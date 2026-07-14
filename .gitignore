@@ -1,0 +1,8 @@
+# Exécutables et builds
+dist/
+build/
+*.exe
+*.pkg
+*.pyc
+__pycache__/
+.env
