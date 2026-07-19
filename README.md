@@ -27,6 +27,8 @@ Please use the [Discussions tab](https://github.com/aeloxhardware/apex/discussio
 
 **Total Releases Downloads:**![Total Downloads](https://img.shields.io/github/downloads/aeloxhardware/apex/total?style=for-the-badge&logo=github&color=31c653)
 
+## Run
+You should have Python 3.12.x and CUDA 12.x. Go to the root folder, open PowerShell INTO THIS FOLDER and type 'python run main.py'. If dependencies are missing, install them.
 
 ### Bibtex Citation:
 ```bibtex
