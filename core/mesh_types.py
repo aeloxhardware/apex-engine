@@ -275,13 +275,54 @@ class PrintSchedule:
 
 
 # ---------------------------------------------------------------------------
-# Étape 8 — Trajectoire machine 4 axes
+# Profil machine — cinématique réelle (R, C, Z, B)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class MachineProfile:
+    """
+    Cinématique réelle de la machine : plateau rotatif (axe C) + tête
+    rotative (axe B) — PAS un axe de rotation générique unique comme le
+    contrat initial le supposait. Voir CLAUDE.md limite de conception #18.
+
+    Commande firmware (gabarit symbolique, pas de valeurs numériques
+    fictives) : `G00 Y<C> X<R> Z<Z> B<B> F<feedrate>`.
+    """
+    platform_axis: Vec3             # axe de rotation du plateau (C), typiquement (0,0,1)
+    platform_origin: Vec3           # centre du plateau, origine du rayon R — aussi le
+                                     # point de singularité où C est indéterminé (limite #19)
+    head_rotation_axis: Vec3        # axe de rotation de la tête (B), perpendiculaire à l'axe R
+    # (B_min, B_max) en degrés. Contrainte physique FIXE de cette machine :
+    # B ne prend jamais de valeur négative ni > 180° (B=0 tête vers le bas,
+    # B=90 horizontale, B=180 tête retournée vers le haut) — toute
+    # orientation qui semblerait réclamer B<0 doit être atteinte en
+    # tournant C à la place. Reste un champ explicite (pas une constante
+    # codée en dur) pour ne pas supposer que toute machine future partage
+    # cette contrainte.
+    head_angle_range: tuple[float, float] = (0.0, 180.0)
+    nozzle_model: Any = None         # maillage 3D tête (buse + porte-buse + carriage proche)
+    nozzle_diameter: float = 0.4
+    max_angular_velocity: float = 0.0     # rad/s
+    max_angular_acceleration: float = 0.0
+    build_volume: Optional["AABB"] = None
+    z_clearance_min: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Étape 8 — Trajectoire machine (R, C, Z, B)
 # ---------------------------------------------------------------------------
 
 @dataclass
 class ToolpathPoint:
-    position: Vec3
-    rotation_angle: float          # angle du plateau rotatif, radians
+    """
+    Un point de trajectoire dans la cinématique réelle (R, C, Z, B) — PAS un
+    unique `rotation_angle` générique, structurellement insuffisant pour
+    représenter deux rotations indépendantes (plateau + tête).
+    """
+    position: Vec3                  # cartésien machine, pour vérification/debug (étape 9)
+    radius: float                   # R, mm
+    platform_angle: float           # C, degrés
+    head_angle: float                # B, degrés — contraint à [0, 180] par construction
     extrusion: float
     feedrate: float
     color_id: Optional[int] = None

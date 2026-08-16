@@ -144,7 +144,24 @@ pipeline géométrique (point-in-polygon, marching tetrahedra, etc.).
 
 ```
 MachineProfile {
-  rotation_axis: {origin: Vec3, direction: Vec3}   // position/axe du plateau rotatif
+  // Cinématique CYLINDRIQUE réelle à 4 axes de commande — PAS cartésien
+  // + 1 rotation générique. Commande firmware (gabarit symbolique) :
+  //   G00 Y<C> X<R> Z<Z> B<B> F<feedrate>
+  //   R (firmware "X") = rayon du plateau, mm
+  //   C (firmware "Y") = rotation du plateau, degrés
+  //   Z (firmware "Z") = hauteur
+  //   B (firmware "B") = rotation de la TÊTE, autour d'un axe perpendiculaire à R
+  //     B=0°   tête vers le bas (position d'impression normale)
+  //     B=90°  tête à l'horizontale, vers l'extérieur du bras porté par R
+  //     B=180° tête complètement retournée vers le haut
+  //     JAMAIS de valeur négative, jamais > 180° — toute orientation qui
+  //     semblerait réclamer B<0 s'obtient en tournant C à la place.
+  // Voir limite de conception #18 (couverture sphérique complète malgré
+  // 4 axes de commande) et #19 (singularité C au centre du plateau, R=0).
+  platform_axis: Vec3               // axe de rotation du plateau (C), typiquement (0,0,1)
+  platform_origin: Vec3             // centre du plateau — aussi le point de singularité C indéterminé
+  head_rotation_axis: Vec3          // axe de rotation de la tête (B), perpendiculaire à R
+  head_angle_range: {min: float, max: float}   // (0°, 180°) — contrainte physique fixe
   nozzle_model: Mesh                                 // maillage 3D tête (buse + porte-buse + carriage proche)
   nozzle_diameter: float
   max_angular_velocity: float                        // rad/s
@@ -209,7 +226,13 @@ Voici la spécification complète, étape par étape, avec les données précise
 
 ```
 MachineProfile {
-  rotation_axis: {origin: Vec3, direction: Vec3}   // position/axe du plateau rotatif
+  // Cinématique CYLINDRIQUE réelle — voir le premier bloc MachineProfile
+  // ci-dessus pour le détail complet (gabarit de commande, plages, limites
+  // #18/#19). Rappel synthétique :
+  platform_axis: Vec3               // axe de rotation du plateau (C), typiquement (0,0,1)
+  platform_origin: Vec3             // centre du plateau — singularité C au centre (R=0)
+  head_rotation_axis: Vec3          // axe de rotation de la tête (B), perpendiculaire à R
+  head_angle_range: {min: float, max: float}   // (0°, 180°) — jamais négatif, jamais > 180°
   nozzle_model: Mesh                                 // maillage 3D de la tête (buse + porte-buse + carriage proche)
   nozzle_diameter: float
   max_angular_velocity: float                        // rad/s, limite plateau
@@ -603,6 +626,33 @@ re-dériver la logique d'ordonnancement.
     peinture suit une frontière géométrique doit être suffisamment subdivisé
     — sinon on teste/affiche une frontière que la donnée n'encode pas.
 
+18. **La machine a DEUX degrés de liberté de rotation (C plateau + B tête),
+    pas un seul** — correction tardive d'une hypothèse posée dès l'étape 3
+    (`SegmentationParams.rotation_axis_direction`,
+    `rotation_axis_circle_directions`). Conséquence géométrique nette,
+    vérifiable : `C` balaie un tour complet et `B ∈ [0°, 180°]` (jamais
+    négatif — voir `MachineProfile`), donc l'ensemble des directions de dépôt
+    atteignables `{Rz(C)·Rhead(B)·(0,0,-1)}` couvre la **sphère complète**,
+    exactement comme la paramétrisation standard d'une sphère par
+    (longitude, colatitude) où la colatitude ne parcourt que `[0°, 180°]`.
+    **La machine est donc kinématiquement équivalente à une machine 5 axes
+    pour le choix de direction d'impression**, malgré ses 4 axes de commande
+    — `rotation_axis_circle_directions` (cercle à 1 DOF) n'est PAS le bon
+    modèle pour cette machine ; `fibonacci_sphere_directions` l'est. Révision
+    de `step3_segmentation.py` nécessaire mais **différée à un plan séparé**
+    (impact sur des tests existants nommés autour du cercle à 1 DOF) — ne
+    pas repartir de l'hypothèse 4-axes-1-DOF par défaut dans une session
+    future.
+
+19. **Singularité géométrique au centre du plateau (`R=0`) : `C` est
+    indéterminé**, comme au pôle d'un système de coordonnées polaires
+    (`atan2(0,0)` n'est pas défini). L'étape 8 doit hériter le `C` du point
+    de trajectoire précédent plutôt que de recalculer un `atan2` instable —
+    cohérent avec le lissage temporel des angles déjà prévu pour respecter
+    `max_angular_velocity`/`max_angular_acceleration`. Ne dégrade rien
+    géométriquement : un point exactement centré ne contraint par
+    construction aucune orientation de matière réelle.
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
@@ -631,7 +681,12 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
   vers la géométrie, jamais une copie ; `layer_range` seul ne suffit pas car
   une passe ne couvre qu'une partie de chaque couche), `PrintSchedule`
   (l'ordre de `passes` EST l'ordre d'exécution) — étape 7
-- `ToolpathPoint`, `ToolpathMachine` — étape 8
+- `MachineProfile` (**cinématique réelle** `platform_axis`/`platform_origin`
+  (C) + `head_rotation_axis`/`head_angle_range` (B, borné `[0°,180°]` par
+  défaut) — PAS un `rotation_axis` générique unique, voir limite #18)
+- `ToolpathPoint` (**`radius`/`platform_angle`/`head_angle`** — (R, C, B)
+  explicites, PAS un `rotation_angle` unique, structurellement insuffisant
+  pour deux rotations indépendantes), `ToolpathMachine` — étape 8
 - `CollisionEvent`, `CollisionReport` — étape 9
 - `AdjustmentLogEntry` — étape 10
 
@@ -744,13 +799,24 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 
 ## Prochaine étape
 
-Étapes 1 à 7 stables et testées (61/61 tests). Démarrer
-`pipeline/step8_machine_toolpath.py` : consommer `PrintSchedule.passes`
-**dans l'ordre** (aucune logique d'ordonnancement à re-dériver, elle est
-gelée à l'étape 7), relever chaque segment `(layer_id, index)` du repère
-local 2D vers le repère machine global via `Layer.local_frame`
-(`step6._lift_to_3d` fait déjà la moitié du travail), calculer l'angle de
-plateau requis à partir de l'orientation locale du champ, lisser la série
-temporelle d'angles pour respecter `max_angular_velocity` /
-`max_angular_acceleration`, et garantir la continuité d'extrusion
-(rétractions explicites aux sauts).
+Étapes 1 à 7 stables et testées (61/61 tests). `MachineProfile` et
+`ToolpathPoint` reflètent maintenant la cinématique réelle (R, C, Z, B) —
+voir limites #18/#19 — mais `pipeline/step8_machine_toolpath.py` lui-même
+n'est pas encore écrit, ni planifié en détail : consommer
+`PrintSchedule.passes` **dans l'ordre** (aucune logique d'ordonnancement à
+re-dériver, gelée à l'étape 7), relever chaque segment `(layer_id, index)`
+du repère local 2D vers le cartésien machine via `Layer.local_frame`
+(`step6._lift_to_3d` fait déjà la moitié du travail), PUIS convertir
+position→(R,C) et orientation désirée→(C,B) en respectant le clamping
+`B∈[0°,180°]` et la singularité `R=0` (limite #19), lisser la série
+temporelle d'angles pour `max_angular_velocity`/`max_angular_acceleration`,
+garantir la continuité d'extrusion. Un plan dédié à step8 doit encore
+trancher l'algorithme précis (notamment le cas `B` hors plage : réessai à
+`C+180°` ou signal vers l'étape 10) — non fait ici.
+
+Révision différée, à planifier séparément avant ou pendant step8 :
+`pipeline/step3_segmentation.py` suppose encore une machine à 1 DOF de
+rotation (`rotation_axis_circle_directions`) alors que la machine réelle
+couvre la sphère complète (limite #18) — impact sur
+`SegmentationParams.rotation_axis_direction` et sur des tests existants
+nommés autour de ce comportement.
