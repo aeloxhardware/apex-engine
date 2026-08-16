@@ -17,6 +17,7 @@ import numpy as np
 import pytest
 import trimesh
 
+from core.geometry_utils import point_in_polygon_2d
 from core.mesh_types import ScalarField, TetMesh
 from pipeline.step1_ingest import run as ingest_run
 from pipeline.step2_overhang import OverhangParams, run as overhang_run
@@ -183,21 +184,6 @@ def test_hollow_box_mid_layer_has_two_disjoint_contours(hollow_box_data):
     )
 
 
-def _point_in_polygon_2d(point: np.ndarray, polygon: np.ndarray) -> bool:
-    """Ray-casting standard (pas de nouvelle dependance) : point (2,), polygon (N,2)."""
-    x, y = point
-    inside = False
-    n = len(polygon)
-    for i in range(n):
-        x1, y1 = polygon[i]
-        x2, y2 = polygon[(i + 1) % n]
-        if (y1 > y) != (y2 > y):
-            x_intersect = (x2 - x1) * (y - y1) / (y2 - y1) + x1
-            if x < x_intersect:
-                inside = not inside
-    return inside
-
-
 def test_hollow_box_disjoint_contours_are_correctly_nested(hollow_box_data):
     """
     Decision 3bis (corrigee) : contour_3d + local_frame doivent suffire a
@@ -236,12 +222,12 @@ def test_hollow_box_disjoint_contours_are_correctly_nested(hollow_box_data):
     for i, poly in enumerate(projected):
         if i == outer_idx:
             continue
-        assert _point_in_polygon_2d(poly[0], projected[outer_idx]), (
+        assert point_in_polygon_2d(poly[0], projected[outer_idx]), (
             f"Le contour {i} (aire={areas[i]:.2f}) devrait etre imbrique dans le "
             f"contour exterieur {outer_idx} (aire={areas[outer_idx]:.2f}) - "
             f"step6 doit pouvoir distinguer trou et paroi exterieure par imbrication"
         )
-        assert not _point_in_polygon_2d(projected[outer_idx][0], poly), (
+        assert not point_in_polygon_2d(projected[outer_idx][0], poly), (
             "La relation d'imbrication doit etre non-symetrique (le contour "
             "exterieur ne doit pas etre contenu dans le trou)"
         )

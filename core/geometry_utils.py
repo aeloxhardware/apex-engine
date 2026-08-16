@@ -10,6 +10,11 @@ Utilitaires geometriques partages entre plusieurs etapes du pipeline.
 - rotation_axis_circle_directions : repartition de directions sur le cercle
   atteignable par une machine 4 axes reelle (3 lineaires + 1 seul DOF de
   rotation) - PAS une sphere complete, voir CLAUDE.md limite de conception #6.
+- point_in_polygon_2d : test d'imbrication geometrique standard
+  (ray-casting), utilise pour distinguer un contour exterieur d'un trou
+  (step5 pour la verification de coherence, step6 pour la classification
+  des contours avant remplissage) - PAS le signe de l'aire projetee, dont
+  l'hypothese s'est revelee fausse empiriquement (voir CLAUDE.md limite #11).
 """
 
 from __future__ import annotations
@@ -97,3 +102,23 @@ def rotation_axis_circle_directions(
     )
 
     return directions
+
+
+def point_in_polygon_2d(point: np.ndarray, polygon: np.ndarray) -> bool:
+    """
+    Ray-casting standard : `point` (2,) est-il a l'interieur de `polygon`
+    (N,2) ? Technique robuste et independante de toute convention de
+    winding, contrairement au signe de l'aire projetee (verifie empiriquement
+    faux sur un anneau plat synthetique - CLAUDE.md limite #11).
+    """
+    x, y = point
+    inside = False
+    n = len(polygon)
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            x_intersect = (x2 - x1) * (y - y1) / (y2 - y1) + x1
+            if x < x_intersect:
+                inside = not inside
+    return inside

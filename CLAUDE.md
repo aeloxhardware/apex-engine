@@ -97,7 +97,7 @@ slicer_engine/
 │   ├── step3_segmentation.py        # FAIT — tests pytest formalisés (9 tests)
 │   ├── step4_field_solver.py        # FAIT — résolution FEM du champ scalaire (7 tests)
 │   ├── step5_layers.py              # FAIT — extraction des couches courbes (12 tests)
-│   ├── step6_toolpath2d.py          # PAS ENCORE ÉCRIT
+│   ├── step6_toolpath2d.py          # FAIT — remplissage 2D par couche (8 tests)
 │   ├── step7_scheduling.py          # PAS ENCORE ÉCRIT
 │   ├── step8_machine_toolpath.py    # PAS ENCORE ÉCRIT
 │   ├── step9_collision_sim.py       # PAS ENCORE ÉCRIT
@@ -106,7 +106,7 @@ slicer_engine/
 │   ├── __init__.py
 │   ├── mesh_types.py                # FAIT — toutes les dataclasses partagées (voir détail plus bas)
 │   ├── geometry_utils.py            # FAIT — build_face_adjacency, fibonacci_sphere_directions,
-│   │                                 #   rotation_axis_circle_directions
+│   │                                 #   rotation_axis_circle_directions, point_in_polygon_2d
 │   └── constraints.py               # FAIT — registre extensible d'assembleurs de contraintes
 │                                     #   utilisateur (ATTACH_POINT/AESTHETIC/STRUCTURAL), point
 │                                     #   d'extension pour tout nouveau type sans toucher step4
@@ -118,17 +118,24 @@ slicer_engine/
     ├── test_step2_overhang.py       # FAIT — 6 tests, tous passants et stables
     ├── test_step3_segmentation.py   # FAIT — 9 tests
     ├── test_step4_field_solver.py   # FAIT — 7 tests
-    └── test_step5_layers.py         # FAIT — 12 tests
+    ├── test_step5_layers.py         # FAIT — 12 tests
+    └── test_step6_toolpath2d.py     # FAIT — 8 tests
 ```
 
-**État global : 34/34 tests passants** (step2 à step5). Étapes 1 à 5 du
-pipeline stables et testées ; step6 (toolpath 2D) est la prochaine à écrire.
+**État global : 42/42 tests passants** (step2 à step6). Étapes 1 à 6 du
+pipeline stables et testées ; step7 (couleur + ordonnancement) est la
+prochaine à écrire.
 
 **Dépendances Python requises** (installer via pip) :
 ```
-trimesh scipy tetgen rtree manifold3d networkx pytest
+trimesh scipy tetgen rtree manifold3d networkx shapely pytest
 ```
 `pip install <package> --break-system-packages` si environnement géré (Debian/Ubuntu récent).
+`shapely` ajouté à l'étape 6 pour l'offset polygonal (`buffer`) et le
+clipping d'infill — géométrie 2D robuste (trous, auto-intersections,
+polygones multi-parties après un offset qui sépare une forme en deux),
+hors de portée d'une implémentation maison contrairement au reste du
+pipeline géométrique (point-in-polygon, marching tetrahedra, etc.).
 
 ---
 
@@ -320,14 +327,33 @@ Les 10 étapes du pipeline
 
 ## Étape 6 — Remplissage par couche (contours + infill + ponts)
 
-**Ce que le code fait précisément :**
-- Pour chaque couche, projette le contour dans son plan local approximatif (base orthonormée dérivée du gradient de champ moyen sur la couche).
-- Génère les périmètres par offset polygonal successif vers l'intérieur (`shapely.buffer(-nozzle_width * n)`), pour `wall_count` parois.
-- Génère l'infill à `infill_density`/`infill_pattern` à l'intérieur du dernier offset.
-- Ordonne les contours concentriques du centre vers l'extérieur (tri par aire décroissante des offsets, trajectoire commençant par le plus interne).
-- Pour les zones marquées `is_bridge` (étape 2) qui retombent dans cette couche : recalcule localement l'orientation de trajectoire pour traverser le pont perpendiculairement à sa plus grande portée (analyse PCA locale du contour du pont pour trouver l'axe de portée max), et augmente la densité d'ancrage sur les bords.
+**Ce que le code fait précisément (`pipeline/step6_toolpath2d.py`, FAIT) :**
+- Pour chaque couche, projette chaque boucle de `contour_3d` dans son plan
+  local (`local_frame` de l'étape 5, déjà calculé — pas recalculé ici).
+- Classe les boucles projetées en contours "matière" / trous par
+  **imbrication géométrique** (`point_in_polygon_2d`, `core/geometry_utils.py`),
+  jamais par signe d'aire (limite #11) — parité généralisée à un nombre
+  arbitraire de boucles imbriquées, pas seulement 2.
+- Génère les périmètres par offset polygonal successif vers l'intérieur
+  (`shapely.buffer(-nozzle_width * n)`), pour `wall_count` parois ; s'arrête
+  proprement (sans erreur) si une zone plus fine que `nozzle_width *
+  wall_count` fait disparaître l'offset avant d'atteindre le nombre nominal
+  de parois — voir limite #13.
+- Génère l'infill (balayage de lignes parallèles, `infill_density`/`infill_pattern`)
+  à l'intérieur du dernier offset valide.
+- Ordonne la trajectoire du centre vers l'extérieur (infill, puis parois
+  n=wall_count...1, puis le contour original n=0 en dernier).
+- Pour les boucles touchant une zone `is_bridge` (étape 2, détection de
+  PRÉSENCE pas de majorité — voir limite #14) : ajoute
+  `bridge_anchor_extra_walls` parois supplémentaires resserrées sur le
+  périmètre (ancrage = renfort de matière sur les bords, pas densité
+  d'infill augmentée — lecture directe de CLAUDE.md), puis réoriente
+  l'infill pour balayer perpendiculairement à `bridge_span_direction`
+  (étape 2, projeté dans le plan local de la couche).
 
-**Sortie :** `Layer.toolpath_2d` (liste de polylignes ordonnées, repère local).
+**Sortie :** `Layer.toolpath_2d` (liste de polylignes ordonnées, repère
+local **2D** — pas 3D, l'étape 8 se chargera de relever au repère machine
+via `local_frame`).
 
 
 ## Étape 7 — Application de la carte de couleur et planification d'ordonnancement
@@ -494,6 +520,27 @@ Les 10 étapes du pipeline
     `‖∇φ‖` sur tout le `TetMesh` (pas la moyenne brute, faussée par le gradient
     localement élevé près de l'ancrage plateau à poids élevé).
 
+13. **Une paroi plus fine que `nozzle_width * wall_count` ne peut pas recevoir
+    `wall_count` parois pleines** — géométriquement impossible, forcer le nombre
+    nominal produirait des offsets dégénérés/auto-intersectants. L'étape 6
+    (`_offset_walls`) s'arrête proprement dès qu'un offset devient vide ou
+    résiduel (aire `< degenerate_area_ratio * aire_initiale`), sans lever
+    d'erreur ni log — le nombre de parois réellement généré pour cette zone
+    est simplement `< wall_count`, cohérent avec la convention déjà en place
+    (pas d'objet placeholder, moins d'éléments dans la liste retournée).
+
+14. **La détection de pont par couche (étape 6) doit être un seuil de
+    PRÉSENCE, jamais de majorité, sur la boucle de contour.** Une boucle de
+    contour est le périmètre COMPLET de la silhouette de matière à cette
+    hauteur de champ (ex: paroi gauche → dessus → paroi droite → dessous du
+    pont → retour) ; la portion réellement `is_bridge` n'en est qu'un petit
+    arc, jamais une majorité. Bug réel mesuré : avec un seuil de ratio à 0.5,
+    aucune couche d'une fixture pont réaliste (dalle entre deux piliers)
+    n'était jamais détectée (ratio réel mesuré entre 0.06 et 0.21 sur toutes
+    les couches concernées) — un seuil de majorité ne peut structurellement
+    jamais se déclencher, quel que soit sa valeur. Fix : seuil bas de présence
+    (`Step6Params.bridge_contour_ratio_threshold`, défaut `0.05`).
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
@@ -510,7 +557,9 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
 - `ScalarField` (values par nœud, **`gradient` shape (T,3)** — un par tétraèdre,
   pas par nœud : champ P1 = gradient constant par élément) — sortie étape 4
 - `ConstraintType` (enum), `ConstraintFalloff` (enum), `Constraint` — contraintes utilisateur
-- `Layer` (contour_3d, region_ids, local_frame, toolpath_2d, color_id) — étapes 5/6
+- `Layer` (contour_3d, region_ids, local_frame, **`toolpath_2d`** — liste de
+  polylignes `(K,2)` dans le repère local 2D de la couche, pas 3D, remplies
+  par l'étape 6, color_id) — étapes 5/6
 - `ColorMap`, `PrintPass`, `PrintSchedule` — étape 7
 - `ToolpathPoint`, `ToolpathMachine` — étape 8
 - `CollisionEvent`, `CollisionReport` — étape 9
@@ -523,6 +572,9 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
 - `fibonacci_sphere_directions(count) -> ndarray` — répartition uniforme sur sphère.
 - `rotation_axis_circle_directions(rotation_axis_direction, count) -> ndarray` —
   répartition sur le cercle atteignable par un seul DOF de rotation (cinématique 4 axes réelle).
+- `point_in_polygon_2d(point, polygon) -> bool` — ray-casting standard, utilisé
+  par step5 (test de cohérence) et step6 (classification contour/trou) pour
+  l'imbrication géométrique — voir limite #11.
 
 ## Détail de `core/constraints.py`
 
@@ -552,6 +604,30 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
   nœuds), sinon itératif (`cg`, préconditionné) — jamais `gmres` (système
   toujours symétrique par construction).
 
+## Détail de `pipeline/step6_toolpath2d.py`
+
+- `_classify_contours` : classification trou/matière par parité du nombre de
+  boucles englobantes (imbrication `point_in_polygon_2d`), généralisée
+  au-delà de 2 boucles (ex: anneau dans anneau) ; chaque trou est rattaché à
+  son parent immédiat (le plus petit contour matière qui le contient), pas
+  au plus grand contour de la couche.
+- `_offset_walls` : offset `shapely.buffer` progressif, arrêt propre sur zone
+  dégénérée (limite #13) ; retourne aussi le polygone du dernier offset
+  valide (frontière de départ de l'infill).
+- `_bridge_direction_for_loop` : pont surface/volume par kdtree
+  (`mesh_data.kdtree`, même technique que step4/step5), seuil de PRÉSENCE
+  pas de majorité (limite #14).
+- `_reorient_bridge_toolpath` : parois normales + `bridge_anchor_extra_walls`
+  parois supplémentaires resserrées sur le périmètre (ancrage = matière sur
+  les bords, jamais densité d'infill augmentée — ne pas réutiliser
+  `infill_density` pour ça, ça casserait le contrat UI où ce paramètre
+  représente la densité réelle) + infill balayé perpendiculairement à la
+  portée du pont.
+- Limite connue non résolue (hors périmètre de l'étape 6, cohérent avec les
+  autres limites documentées) : un pont qui s'étend sur plusieurs couches
+  consécutives est reclassé indépendamment couche par couche, sans lissage
+  temporel de la direction de traversée entre couches voisines.
+
 ---
 
 ## Conventions de code à respecter
@@ -571,11 +647,11 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 
 ## Prochaine étape
 
-Étapes 1 à 5 stables et testées (34/34 tests). Démarrer
-`pipeline/step6_toolpath2d.py` : pour chaque `Layer`, projeter `contour_3d`
-dans son `local_frame` (déjà calculé par step5), générer les périmètres par
-offset polygonal (`wall_count`), l'infill, et traiter les zones `is_bridge`
-(orientation de trajectoire perpendiculaire à la portée du pont,
-`bridge_span_direction` de l'étape 2). Distinguer contour extérieur et trou
-par imbrication géométrique (point-in-polygon), pas par signe d'aire — voir
-limite #11.
+Étapes 1 à 6 stables et testées (42/42 tests). Démarrer
+`pipeline/step7_scheduling.py` : projeter `ColorMap.per_face_color` sur
+chaque segment de `toolpath_2d` (par proximité au mesh original — même pont
+kdtree que step4/step5/step6), lisser/regrouper selon `merge_tolerance`,
+croiser avec `RegionDependencyGraph` pour construire le graphe de
+dépendances `(region, color)`, décider trous temporaires vs purge classique
+(`hole_cost_model` vs `purge_cost_model`), ordonnancer par earliest-deadline-first
+entrelacé avec l'ordre topologique géométrique de base.
