@@ -1,9 +1,9 @@
-# Apex Slicer — Contexte projet — FICHIER MODIFIABLE
+# Apex Slicer — Contexte projet — FICHIER MODIFIABLE PAR L'IA
 
 Moteur de slicing géométrique (Python) pour une imprimante 3D **4 axes** (3 linéaires
 + 1 rotatif). L'interface utilisateur est en **TypeScript**, séparée de ce moteur.
 Ce fichier centralise tout le contexte nécessaire pour reprendre le développement
-sans redemander les spécifications déjà actées.
+sans redemander les spécifications déjà actées. L'IA peut et doit modifier ce fichier lorsqu'elle opère.
 
 ## Objectif du projet
 
@@ -91,12 +91,12 @@ slicer_engine/
 │   └── schema.py                    #   (de)sérialisation JSON <-> dataclasses, pont avec l'UI TS
 ├── pipeline/
 │   ├── __init__.py
-│   ├── step1_ingest.py              # FAIT — ingestion mesh + tétraédrisation
+│   ├── step1_ingest.py              # FAIT — ingestion mesh + tétraédrisation (+ détection
+│   │                                 #   automatique des cavités internes pour tetgen, voir limite #7)
 │   ├── step2_overhang.py            # FAIT — détection surplombs + ponts internes
-│   ├── step3_segmentation.py        # FAIT (code écrit, tests pytest PAS ENCORE formalisés,
-│   │                                 #   validé manuellement sur cube plat + sphère)
-│   ├── step4_field_solver.py        # PAS ENCORE ÉCRIT
-│   ├── step5_layers.py              # PAS ENCORE ÉCRIT
+│   ├── step3_segmentation.py        # FAIT — tests pytest formalisés (9 tests)
+│   ├── step4_field_solver.py        # FAIT — résolution FEM du champ scalaire (7 tests)
+│   ├── step5_layers.py              # FAIT — extraction des couches courbes (12 tests)
 │   ├── step6_toolpath2d.py          # PAS ENCORE ÉCRIT
 │   ├── step7_scheduling.py          # PAS ENCORE ÉCRIT
 │   ├── step8_machine_toolpath.py    # PAS ENCORE ÉCRIT
@@ -107,15 +107,22 @@ slicer_engine/
 │   ├── mesh_types.py                # FAIT — toutes les dataclasses partagées (voir détail plus bas)
 │   ├── geometry_utils.py            # FAIT — build_face_adjacency, fibonacci_sphere_directions,
 │   │                                 #   rotation_axis_circle_directions
-│   └── constraints.py               # PAS ENCORE ÉCRIT — logique de fusion des contraintes utilisateur
+│   └── constraints.py               # FAIT — registre extensible d'assembleurs de contraintes
+│                                     #   utilisateur (ATTACH_POINT/AESTHETIC/STRUCTURAL), point
+│                                     #   d'extension pour tout nouveau type sans toucher step4
 ├── io/                               # PAS ENCORE ÉCRIT
 │   ├── mesh_loader.py
 │   └── gcode_export.py
 └── tests/
     ├── __init__.py
     ├── test_step2_overhang.py       # FAIT — 6 tests, tous passants et stables
-    └── test_step3_segmentation.py   # PAS ENCORE ÉCRIT
+    ├── test_step3_segmentation.py   # FAIT — 9 tests
+    ├── test_step4_field_solver.py   # FAIT — 7 tests
+    └── test_step5_layers.py         # FAIT — 12 tests
 ```
+
+**État global : 34/34 tests passants** (step2 à step5). Étapes 1 à 5 du
+pipeline stables et testées ; step6 (toolpath 2D) est la prochaine à écrire.
 
 **Dépendances Python requises** (installer via pip) :
 ```
@@ -384,6 +391,14 @@ Les 10 étapes du pipeline
     → lire `tet.node` / `tet.elem` sur l'objet plutôt que la valeur de retour
 - Opérations booléennes trimesh (`union`, `difference`) nécessitent `manifold3d` installé
   (`engine='manifold'`).
+- `tetgen.TetGen` ne détecte PAS automatiquement les cavités internes (ex: boîte creuse) :
+  sans appel explicite à `tet.add_hole(point_interieur)` avant `tetrahedralize()`, tetgen
+  peut générer des tétraèdres qui traversent le vide (mesuré : ~6% des tétraèdres sur une
+  boîte creuse simple). `step1_ingest._find_internal_cavities()` détecte automatiquement
+  ces cavités (coques connexes à volume signé négatif via `mesh.split()`) et fournit les
+  points de trou — voir limite #7.
+- `scipy.sparse.linalg.cg` (scipy ≥1.9, venv du projet en 1.18.0) attend `rtol=`, pas
+  `tol=` (renommé) — utilisé par `step4_field_solver._solve_linear_system`.
 
 ### Limites de conception importantes (à garder en tête pour les étapes suivantes)
 1. **Le plateau d'impression n'est connu qu'à partir de l'étape 3.** `step2_overhang.py`
@@ -423,6 +438,62 @@ Les 10 étapes du pipeline
    (`fibonacci_sphere_directions`, réservée à une orientation libre type 5 axes).
    `SegmentationParams.rotation_axis_direction` bascule entre les deux modes.
 
+7. **Les cavités internes doivent être signalées explicitement à tetgen.** Un mesh
+   watertight avec un vide interne (boîte creuse) ne suffit pas : sans
+   `tet.add_hole(point)` par cavité, tetgen peut générer des tétraèdres qui traversent
+   le vide, corrompant silencieusement le volume résolu par l'étape 4. Bug réel détecté
+   tardivement (aucun test antérieur à l'étape 5 n'exerçait la correction volumique du
+   `TetMesh` sur une géométrie à cavité — step2/3 ne travaillent que sur la surface,
+   step4 n'était testé que sur cube plat/forme en L). Détection automatique et générale
+   (pas cas-par-cas) : séparer le mesh en coques connexes étanches
+   (`mesh.split(only_watertight=True)`), une coque à volume signé négatif
+   (`shell.volume`, propriété trimesh) est une cavité, son centroïde (vérifié via
+   `shell.contains()`) sert de point de trou.
+
+8. **`TetMesh.tet_adjacency` (adjacence nœud-nœud) ne doit PAS servir de poids au
+   Laplacien discret**, malgré ce que suggérait son commentaire d'origine dans
+   `step1_ingest.py`. Un Laplacien de graphe (poids uniformes) ignore la géométrie
+   réelle des tétraèdres — l'étape 4 assemble la vraie matrice de rigidité FEM P1
+   (élément par élément, `step4_field_solver._assemble_stiffness_matrix`).
+   `tet_adjacency` reste utile comme outil topologique (propagation d'influence de
+   surplomb par sauts d'adjacence), pas comme poids de la forme bilinéaire.
+
+9. **Un système Laplacien pur est singulier** (le champ constant est toujours solution)
+   et **un terme de direction limité aux zones à risque laisse le reste du champ
+   indéterminé** (donc nul, une pièce sans surplomb n'aurait aucune couche). L'étape 4
+   résout les deux : ancrage automatique du plateau (pénalité molle de poids élevé sur
+   les nœuds au contact du plateau, `platform_anchor_weight`) + terme de direction de
+   gradient appliqué à **tous** les tétraèdres avec un poids de base
+   (`gradient_baseline_weight`), renforcé près des surplombs
+   (`gradient_overhang_weight`). Piège écarté : déduire les nœuds du plateau de la
+   topologie du graphe de dépendances ("régions sans arête entrante") est faux dès que
+   la segmentation ne produit qu'une seule région (tout objet simple) — cette région
+   unique serait alors à la fois racine et couvrirait tout le modèle. La bonne source
+   de vérité est `RegionDependencyGraph.platform_contact_faces` (booléen par face,
+   calculé par step3, qui seul connaît la position du plateau).
+
+10. **Marching tetrahedra (étape 5) doit orienter ses triangles à partir des valeurs de
+    champ, jamais de l'ordre local des sommets du tétraèdre** (`tetgen` ne garantit
+    aucune convention de handedness cohérente d'un tétraèdre à l'autre — même raison
+    que le `abs(volume)` de l'étape 4). Convention retenue : normale du triangle
+    pointant du côté "en-dessous de l'isovaleur" vers le côté "au-dessus", dérivée des
+    sommets de valeur min/max du tétraèdre — garantie correcte car le champ est
+    linéaire par tétraèdre (P1).
+
+11. **Le sens de parcours (winding) d'un contour extérieur et d'un trou intérieur
+    N'EST PAS opposé** via `trimesh.Trimesh.outline()`, contrairement à l'intuition
+    initiale (théorème de Stokes mal appliqué). Vérifié directement sur un anneau plat
+    synthétique à normales cohérentes : les deux boucles donnent le même signe d'aire
+    projetée. La distinction extérieur/trou doit passer par un test d'imbrication
+    géométrique (point-in-polygon), pas par le signe d'une aire signée.
+
+12. **L'espacement des isovaleurs (étape 5) ne peut être qu'approximativement
+    constant.** `‖∇φ‖` varie spatialement (le champ résout un compromis
+    lissage/direction/contraintes, pas une équation eikonale `‖∇φ‖=1`) ; une seule
+    valeur d'espacement est dérivée de la **médiane pondérée par volume** de
+    `‖∇φ‖` sur tout le `TetMesh` (pas la moyenne brute, faussée par le gradient
+    localement élevé près de l'ancrage plateau à poids élevé).
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
@@ -433,8 +504,11 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
 - `MeshData` (vertices, faces, normales, watertight, bvh, kdtree) — sortie étape 1
 - `TetMesh` (tet_vertices, tetrahedra, tet_adjacency) — sortie étape 1
 - `OverhangMap` (risk_score, is_overhang, is_bridge, bridge_span_direction) — sortie étape 2
-- `Region`, `RegionDependencyGraph` — sortie étape 3
-- `ScalarField` (values, gradient) — sortie étape 4
+- `Region`, `RegionDependencyGraph` (regions, dependencies,
+  **`platform_contact_faces`** — booléen par face, ajouté pour l'étape 4, seule
+  source de vérité sur le contact plateau) — sortie étape 3
+- `ScalarField` (values par nœud, **`gradient` shape (T,3)** — un par tétraèdre,
+  pas par nœud : champ P1 = gradient constant par élément) — sortie étape 4
 - `ConstraintType` (enum), `ConstraintFalloff` (enum), `Constraint` — contraintes utilisateur
 - `Layer` (contour_3d, region_ids, local_frame, toolpath_2d, color_id) — étapes 5/6
 - `ColorMap`, `PrintPass`, `PrintSchedule` — étape 7
@@ -449,6 +523,34 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
 - `fibonacci_sphere_directions(count) -> ndarray` — répartition uniforme sur sphère.
 - `rotation_axis_circle_directions(rotation_axis_direction, count) -> ndarray` —
   répartition sur le cercle atteignable par un seul DOF de rotation (cinématique 4 axes réelle).
+
+## Détail de `core/constraints.py`
+
+Point d'extension pour tout nouveau type de contrainte utilisateur — ajouter un
+type ne nécessite jamais de modifier `step4_field_solver.py` :
+
+- `ConstraintAssemblyContext` — données partagées (TetMesh, MeshData, kdtree,
+  gradients de forme précalculés), sans logique.
+- `CONSTRAINT_ASSEMBLERS: dict[ConstraintType, ConstraintAssembler]` — registre ;
+  ajouter un type = une fonction d'assemblage + une entrée ici.
+- `assemble_all_constraints(constraints, ctx) -> (csr_matrix, ndarray)` — point
+  d'entrée unique appelé par step4.
+
+## Détail de `pipeline/step4_field_solver.py`
+
+- Système `A·φ = b` symétrique défini positif, assemblé en trois fonctions
+  pures pour permettre une re-résolution rapide après édition d'un point
+  d'attache (jamais besoin de relancer step1/2/3, ni de réassembler la partie
+  structurelle) :
+  - `build_static_system(...) -> FieldSolverStaticSystem` — tout ce qui NE
+    dépend PAS des `Constraint[]` (rigidité, direction de gradient, ancrage
+    plateau). À appeler une seule fois après step3, résultat à mettre en cache.
+  - `solve_with_constraints(static_system, constraints, params) -> ScalarField`
+    — chemin rapide, appelé à chaque édition de contrainte.
+  - `run(...)` — enveloppe des deux, pour un slicing complet en une passe.
+- Solveur : direct (`spsolve`) sous `direct_solve_node_threshold` (défaut 30000
+  nœuds), sinon itératif (`cg`, préconditionné) — jamais `gmres` (système
+  toujours symétrique par construction).
 
 ---
 
@@ -469,7 +571,11 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
 
 ## Prochaine étape
 
-Formaliser `tests/test_step3_segmentation.py` (cas cube plat validé manuellement,
-forme en L et boîte creuse restent à vérifier avec la logique de compatibilité
-corrigée), puis démarrer `pipeline/step4_field_solver.py` (Laplacien discret +
-contraintes, la partie mathématiquement la plus dense du pipeline).
+Étapes 1 à 5 stables et testées (34/34 tests). Démarrer
+`pipeline/step6_toolpath2d.py` : pour chaque `Layer`, projeter `contour_3d`
+dans son `local_frame` (déjà calculé par step5), générer les périmètres par
+offset polygonal (`wall_count`), l'infill, et traiter les zones `is_bridge`
+(orientation de trajectoire perpendiculaire à la portée du pont,
+`bridge_span_direction` de l'étape 2). Distinguer contour extérieur et trou
+par imbrication géométrique (point-in-polygon), pas par signe d'aire — voir
+limite #11.

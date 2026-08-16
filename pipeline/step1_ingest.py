@@ -143,6 +143,45 @@ def _build_mesh_data(mesh: trimesh.Trimesh) -> MeshData:
 # Etape 6 - Tetraedrisation volumique (tetgen)
 # ---------------------------------------------------------------------------
 
+def _find_internal_cavities(mesh: trimesh.Trimesh) -> list[np.ndarray]:
+    """
+    Detecte les cavites internes du mesh (ex: boite creuse) et retourne un
+    point representatif a l'interieur de chacune, a passer a
+    tetgen.TetGen.add_hole(). Sans ça, tetgen ne sait pas qu'un volume
+    interne doit rester vide et peut generer des tetraedres qui traversent
+    la cavite (mesure : jusqu'a ~6% des tetraedres sur une boite creuse
+    simple, centroides verifies hors du solide reel).
+
+    Methode : separe le mesh en coques connexes etanches
+    (`mesh.split(only_watertight=True)`). Le signe du volume d'une coque
+    (propriete trimesh, deja orientee) distingue frontiere solide (positif)
+    de cavite (negatif - ses normales, heritees d'une operation booleenne
+    de difference, pointent vers l'interieur du vide). Le centroide de
+    chaque coque-cavite sert de point representatif, verifie via
+    `shell.contains()` avant utilisation.
+    """
+    shells = mesh.split(only_watertight=True)
+    if len(shells) <= 1:
+        return []
+
+    hole_points = []
+    for shell in shells:
+        if shell.volume >= 0:
+            continue  # coque solide (frontiere exterieure ou paroi normale), pas une cavite
+
+        centroid = shell.vertices.mean(axis=0)
+        if not shell.contains([centroid])[0]:
+            raise MeshIngestError(
+                "Cavite interne detectee (volume signe negatif) mais son "
+                "centroide n'est pas a l'interieur de sa propre coque "
+                "(cavite non-convexe) - impossible de deriver un point de "
+                "trou fiable pour tetgen sans heuristique plus poussee."
+            )
+        hole_points.append(centroid)
+
+    return hole_points
+
+
 def _tetrahedralize(mesh: trimesh.Trimesh, resolution: float) -> TetMesh:
     """
     Genere un maillage tetraedrique volumique respectant la frontiere du mesh
@@ -160,6 +199,8 @@ def _tetrahedralize(mesh: trimesh.Trimesh, resolution: float) -> TetMesh:
     max_tet_volume = resolution ** 3
 
     tet = tetgen.TetGen(mesh.vertices, mesh.faces)
+    for hole_point in _find_internal_cavities(mesh):
+        tet.add_hole(hole_point)
     tet.tetrahedralize(switches=f"pq1.2a{max_tet_volume:.10f}")
     # Lire depuis les attributs de l'objet plutot que la valeur de retour :
     # le nombre de valeurs retournees par tetrahedralize() varie selon la

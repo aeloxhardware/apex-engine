@@ -135,6 +135,14 @@ class RegionDependencyGraph:
     """
     regions: dict[int, Region] = field(default_factory=dict)
     dependencies: list[tuple[int, int]] = field(default_factory=list)
+    # shape (M,) bool, indexé comme MeshData.faces : True si la face repose
+    # sur le plateau d'impression. C'est l'étape 3 qui introduit la
+    # connaissance du plateau dans le pipeline (limite de conception #1) ;
+    # cette information est exposée ici parce que l'étape 4 en a besoin pour
+    # ancrer le champ scalaire au plateau. Ne PAS la redériver ailleurs à
+    # partir d'un second paramètre `platform_z` : deux sources de vérité qui
+    # divergent en silence.
+    platform_contact_faces: Optional[np.ndarray] = None
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +156,12 @@ class ScalarField:
     couches courbes (étape 5).
     """
     values: np.ndarray            # shape (P,) - une valeur par nœud du TetMesh
-    gradient: Optional[np.ndarray] = None  # shape (T,3) ou (P,3), précalculé si besoin
+    # shape (T, 3) - un gradient par TÉTRAÈDRE, pas par nœud. Le champ est
+    # linéaire par élément (éléments finis P1), donc son gradient est
+    # constant sur chaque tétraèdre : c'est la représentation exacte, pas
+    # une approximation. C'est aussi directement ce dont l'étape 5 a besoin
+    # (norme moyenne du gradient local par couche).
+    gradient: Optional[np.ndarray] = None
 
 
 # ---------------------------------------------------------------------------

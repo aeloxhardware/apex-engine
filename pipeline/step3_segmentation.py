@@ -346,7 +346,16 @@ def _build_dependency_graph(
         )
 
     dependencies = list(graph.edges())
-    return RegionDependencyGraph(regions=regions, dependencies=dependencies)
+    return RegionDependencyGraph(
+        regions=regions,
+        dependencies=dependencies,
+        # expose au reste du pipeline : l'etape 4 en a besoin pour ancrer le
+        # champ scalaire au plateau. Le deduire du graphe (regions sans arete
+        # entrante) serait faux des que la segmentation ne produit qu'une
+        # seule region - cette region est alors racine ET couvre tout le
+        # modele, plateau compris.
+        platform_contact_faces=is_platform_contact,
+    )
 
 
 # ---------------------------------------------------------------------------
