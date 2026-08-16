@@ -106,7 +106,8 @@ slicer_engine/
 │   ├── __init__.py
 │   ├── mesh_types.py                # FAIT — toutes les dataclasses partagées (voir détail plus bas)
 │   ├── geometry_utils.py            # FAIT — build_face_adjacency, fibonacci_sphere_directions,
-│   │                                 #   rotation_axis_circle_directions, point_in_polygon_2d
+│   │                                 #   rotation_axis_circle_directions, composed_rotation_directions
+│   │                                 #   (N axes composes, cinematique generique), point_in_polygon_2d
 │   └── constraints.py               # FAIT — registre extensible d'assembleurs de contraintes
 │                                     #   utilisateur (ATTACH_POINT/AESTHETIC/STRUCTURAL), point
 │                                     #   d'extension pour tout nouveau type sans toucher step4
@@ -120,12 +121,13 @@ slicer_engine/
     ├── test_step4_field_solver.py   # FAIT — 7 tests
     ├── test_step5_layers.py         # FAIT — 12 tests
     ├── test_step6_toolpath2d.py     # FAIT — 8 tests
-    └── test_step7_scheduling.py     # FAIT — 19 tests
+    ├── test_step7_scheduling.py     # FAIT — 19 tests
+    └── test_geometry_utils.py       # FAIT — 6 tests (composed_rotation_directions)
 ```
 
-**État global : 61/61 tests passants** (step2 à step7). Étapes 1 à 7 du
-pipeline stables et testées ; step8 (trajectoire machine 4 axes) est la
-prochaine à écrire.
+**État global : 67/67 tests passants** (step2 à step7 + core/geometry_utils.py).
+Étapes 1 à 7 du pipeline stables et testées ; step8 (trajectoire machine)
+est la prochaine à écrire.
 
 **Dépendances Python requises** (installer via pip) :
 ```
@@ -144,24 +146,28 @@ pipeline géométrique (point-in-polygon, marching tetrahedra, etc.).
 
 ```
 MachineProfile {
-  // Cinématique CYLINDRIQUE réelle à 4 axes de commande — PAS cartésien
-  // + 1 rotation générique. Commande firmware (gabarit symbolique) :
-  //   G00 Y<C> X<R> Z<Z> B<B> F<feedrate>
-  //   R (firmware "X") = rayon du plateau, mm
-  //   C (firmware "Y") = rotation du plateau, degrés
-  //   Z (firmware "Z") = hauteur
-  //   B (firmware "B") = rotation de la TÊTE, autour d'un axe perpendiculaire à R
-  //     B=0°   tête vers le bas (position d'impression normale)
-  //     B=90°  tête à l'horizontale, vers l'extérieur du bras porté par R
-  //     B=180° tête complètement retournée vers le haut
-  //     JAMAIS de valeur négative, jamais > 180° — toute orientation qui
-  //     semblerait réclamer B<0 s'obtient en tournant C à la place.
-  // Voir limite de conception #18 (couverture sphérique complète malgré
-  // 4 axes de commande) et #19 (singularité C au centre du plateau, R=0).
-  platform_axis: Vec3               // axe de rotation du plateau (C), typiquement (0,0,1)
-  platform_origin: Vec3             // centre du plateau — aussi le point de singularité C indéterminé
-  head_rotation_axis: Vec3          // axe de rotation de la tête (B), perpendiculaire à R
-  head_angle_range: {min: float, max: float}   // (0°, 180°) — contrainte physique fixe
+  // Cinématique décrite comme une liste ORDONNÉE et PARAMÉTRABLE d'axes de
+  // rotation — PAS un modèle figé sur une seule machine. Chaque machine
+  // future (un seul DOF, deux DOF différemment agencés, plus de deux DOF)
+  // se décrit par sa propre liste rotation_axes, sans changer le contrat.
+  // Voir limite de conception #18 (composition de N rotations, la machine
+  // HPI/HPE n'est qu'un cas d'usage parmi d'autres) et #19 (singularité au
+  // centre du premier axe de rotation, si applicable).
+  rotation_axes: RotationAxisSpec[] {
+    axis: Vec3                        // unitaire, dans le repère du DOF parent
+    angle_range_deg: {min: float, max: float}  // (0,360) tour complet, plage
+                                                 // restreinte, ou (v,v) fige
+  }
+  // Exemple d'usage — machine HPI/HPE actuelle (commande firmware, gabarit
+  // symbolique) : G00 Y<C> X<R> Z<Z> B<B> F<feedrate>
+  //   R (firmware "X") = rayon du plateau, mm ; C (firmware "Y") = rotation
+  //   du plateau, degrés ; Z (firmware "Z") = hauteur ; B (firmware "B") =
+  //   rotation de la TÊTE, perpendiculaire à R (B=0° tête vers le bas,
+  //   B=90° horizontale, B=180° retournée vers le haut, jamais négatif).
+  //   rotation_axes = [ {axis: (0,0,1), angle_range_deg: (0,360)},   // C
+  //                      {axis: perpendiculaire à R, angle_range_deg: (0,180)} ]  // B
+  platform_origin: Vec3             // centre de rotation du premier axe (si applicable) —
+                                     // aussi le point de singularité éventuel (limite #19)
   nozzle_model: Mesh                                 // maillage 3D tête (buse + porte-buse + carriage proche)
   nozzle_diameter: float
   max_angular_velocity: float                        // rad/s
@@ -226,13 +232,11 @@ Voici la spécification complète, étape par étape, avec les données précise
 
 ```
 MachineProfile {
-  // Cinématique CYLINDRIQUE réelle — voir le premier bloc MachineProfile
-  // ci-dessus pour le détail complet (gabarit de commande, plages, limites
-  // #18/#19). Rappel synthétique :
-  platform_axis: Vec3               // axe de rotation du plateau (C), typiquement (0,0,1)
-  platform_origin: Vec3             // centre du plateau — singularité C au centre (R=0)
-  head_rotation_axis: Vec3          // axe de rotation de la tête (B), perpendiculaire à R
-  head_angle_range: {min: float, max: float}   // (0°, 180°) — jamais négatif, jamais > 180°
+  // Cinématique décrite par rotation_axes (liste paramétrable de N axes) —
+  // voir le premier bloc MachineProfile ci-dessus pour le détail complet
+  // (gabarit générique, exemple HPI/HPE, limites #18/#19). Rappel synthétique :
+  rotation_axes: RotationAxisSpec[]   // N axes ordonnés, chacun {axis, angle_range_deg}
+  platform_origin: Vec3             // centre du premier axe (si applicable) — singularité éventuelle
   nozzle_model: Mesh                                 // maillage 3D de la tête (buse + porte-buse + carriage proche)
   nozzle_diameter: float
   max_angular_velocity: float                        // rad/s, limite plateau
@@ -511,10 +515,13 @@ re-dériver la logique d'ordonnancement.
    mais l'ensemble ne l'était pas.
 
 6. **Directions candidates 4 axes vs 5 axes** (`core/geometry_utils.py`) : une machine
-   4 axes (3 linéaires + 1 rotatif) n'atteint qu'un **cercle** de directions autour de
+   à 1 seul DOF de rotation n'atteint qu'un **cercle** de directions autour de
    son axe de rotation (`rotation_axis_circle_directions`), pas une sphère complète
    (`fibonacci_sphere_directions`, réservée à une orientation libre type 5 axes).
-   `SegmentationParams.rotation_axis_direction` bascule entre les deux modes.
+   `SegmentationParams.rotation_axes` (une liste de `RotationAxisSpec`, voir
+   limite #18) généralise ce choix à N axes composés, chacun avec sa propre
+   plage — le cas à 1 DOF ci-dessus reste un cas particulier valide (liste à
+   1 élément, plage complète), pas remplacé.
 
 7. **Les cavités internes doivent être signalées explicitement à tetgen.** Un mesh
    watertight avec un vide interne (boîte creuse) ne suffit pas : sans
@@ -626,23 +633,28 @@ re-dériver la logique d'ordonnancement.
     peinture suit une frontière géométrique doit être suffisamment subdivisé
     — sinon on teste/affiche une frontière que la donnée n'encode pas.
 
-18. **La machine a DEUX degrés de liberté de rotation (C plateau + B tête),
-    pas un seul** — correction tardive d'une hypothèse posée dès l'étape 3
-    (`SegmentationParams.rotation_axis_direction`,
-    `rotation_axis_circle_directions`). Conséquence géométrique nette,
-    vérifiable : `C` balaie un tour complet et `B ∈ [0°, 180°]` (jamais
-    négatif — voir `MachineProfile`), donc l'ensemble des directions de dépôt
-    atteignables `{Rz(C)·Rhead(B)·(0,0,-1)}` couvre la **sphère complète**,
-    exactement comme la paramétrisation standard d'une sphère par
-    (longitude, colatitude) où la colatitude ne parcourt que `[0°, 180°]`.
-    **La machine est donc kinématiquement équivalente à une machine 5 axes
-    pour le choix de direction d'impression**, malgré ses 4 axes de commande
-    — `rotation_axis_circle_directions` (cercle à 1 DOF) n'est PAS le bon
-    modèle pour cette machine ; `fibonacci_sphere_directions` l'est. Révision
-    de `step3_segmentation.py` nécessaire mais **différée à un plan séparé**
-    (impact sur des tests existants nommés autour du cercle à 1 DOF) — ne
-    pas repartir de l'hypothèse 4-axes-1-DOF par défaut dans une session
-    future.
+18. **Le système doit décrire une cinématique de rotation ARBITRAIRE (N axes
+    composés), jamais une seule machine figée en dur.** Corrige une hypothèse
+    posée dès l'étape 3 (à l'origine : un seul DOF de rotation supposé,
+    `rotation_axis_circle_directions` comme unique alternative à
+    `fibonacci_sphere_directions`). `core/mesh_types.RotationAxisSpec`
+    (axe + plage angulaire) et `core/geometry_utils.composed_rotation_directions`
+    généralisent à N axes ordonnés, chacun avec sa propre plage — SANS
+    retirer ni remplacer les deux fonctions existantes, qui restent des cas
+    particuliers valides et testés (0 axe → sphère libre, 1 axe à plage
+    complète → dégénère exactement vers le cercle à 1 DOF).
+    `SegmentationParams`/`Step7Params` exposent `rotation_axes: list[RotationAxisSpec]`
+    ; `MachineProfile.rotation_axes` décrit la cinématique réelle de la
+    machine utilisée. **Résultat mesuré (pas supposé) pour la machine HPI/HPE
+    actuelle en particulier**, un cas d'usage parmi d'autres possibles, pas
+    la référence du type : `C` balaie un tour complet et `B ∈ [0°, 180°]`
+    (jamais négatif), donc l'ensemble des directions de dépôt atteignables
+    couvre la **sphère complète** — exactement comme la paramétrisation
+    standard d'une sphère par (longitude, colatitude) où la colatitude ne
+    parcourt que `[0°, 180°]`. Une cinématique à 2 axes tous deux restreints
+    (ex: chacun `[0°,90°]`) ne couvre en général PAS la sphère complète —
+    vérifié par test (`tests/test_geometry_utils.py`), pour ne jamais
+    retomber sur l'hypothèse cachée « 2 axes ⇒ sphère complète ».
 
 19. **Singularité géométrique au centre du plateau (`R=0`) : `C` est
     indéterminé**, comme au pôle d'un système de coordonnées polaires
@@ -681,9 +693,10 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
   vers la géométrie, jamais une copie ; `layer_range` seul ne suffit pas car
   une passe ne couvre qu'une partie de chaque couche), `PrintSchedule`
   (l'ordre de `passes` EST l'ordre d'exécution) — étape 7
-- `MachineProfile` (**cinématique réelle** `platform_axis`/`platform_origin`
-  (C) + `head_rotation_axis`/`head_angle_range` (B, borné `[0°,180°]` par
-  défaut) — PAS un `rotation_axis` générique unique, voir limite #18)
+- `RotationAxisSpec` (axe + plage angulaire, un DOF de rotation dans le
+  repère de son parent) ; `MachineProfile` (**`rotation_axes: list[RotationAxisSpec]`**
+  — cinématique décrite génériquement, N axes ordonnés et paramétrables,
+  jamais figée sur une seule machine, voir limite #18)
 - `ToolpathPoint` (**`radius`/`platform_angle`/`head_angle`** — (R, C, B)
   explicites, PAS un `rotation_angle` unique, structurellement insuffisant
   pour deux rotations indépendantes), `ToolpathMachine` — étape 8
@@ -696,7 +709,18 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
   utilisé par step2 (composantes connexes de ponts) et step3 (region growing).
 - `fibonacci_sphere_directions(count) -> ndarray` — répartition uniforme sur sphère.
 - `rotation_axis_circle_directions(rotation_axis_direction, count) -> ndarray` —
-  répartition sur le cercle atteignable par un seul DOF de rotation (cinématique 4 axes réelle).
+  répartition sur le cercle atteignable par un seul DOF de rotation. Reste un
+  cas particulier valide et testé, PAS remplacé par la fonction générique
+  ci-dessous (voir limite #18).
+- `composed_rotation_directions(axes, reference_direction, samples_per_axis) -> ndarray` —
+  généralise à N axes de rotation composés (`RotationAxisSpec`), chacun
+  échantillonné sur sa propre plage angulaire (grille produit, rotations de
+  Rodrigues successives). Dégénère exactement vers `rotation_axis_circle_directions`
+  pour un seul axe à plage complète (vérifié par test), et vers la direction
+  de référence seule pour une liste vide. Utilisé par step3
+  (`_generate_candidate_directions`) et step7 (`_escape_directions`) — même
+  dispatch générique dans les deux, aucun des deux ne connaît le nombre ni
+  la nature des axes de la machine réellement utilisée.
 - `point_in_polygon_2d(point, polygon) -> bool` — ray-casting standard, utilisé
   par step5 (test de cohérence) et step6 (classification contour/trou) pour
   l'imbrication géométrique — voir limite #11.
@@ -799,24 +823,24 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 
 ## Prochaine étape
 
-Étapes 1 à 7 stables et testées (61/61 tests). `MachineProfile` et
-`ToolpathPoint` reflètent maintenant la cinématique réelle (R, C, Z, B) —
-voir limites #18/#19 — mais `pipeline/step8_machine_toolpath.py` lui-même
-n'est pas encore écrit, ni planifié en détail : consommer
-`PrintSchedule.passes` **dans l'ordre** (aucune logique d'ordonnancement à
-re-dériver, gelée à l'étape 7), relever chaque segment `(layer_id, index)`
-du repère local 2D vers le cartésien machine via `Layer.local_frame`
-(`step6._lift_to_3d` fait déjà la moitié du travail), PUIS convertir
-position→(R,C) et orientation désirée→(C,B) en respectant le clamping
-`B∈[0°,180°]` et la singularité `R=0` (limite #19), lisser la série
-temporelle d'angles pour `max_angular_velocity`/`max_angular_acceleration`,
-garantir la continuité d'extrusion. Un plan dédié à step8 doit encore
-trancher l'algorithme précis (notamment le cas `B` hors plage : réessai à
-`C+180°` ou signal vers l'étape 10) — non fait ici.
+Étapes 1 à 7 stables et testées (67/67 tests). `MachineProfile` décrit
+maintenant une cinématique générique à N axes de rotation composés
+(`rotation_axes: list[RotationAxisSpec]`, voir limites #18/#19) ; step3 et
+step7 dispatchent tous deux sur `composed_rotation_directions` sans
+hypothèse figée sur le nombre d'axes de la machine réellement utilisée.
 
-Révision différée, à planifier séparément avant ou pendant step8 :
-`pipeline/step3_segmentation.py` suppose encore une machine à 1 DOF de
-rotation (`rotation_axis_circle_directions`) alors que la machine réelle
-couvre la sphère complète (limite #18) — impact sur
-`SegmentationParams.rotation_axis_direction` et sur des tests existants
-nommés autour de ce comportement.
+`pipeline/step8_machine_toolpath.py` lui-même n'est pas encore écrit, ni
+planifié en détail : consommer `PrintSchedule.passes` **dans l'ordre**
+(aucune logique d'ordonnancement à re-dériver, gelée à l'étape 7), relever
+chaque segment `(layer_id, index)` du repère local 2D vers le cartésien
+machine via `Layer.local_frame` (`step6._lift_to_3d` fait déjà la moitié du
+travail), PUIS résoudre position/orientation désirée en valeurs concrètes
+d'angles pour CHAQUE axe de `MachineProfile.rotation_axes` (pas seulement
+2, le cas HPI/HPE), en respectant la plage de chaque axe et la singularité
+géométrique au centre du premier axe si applicable (limite #19), lisser la
+série temporelle d'angles pour `max_angular_velocity`/`max_angular_acceleration`,
+garantir la continuité d'extrusion. Un plan dédié à step8 doit encore
+trancher l'algorithme précis de résolution multi-axes (notamment le cas où
+la plage d'un axe interne est dépassée : réessai via un axe externe, ou
+signal vers l'étape 10) — non fait ici, et à concevoir génériquement plutôt
+que spécifiquement pour 2 axes.

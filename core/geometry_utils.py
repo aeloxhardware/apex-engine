@@ -15,6 +15,12 @@ Utilitaires geometriques partages entre plusieurs etapes du pipeline.
   (step5 pour la verification de coherence, step6 pour la classification
   des contours avant remplissage) - PAS le signe de l'aire projetee, dont
   l'hypothese s'est revelee fausse empiriquement (voir CLAUDE.md limite #11).
+- composed_rotation_directions : repartition de directions atteignables par
+  la composition ordonnee de N axes de rotation (core.mesh_types.RotationAxisSpec),
+  chacun avec sa propre plage angulaire - generalisation qui englobe
+  rotation_axis_circle_directions (cas a 1 axe, plage complete) SANS le
+  remplacer, pour decrire une cinematique de machine arbitraire (pas figee
+  sur une machine en particulier - voir CLAUDE.md limite de conception #18).
 """
 
 from __future__ import annotations
@@ -100,6 +106,82 @@ def rotation_axis_circle_directions(
     directions = (
         np.cos(angles)[:, None] * u[None, :] + np.sin(angles)[:, None] * v[None, :]
     )
+
+    return directions
+
+
+def _rodrigues_rotate(vectors: np.ndarray, axis: np.ndarray, angles_rad: np.ndarray) -> np.ndarray:
+    """
+    Tourne chaque ligne de `vectors` (N,3) autour de `axis` (3,, unitaire)
+    d'un angle correspondant dans `angles_rad` (N,), via la formule de
+    rotation de Rodrigues. Vectorise sur N pour eviter une boucle Python
+    lors de l'echantillonnage d'une grille produit d'angles.
+    """
+    cos_a = np.cos(angles_rad)[:, None]
+    sin_a = np.sin(angles_rad)[:, None]
+    dot = (vectors @ axis)[:, None]
+    cross = np.cross(np.broadcast_to(axis, vectors.shape), vectors)
+    return vectors * cos_a + cross * sin_a + axis[None, :] * dot * (1.0 - cos_a)
+
+
+def composed_rotation_directions(
+    axes: "list", reference_direction: np.ndarray, samples_per_axis: int
+) -> np.ndarray:
+    """
+    Directions atteignables par la composition ORDONNEE de N rotations
+    (`axes`, une liste de `core.mesh_types.RotationAxisSpec`), chacune
+    echantillonnee sur sa propre plage angulaire. `axes[0]` est la rotation
+    la plus "externe" (ex: le plateau C), `axes[-1]` la plus "interne" (ex:
+    la tete B) - meme convention que l'ordre d'application matricielle.
+
+    Generalisation directe et verifiable de rotation_axis_circle_directions,
+    pas un remplacement :
+      - axes vide -> `reference_direction` seule (aucune rotation).
+      - un seul axe a plage complete (0,360) -> memes directions que
+        rotation_axis_circle_directions (verifie par test).
+      - N axes -> grille produit des echantillons de chaque plage, chaque
+        point de la grille compose par rotations de Rodrigues successives.
+
+    Ne fait AUCUNE hypothese sur le nombre d'axes ni leurs plages : une
+    machine a 2 DOF dont les deux plages sont restreintes ne couvre en
+    general PAS la sphere complete, contrairement a une machine dont un axe
+    a plage complete et l'autre une demi-plage (cas mesure separement, pas
+    suppose ici).
+    """
+    reference_direction = np.asarray(reference_direction, dtype=float)
+    reference_direction = reference_direction / np.linalg.norm(reference_direction)
+
+    if not axes:
+        return reference_direction.reshape(1, 3)
+
+    # grille produit des angles echantillonnes par axe, un DOF fige
+    # (min==max) ne produit qu'un seul echantillon plutot que
+    # samples_per_axis redondants. Un tour complet (plage >= 360deg) exclut
+    # l'extremite superieure (0deg et 360deg sont le meme point, cf.
+    # rotation_axis_circle_directions) ; une plage bornee strictement (ex:
+    # B in [0,180], deux valeurs physiquement distinctes) inclut les deux
+    # bornes - confondre les deux cas produirait un espacement d'angle faux
+    # (mesure : linspace(0,360,8,endpoint=True) espace de 360/7 au lieu de
+    # 360/8, dupliquant le point 0/360).
+    per_axis_angles = []
+    for spec in axes:
+        lo, hi = spec.angle_range_deg
+        is_full_turn = (hi - lo) >= 360.0
+        n = 1 if hi <= lo else max(samples_per_axis, 1)
+        per_axis_angles.append(np.radians(np.linspace(lo, hi, n, endpoint=not is_full_turn)))
+
+    grids = np.meshgrid(*per_axis_angles, indexing="ij")
+    flat_angles = [g.reshape(-1) for g in grids]  # une colonne d'angles par axe
+    total_points = flat_angles[0].shape[0]
+
+    directions = np.tile(reference_direction, (total_points, 1))
+    # applique les rotations dans l'ordre INVERSE de la liste (la plus
+    # interne d'abord, cf. axes[-1] = tete, la plus proche de la buse) pour
+    # que la composition matricielle corresponde a R_1 . R_2 ... . R_n . d_ref
+    for spec, angles in zip(reversed(axes), reversed(flat_angles)):
+        axis = np.asarray(spec.axis, dtype=float)
+        axis = axis / np.linalg.norm(axis)
+        directions = _rodrigues_rotate(directions, axis, angles)
 
     return directions
 

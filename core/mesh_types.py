@@ -275,31 +275,47 @@ class PrintSchedule:
 
 
 # ---------------------------------------------------------------------------
-# Profil machine — cinématique réelle (R, C, Z, B)
+# Profil machine — cinématique générique à N axes de rotation composés
 # ---------------------------------------------------------------------------
+
+@dataclass
+class RotationAxisSpec:
+    """
+    Un DOF de rotation : axe + plage angulaire, exprimé dans le repère du
+    DOF parent (le repère déjà tourné par tous les axes précédents de la
+    liste — même convention que l'ordre d'application matricielle).
+
+    `angle_range_deg` peut être `(0, 360)` pour un tour complet, une plage
+    restreinte (ex: `(0, 180)` pour la tête de la machine HPI/HPE actuelle),
+    ou `(v, v)` pour un DOF figé à une seule valeur — dégénérescence utile
+    qui permet de décrire un axe verrouillé sans le retirer de la liste.
+    """
+    axis: Vec3
+    angle_range_deg: tuple[float, float]
+
 
 @dataclass
 class MachineProfile:
     """
-    Cinématique réelle de la machine : plateau rotatif (axe C) + tête
-    rotative (axe B) — PAS un axe de rotation générique unique comme le
-    contrat initial le supposait. Voir CLAUDE.md limite de conception #18.
+    Cinématique de la machine, décrite comme une liste ORDONNÉE et
+    PARAMÉTRABLE d'axes de rotation — PAS un modèle figé sur une seule
+    machine. La machine actuelle (HPI/HPE : plateau C + tête B∈[0°,180°])
+    n'est qu'UN cas d'usage à valider parmi d'autres cinématiques futures
+    (un seul DOF, deux DOF différemment agencés, plus de deux DOF) ; voir
+    CLAUDE.md limite de conception #18.
 
-    Commande firmware (gabarit symbolique, pas de valeurs numériques
-    fictives) : `G00 Y<C> X<R> Z<Z> B<B> F<feedrate>`.
+    - liste vide : orientation libre (5 axes), aucune contrainte de rotation.
+    - 1 élément, plage `(0,360)` : machine 4 axes classique à 1 DOF.
+    - 2 éléments comme la machine actuelle : un exemple parmi d'autres
+      configurations possibles, pas la référence du type lui-même.
+
+    Commande firmware de la machine HPI/HPE actuelle (gabarit symbolique,
+    pas de valeurs numériques fictives) : `G00 Y<C> X<R> Z<Z> B<B> F<feedrate>`.
     """
-    platform_axis: Vec3             # axe de rotation du plateau (C), typiquement (0,0,1)
-    platform_origin: Vec3           # centre du plateau, origine du rayon R — aussi le
-                                     # point de singularité où C est indéterminé (limite #19)
-    head_rotation_axis: Vec3        # axe de rotation de la tête (B), perpendiculaire à l'axe R
-    # (B_min, B_max) en degrés. Contrainte physique FIXE de cette machine :
-    # B ne prend jamais de valeur négative ni > 180° (B=0 tête vers le bas,
-    # B=90 horizontale, B=180 tête retournée vers le haut) — toute
-    # orientation qui semblerait réclamer B<0 doit être atteinte en
-    # tournant C à la place. Reste un champ explicite (pas une constante
-    # codée en dur) pour ne pas supposer que toute machine future partage
-    # cette contrainte.
-    head_angle_range: tuple[float, float] = (0.0, 180.0)
+    rotation_axes: list["RotationAxisSpec"] = field(default_factory=list)
+    platform_origin: Vec3 = None     # centre de rotation du premier axe (si applicable) —
+                                      # aussi le point de singularité où l'angle du premier
+                                      # axe est indéterminé (limite #19)
     nozzle_model: Any = None         # maillage 3D tête (buse + porte-buse + carriage proche)
     nozzle_diameter: float = 0.4
     max_angular_velocity: float = 0.0     # rad/s

@@ -47,8 +47,8 @@ import trimesh
 import trimesh.proximity
 
 from core.geometry_utils import (
+    composed_rotation_directions,
     fibonacci_sphere_directions,
-    rotation_axis_circle_directions,
 )
 from core.mesh_types import (
     ColorMap,
@@ -57,6 +57,7 @@ from core.mesh_types import (
     PrintPass,
     PrintSchedule,
     RegionDependencyGraph,
+    RotationAxisSpec,
     ScalarField,
     TetMesh,
 )
@@ -92,10 +93,13 @@ class Step7Params:
     max_open_holes: int = 4
     # Directions d'echappement testees pour la deadline d'accessibilite.
     escape_direction_count: int = 16
-    # Axe de rotation machine : si fourni, les directions d'echappement sont
-    # prises sur le CERCLE reellement atteignable par une machine 4 axes
-    # (limite de conception #6), pas sur une sphere complete.
-    rotation_axis_direction: Optional[np.ndarray] = None
+    # Cinematique de rotation de la machine : si None/vide, les directions
+    # d'echappement sont prises sur la sphere complete (orientation libre).
+    # Si fourni, decrit une cinematique arbitraire (N axes composes, chacun
+    # avec sa propre plage) via composed_rotation_directions - PAS figee sur
+    # une seule machine (voir CLAUDE.md limite de conception #18). Un seul
+    # axe a plage complete degenere vers l'ancien comportement a 1 DOF.
+    rotation_axes: Optional[list[RotationAxisSpec]] = None
     # Nombre d'echantillons le long d'un rayon d'echappement.
     deadline_ray_samples: int = 24
 
@@ -425,16 +429,32 @@ def _escape_directions(params: Step7Params) -> np.ndarray:
     """
     Directions d'echappement candidates pour tester l'accessibilite d'un trou.
 
-    Sur une machine 4 axes (3 lineaires + 1 rotatif), la buse n'atteint qu'un
-    CERCLE de directions autour de l'axe de rotation, pas une sphere complete
-    (limite de conception #6) - tester une sphere surestimerait l'accessibilite
-    et planifierait des repassages impossibles.
+    Dispatch generique sur la cinematique decrite par `rotation_axes` (meme
+    principe que step3._generate_candidate_directions) : ni None/vide
+    (orientation libre, sphere complete) ni une liste d'axes quelconque
+    n'est un cas special code en dur - composed_rotation_directions absorbe
+    uniformement 0, 1 ou N axes. Tester une sphere complete quand la
+    cinematique reelle est plus restreinte surestimerait l'accessibilite et
+    planifierait des repassages impossibles (voir CLAUDE.md limite #18).
     """
-    if params.rotation_axis_direction is not None:
-        return rotation_axis_circle_directions(
-            params.rotation_axis_direction, params.escape_direction_count
-        )
-    return fibonacci_sphere_directions(params.escape_direction_count)
+    if not params.rotation_axes:
+        return fibonacci_sphere_directions(params.escape_direction_count)
+
+    up = np.array([0.0, 0.0, 1.0])
+    return composed_rotation_directions(
+        params.rotation_axes,
+        reference_direction=up,
+        samples_per_axis=_escape_samples_per_axis(
+            params.escape_direction_count, len(params.rotation_axes)
+        ),
+    )
+
+
+def _escape_samples_per_axis(escape_direction_count: int, axis_count: int) -> int:
+    """Meme conversion count->samples_per_axis que step3._samples_per_axis (grille produit)."""
+    if axis_count <= 0:
+        return escape_direction_count
+    return max(int(round(escape_direction_count ** (1.0 / axis_count))), 2)
 
 
 def _blocking_layer_along_ray(

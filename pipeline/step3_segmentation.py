@@ -19,6 +19,7 @@ Sortie : RegionDependencyGraph
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Optional
 
 import networkx as nx
 import numpy as np
@@ -26,10 +27,10 @@ import scipy.sparse as sp
 
 from core.geometry_utils import (
     build_face_adjacency,
+    composed_rotation_directions,
     fibonacci_sphere_directions,
-    rotation_axis_circle_directions,
 )
-from core.mesh_types import MeshData, OverhangMap, Region, RegionDependencyGraph
+from core.mesh_types import MeshData, OverhangMap, Region, RegionDependencyGraph, RotationAxisSpec
 
 
 class SegmentationError(Exception):
@@ -43,12 +44,14 @@ class SegmentationParams:
     region_count_penalty: float = 0.1
     platform_z: float = 0.0
     platform_contact_tolerance: float = 0.5
-    # Si None : utilise fibonacci_sphere_directions (orientation libre, 5 axes).
-    # Si fourni : utilise rotation_axis_circle_directions, qui reflete la
-    # cinematique reelle d'une machine 4 axes (3 lineaires + 1 rotatif) - un
-    # seul DOF de rotation donne un CERCLE de directions atteignables, pas
-    # une sphere complete.
-    rotation_axis_direction: np.ndarray = None
+    # Si None ou liste vide : utilise fibonacci_sphere_directions (orientation
+    # libre, 5 axes). Si fourni : decrit une cinematique de rotation
+    # arbitraire (N axes composes, chacun avec sa propre plage angulaire) via
+    # composed_rotation_directions - PAS figee sur une seule machine. Un seul
+    # axe a plage complete (0,360) degenere exactement vers l'ancien
+    # comportement a 1 DOF (cercle) ; plusieurs axes decrivent une cinematique
+    # composee (ex: plateau + tete d'une machine a 2 DOF).
+    rotation_axes: Optional[list[RotationAxisSpec]] = None
     up_vector: np.ndarray = None
 
     def __post_init__(self):
@@ -98,19 +101,42 @@ def _generate_candidate_directions(params: SegmentationParams) -> np.ndarray:
     Genere l'ensemble des directions d'impression candidates a tester,
     toujours avec la verticale (up_vector) en premiere position (direction
     par defaut, prioritaire en cas d'egalite de cout).
+
+    Dispatch generique sur la cinematique decrite par `rotation_axes` : ni
+    None/vide (orientation libre) ni une liste d'axes quelconque n'est un
+    cas special code en dur ici - composed_rotation_directions absorbe
+    uniformement 0, 1 ou N axes (voir CLAUDE.md limite #18 : ne pas figer
+    step3 sur une seule cinematique de machine).
     """
     up = params.up_vector / np.linalg.norm(params.up_vector)
 
-    if params.rotation_axis_direction is not None:
-        circle = rotation_axis_circle_directions(
-            params.rotation_axis_direction, params.direction_candidate_count
-        )
-        directions = np.vstack([up.reshape(1, 3), circle])
-    else:
+    if not params.rotation_axes:
         sphere = fibonacci_sphere_directions(params.direction_candidate_count)
         directions = np.vstack([up.reshape(1, 3), sphere])
+    else:
+        composed = composed_rotation_directions(
+            params.rotation_axes,
+            reference_direction=up,
+            samples_per_axis=_samples_per_axis(
+                params.direction_candidate_count, len(params.rotation_axes)
+            ),
+        )
+        directions = np.vstack([up.reshape(1, 3), composed])
 
     return directions
+
+
+def _samples_per_axis(direction_candidate_count: int, axis_count: int) -> int:
+    """
+    Convertit un nombre de directions cible en nombre d'echantillons PAR
+    AXE, puisque composed_rotation_directions echantillonne une grille
+    produit (total = samples_per_axis ** axis_count, modulo les DOF figes).
+    Racine axis_count-ieme, borne a 2 au minimum pour qu'un axe a plage non
+    degeneree produise toujours au moins 2 points distincts.
+    """
+    if axis_count <= 0:
+        return direction_candidate_count
+    return max(int(round(direction_candidate_count ** (1.0 / axis_count))), 2)
 
 
 def _face_direction_compatibility(

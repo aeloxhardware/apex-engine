@@ -27,6 +27,7 @@ import trimesh
 
 from pipeline.step1_ingest import run as ingest_run
 from pipeline.step2_overhang import OverhangParams, run as overhang_run
+from core.mesh_types import RotationAxisSpec
 from pipeline.step3_segmentation import (
     SegmentationError,
     SegmentationParams,
@@ -269,7 +270,7 @@ def test_sphere_dependency_graph_has_no_cycle(sphere_data):
     params = SegmentationParams(
         platform_z=-100.0,
         platform_contact_tolerance=0.5,
-        rotation_axis_direction=np.array([0.0, 0.0, 1.0]),
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0, 360))],
         direction_candidate_count=12,
     )
 
@@ -280,18 +281,20 @@ def test_sphere_dependency_graph_has_no_cycle(sphere_data):
 
 def test_sphere_uses_rotation_axis_circle_when_axis_provided(sphere_data):
     """
-    Bascule 4 axes vs 5 axes (limite #6) : quand rotation_axis_direction est
-    fourni, toutes les directions de region retenues doivent etre soit la
+    Bascule 4 axes vs 5 axes (limite #6) : quand rotation_axes est fourni
+    avec un seul axe a plage complete (0,360) - degenerescence a 1 DOF de
+    composed_rotation_directions, equivalente a rotation_axis_circle_directions
+    - toutes les directions de region retenues doivent etre soit la
     verticale (up_vector, toujours en premiere position candidate), soit
     perpendiculaires a l'axe de rotation (cercle atteignable par un seul DOF
     de rotation) - jamais une direction hors de ce cercle, qui ne serait pas
-    atteignable par une machine 4 axes reelle.
+    atteignable par une machine 4 axes a 1 DOF.
     """
     mesh_data, overhang_map = sphere_data
     rotation_axis = np.array([0.0, 0.0, 1.0])
     params = SegmentationParams(
         platform_z=-100.0,
-        rotation_axis_direction=rotation_axis,
+        rotation_axes=[RotationAxisSpec(axis=rotation_axis, angle_range_deg=(0, 360))],
         direction_candidate_count=12,
         up_vector=rotation_axis,
     )
