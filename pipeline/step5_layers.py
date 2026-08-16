@@ -481,6 +481,12 @@ def run(
     raw_layers.sort(key=_sort_key)
 
     return [
-        Layer(id=i, contour_3d=contours, region_ids=region_ids, local_frame=local_frame)
-        for i, (_isovalue, contours, region_ids, local_frame) in enumerate(raw_layers)
+        Layer(
+            id=i,
+            contour_3d=contours,
+            region_ids=region_ids,
+            local_frame=local_frame,
+            isovalue=isovalue,
+        )
+        for i, (isovalue, contours, region_ids, local_frame) in enumerate(raw_layers)
     ]

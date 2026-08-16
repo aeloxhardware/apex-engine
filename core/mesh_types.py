@@ -211,7 +211,20 @@ class Layer:
     region_ids: list[int]
     local_frame: tuple[Vec3, Vec3, Vec3]       # (origine, axe_u, axe_v) du repère local approximatif
     toolpath_2d: Optional[list[np.ndarray]] = None  # rempli à l'étape 6 (repère local)
-    color_id: Optional[int] = None             # assigné à l'étape 7 si carte de couleur présente
+    color_id: Optional[int] = None             # couleur dominante de la couche (affichage UI), étape 7
+    # Isovaleur du champ scalaire dont cette couche EST l'isosurface. Donnée
+    # d'identité de la couche, pas un doublon dérivé : l'étape 5 la calcule
+    # (`_generate_isovalues`) et la jetait jusqu'ici. L'étape 7 en a besoin
+    # pour convertir une valeur de champ en indice de couche (calcul de la
+    # deadline d'accessibilité d'un trou temporaire).
+    isovalue: Optional[float] = None
+    # Une couleur par polyligne de `toolpath_2d` (même indexation, même
+    # longueur), remplie par l'étape 7. `None` sur une entrée = matière
+    # INTERNE, invisible depuis l'extérieur : elle peut être imprimée avec
+    # n'importe quelle couleur déjà chargée, ce qui est le principal levier
+    # de réduction des purges. `color_id` (une seule couleur par couche) ne
+    # suffit pas : une couche traverse en général plusieurs zones peintes.
+    segment_colors: Optional[list[Optional[int]]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -227,16 +240,37 @@ class ColorMap:
 
 @dataclass
 class PrintPass:
-    """Un passage d'impression dans la séquence globale (étape 7)."""
-    layer_range: tuple[int, int]       # (id de couche début, id de couche fin) inclus
-    color_id: Optional[int]
-    is_hole_fill: bool = False
+    """
+    Un passage d'impression dans la séquence globale (étape 7).
+
+    `segments` est un POINTEUR vers la géométrie, jamais une copie : les
+    coordonnées restent dans `Layer.toolpath_2d` (source unique de vérité),
+    une passe ne décrit que "quoi imprimer quand". Un couple (layer_id,
+    index) désigne la polyligne `layer.toolpath_2d[index]` de la couche
+    d'identifiant `layer_id`.
+
+    `layer_range` seul ne suffisait pas à décrire une passe : une passe de
+    couleur ne couvre qu'une PARTIE de chaque couche traversée (les segments
+    de cette couleur), pas des couches entières contiguës — sans `segments`,
+    l'étape 8 ne saurait pas quelles polylignes émettre.
+    """
+    segments: list[tuple[int, int]]    # (layer_id, index dans Layer.toolpath_2d)
+    color_id: Optional[int]            # None = matière invisible, couleur libre
+    is_hole_fill: bool = False         # True = passe de comblement d'un trou temporaire
+    layer_range: Optional[tuple[int, int]] = None  # dérivé de `segments`, pour l'affichage UI
     deferred_regions: list[int] = field(default_factory=list)
 
 
 @dataclass
 class PrintSchedule:
-    """Séquence globale d'impression, sortie de pipeline/step7_scheduling.py."""
+    """
+    Séquence globale d'impression, sortie de pipeline/step7_scheduling.py.
+
+    L'ordre d'exécution est EXACTEMENT l'ordre de la liste `passes` :
+    l'étape 8 la consomme séquentiellement, sans jamais réordonner ni
+    re-dériver la logique d'ordonnancement (topologique + earliest-deadline
+    -first), entièrement résolue et gelée ici.
+    """
     passes: list[PrintPass] = field(default_factory=list)
 
 

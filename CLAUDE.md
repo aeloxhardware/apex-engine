@@ -98,7 +98,7 @@ slicer_engine/
 │   ├── step4_field_solver.py        # FAIT — résolution FEM du champ scalaire (7 tests)
 │   ├── step5_layers.py              # FAIT — extraction des couches courbes (12 tests)
 │   ├── step6_toolpath2d.py          # FAIT — remplissage 2D par couche (8 tests)
-│   ├── step7_scheduling.py          # PAS ENCORE ÉCRIT
+│   ├── step7_scheduling.py          # FAIT — couleur + ordonnancement trous/purges (19 tests)
 │   ├── step8_machine_toolpath.py    # PAS ENCORE ÉCRIT
 │   ├── step9_collision_sim.py       # PAS ENCORE ÉCRIT
 │   └── step10_adjustment.py         # PAS ENCORE ÉCRIT
@@ -119,11 +119,12 @@ slicer_engine/
     ├── test_step3_segmentation.py   # FAIT — 9 tests
     ├── test_step4_field_solver.py   # FAIT — 7 tests
     ├── test_step5_layers.py         # FAIT — 12 tests
-    └── test_step6_toolpath2d.py     # FAIT — 8 tests
+    ├── test_step6_toolpath2d.py     # FAIT — 8 tests
+    └── test_step7_scheduling.py     # FAIT — 19 tests
 ```
 
-**État global : 42/42 tests passants** (step2 à step6). Étapes 1 à 6 du
-pipeline stables et testées ; step7 (couleur + ordonnancement) est la
+**État global : 61/61 tests passants** (step2 à step7). Étapes 1 à 7 du
+pipeline stables et testées ; step8 (trajectoire machine 4 axes) est la
 prochaine à écrire.
 
 **Dépendances Python requises** (installer via pip) :
@@ -358,15 +359,43 @@ via `local_frame`).
 
 ## Étape 7 — Application de la carte de couleur et planification d'ordonnancement
 
-**Ce que le code fait précisément :**
-- Projette `ColorMap.per_face_color` sur chaque segment de trajectoire (par proximité au mesh original).
-- Lisse/regroupe la carte de couleur selon `merge_tolerance` (filtre morphologique sur le champ de couleur, ex: closing/opening sur la carte projetée) pour limiter la fragmentation.
-- Construit un graphe `(region, color) → dépendances physiques`, en croisant `RegionDependencyGraph` et la carte de couleur.
-- Pour chaque groupe de couleur : détermine s'il peut être imprimé en une passe complète, ou s'il nécessite des trous temporaires (segments marqués `deferred = true, target_color, deadline`).
-- Calcule, pour chaque trou candidat, le `hole_cost` (via `hole_cost_model`, incluant le risque d'adhérence à froid) vs `purge_cost` (via `purge_cost_model`) ; bascule en purge si `hole_cost > purge_cost` ou si `max_open_holes` serait dépassé.
-- Ordonnance l'ensemble par un earliest-deadline-first sur les trous en attente, entrelacé avec l'ordre topologique géométrique de base.
+**Ce que le code fait précisément (`pipeline/step7_scheduling.py`, FAIT) :**
+- Projette `ColorMap.per_face_color` sur chaque **arête** de trajectoire :
+  relève l'arête du repère local 2D vers la 3D (`step6._lift_to_3d`), puis
+  interroge `trimesh.proximity.ProximityQuery.on_surface()` — **pas**
+  `mesh_data.kdtree`, dont la distance n'est pas une distance à la surface
+  (limite #15). Une arête à plus de `surface_color_distance` de la surface
+  est de la matière **interne/invisible** et reçoit `color_id = None` :
+  imprimable avec n'importe quelle couleur déjà chargée, ce qui est le
+  principal levier de réduction des purges.
+- Scinde les polylignes aux transitions de couleur (invariant « une
+  polyligne = une couleur », dont dépend tout l'ordonnancement aval).
+- Lisse la carte de couleur selon `ColorMap.merge_tolerance` : filtre
+  morphologique **1D le long de la trajectoire** (paramétrée en longueur
+  d'arc), tout run plus court que la tolérance étant absorbé par son voisin
+  le plus long. Lissage le long du chemin et non sur le maillage, car le coût
+  réel à borner est le nombre de **changements de couleur** sur le trajet —
+  lecture directe : « ne jamais changer de couleur pour moins de X mm ».
+- Construit un graphe `(region, color) → dépendances physiques`, en croisant
+  `RegionDependencyGraph` (arêtes héritées) et le recouvrement entre couches
+  successives (arêtes de support), à la granularité (couche, couleur).
+- Calcule la **deadline d'accessibilité** de chaque trou candidat : rayons
+  d'échappement dans les directions atteignables en 4 axes
+  (`rotation_axis_circle_directions`), scellés par la première couche
+  **future** rencontrée (limite #16) ; la deadline est le max sur les
+  directions (la meilleure route survit le plus longtemps), moins 1.
+- Bascule en purge classique si le trou n'est pas **réalisable**
+  (`deadline < couche de comblement`) ou pas **rentable**
+  (`hole_cost > purge_cost`), ou si `max_open_holes` serait dépassé.
+- Ordonnance en earliest-deadline-first sur les trous en attente, entrelacé
+  avec l'ordre topologique géométrique de base.
 
-**Sortie :** séquence globale d'impression = liste de `PrintPass { layer_range, color, is_hole_fill: bool, deferred_regions: [...] }`.
+**Sortie :** `(list[Layer] recolorées/re-segmentées, PrintSchedule)`. Une
+`PrintPass` pointe vers des **segments** `(layer_id, index)` — pas seulement
+une plage de couches : une passe de couleur ne couvre qu'une partie de chaque
+couche traversée. L'ordre d'exécution est exactement l'ordre de
+`PrintSchedule.passes` ; l'étape 8 le consomme séquentiellement sans jamais
+re-dériver la logique d'ordonnancement.
 
 
 ## Étape 8 — Génération de trajectoire machine 4 axes réelle
@@ -541,6 +570,39 @@ via `local_frame`).
     jamais se déclencher, quel que soit sa valeur. Fix : seuil bas de présence
     (`Step6Params.bridge_contour_ratio_threshold`, défaut `0.05`).
 
+15. **`MeshData.kdtree` répond « quelle face est la plus proche », JAMAIS
+    « à quelle distance est la surface ».** Il est construit sur les
+    **centres de face** (`step1_ingest`) : la distance qu'il retourne est une
+    distance à un centre de face, pas à la surface, et l'écart croît avec la
+    taille des triangles. Mesure sur un cube brut (12 triangles) : des points
+    situés **exactement sur** la surface ressortent à 0.370–3.901 du centre de
+    face le plus proche (distance réelle : 0.000) — avec un seuil de 0.5,
+    3 points sur 35 seulement étaient classés « en surface ». Sur maillage
+    grossier, même l'**indice** devient douteux près des arêtes. Pour toute
+    vraie distance (ou tout classement surface/intérieur), passer par
+    `trimesh.proximity.ProximityQuery(mesh).on_surface(points)`, qui retourne
+    distance réelle **et** triangle correct. Step6 n'était pas affecté car il
+    n'utilise que l'indice ; step7 (`_edge_colors_for_polyline`) a dû basculer
+    sur `ProximityQuery`. Piège à garder en tête pour les étapes 8/9/10, qui
+    manipuleront elles aussi des points hors surface.
+
+16. **Un trou temporaire n'est scellé que par la matière déposée APRÈS lui**
+    (étape 7). Le calcul de la deadline d'accessibilité ne doit compter comme
+    bloquants que les échantillons d'indice de couche **strictement supérieur**
+    à celui du trou. Sans cette restriction, un trou de **surface** — le cas
+    d'usage même, la couleur étant une propriété de surface — voit son rayon
+    d'échappement quitter le solide immédiatement, tous les échantillons
+    retombent sur sa propre couche, et le report est refusé quel que soit le
+    paramétrage : le mécanisme de trou devient structurellement inatteignable.
+
+17. **Une `ColorMap` par face ne peut pas représenter une frontière plus fine
+    que le maillage.** `per_face_color` associe UNE couleur à une face
+    entière : sur un cube brut (12 triangles, faces latérales couvrant toute
+    la hauteur), une peinture « z<0 vs z>0 » produit en réalité une découpe
+    diagonale. Toute fixture de test (ou tout modèle utilisateur) dont la
+    peinture suit une frontière géométrique doit être suffisamment subdivisé
+    — sinon on teste/affiche une frontière que la donnée n'encode pas.
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
@@ -559,8 +621,16 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
 - `ConstraintType` (enum), `ConstraintFalloff` (enum), `Constraint` — contraintes utilisateur
 - `Layer` (contour_3d, region_ids, local_frame, **`toolpath_2d`** — liste de
   polylignes `(K,2)` dans le repère local 2D de la couche, pas 3D, remplies
-  par l'étape 6, color_id) — étapes 5/6
-- `ColorMap`, `PrintPass`, `PrintSchedule` — étape 7
+  par l'étape 6 ; **`isovalue`** — l'isovaleur dont la couche EST
+  l'isosurface, renseignée par l'étape 5, requise par l'étape 7 pour
+  convertir `φ` en indice de couche ; **`segment_colors`** — une couleur par
+  polyligne de `toolpath_2d`, `None` = matière interne/couleur libre,
+  remplie par l'étape 7 ; color_id = couleur dominante, affichage UI)
+  — étapes 5/6/7
+- `ColorMap`, `PrintPass` (**`segments: list[(layer_id, index)]`** — pointeur
+  vers la géométrie, jamais une copie ; `layer_range` seul ne suffit pas car
+  une passe ne couvre qu'une partie de chaque couche), `PrintSchedule`
+  (l'ordre de `passes` EST l'ordre d'exécution) — étape 7
 - `ToolpathPoint`, `ToolpathMachine` — étape 8
 - `CollisionEvent`, `CollisionReport` — étape 9
 - `AdjustmentLogEntry` — étape 10
@@ -628,6 +698,33 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
   consécutives est reclassé indépendamment couche par couche, sans lissage
   temporel de la direction de traversée entre couches voisines.
 
+## Détail de `pipeline/step7_scheduling.py`
+
+- `run(layers, mesh_data, tet_mesh, color_map, region_dependency_graph,
+  scalar_field, params) -> (list[Layer], PrintSchedule)`. `tet_mesh` est
+  requis **en plus** de `scalar_field` : `ScalarField.values` est indexé par
+  nœud du TetMesh, donc illisible en un point 3D sans la géométrie des nœuds.
+- `_edge_colors_for_polyline` : couleur par **arête** (pas par point —
+  l'arête est l'unité extrudée, et raisonner par arête évite les
+  sous-polylignes dégénérées à 1 point au découpage). Utilise
+  `ProximityQuery.on_surface`, jamais `mesh_data.kdtree` (limite #15).
+- `_smooth_edge_colors` : filtre 1D en longueur d'arc (`merge_tolerance`).
+  Ce paramètre vit sur `ColorMap` (contrat UI) et n'est **pas** dupliqué dans
+  `Step7Params` — deux sources de vérité qui divergent en silence est le
+  piège déjà rencontré avec `platform_z` à l'étape 4.
+- `compute_hole_deadline` / `_blocking_layer_along_ray` : seule la matière
+  **future** scelle un trou (limite #16). Deux approximations assumées et
+  documentées : `φ` lu au nœud TetMesh le plus proche (pas d'interpolation
+  barycentrique), et test d'accessibilité géométrique — le test rigoureux
+  avec le vrai modèle 3D de la tête et l'état incrémental de la pièce est
+  explicitement le travail de l'étape 9, sur laquelle l'étape 10 boucle.
+- Cas `color_map is None` / vide : une passe par couche, `color_id=None`,
+  aucun trou. Le pipeline sans peinture est le cas d'usage par défaut et doit
+  rester pleinement fonctionnel.
+- Limite connue non résolue : l'ordonnancement est un glouton (maintien de la
+  couleur active aussi longtemps que possible) + EDF sur les trous, pas un
+  optimum global du nombre de purges.
+
 ---
 
 ## Conventions de code à respecter
@@ -647,11 +744,13 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 
 ## Prochaine étape
 
-Étapes 1 à 6 stables et testées (42/42 tests). Démarrer
-`pipeline/step7_scheduling.py` : projeter `ColorMap.per_face_color` sur
-chaque segment de `toolpath_2d` (par proximité au mesh original — même pont
-kdtree que step4/step5/step6), lisser/regrouper selon `merge_tolerance`,
-croiser avec `RegionDependencyGraph` pour construire le graphe de
-dépendances `(region, color)`, décider trous temporaires vs purge classique
-(`hole_cost_model` vs `purge_cost_model`), ordonnancer par earliest-deadline-first
-entrelacé avec l'ordre topologique géométrique de base.
+Étapes 1 à 7 stables et testées (61/61 tests). Démarrer
+`pipeline/step8_machine_toolpath.py` : consommer `PrintSchedule.passes`
+**dans l'ordre** (aucune logique d'ordonnancement à re-dériver, elle est
+gelée à l'étape 7), relever chaque segment `(layer_id, index)` du repère
+local 2D vers le repère machine global via `Layer.local_frame`
+(`step6._lift_to_3d` fait déjà la moitié du travail), calculer l'angle de
+plateau requis à partir de l'orientation locale du champ, lisser la série
+temporelle d'angles pour respecter `max_angular_velocity` /
+`max_angular_acceleration`, et garantir la continuité d'extrusion
+(rétractions explicites aux sauts).
