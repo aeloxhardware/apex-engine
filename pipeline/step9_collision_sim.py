@@ -58,6 +58,18 @@ class CollisionSimParams:
     # Taille de cellule de la grille spatiale des capsules imprimees, en
     # multiple de nozzle_diameter (voir _PrintedGeometryIndex).
     grid_cell_size_multiplier: float = 4.0
+    # Pas d'echantillonnage des ARETES du modele de tete (_surface_sample_points),
+    # en mm - DELIBEREMENT distinct de nozzle_diameter (largeur de buse,
+    # rayon des capsules imprimees : un concept different, la taille du
+    # CORDON, pas la taille de la TETE). Les deux etaient confondus a
+    # l'origine (limite #21) ; mesure concretement en executant main.py sur
+    # le modele de tete reel (aetheris-4.glb, aretes de plusieurs dizaines
+    # de mm) avec nozzle_diameter=0.4 par defaut : 17734 points de test par
+    # point de trajectoire echantillonne, simulation totale de l'ordre de
+    # la dizaine de minutes sur un modele trivial - inutilisable. Defaut
+    # choisi a l'echelle typique d'une tete d'impression (quelques mm),
+    # PAS a l'echelle d'un cordon d'extrusion.
+    toolhead_sample_spacing: float = 5.0
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +285,33 @@ def _point_to_segment_distance(point: np.ndarray, start: np.ndarray, end: np.nda
     return float(np.linalg.norm(point - closest))
 
 
+def _points_to_segment_distances(points: np.ndarray, start: np.ndarray, end: np.ndarray) -> np.ndarray:
+    """
+    Version vectorisee de _point_to_segment_distance : distance de CHAQUE
+    ligne de `points` (V,3) au segment [start,end] en une seule passe
+    numpy, au lieu d'une boucle Python par sommet.
+
+    Necessaire en pratique, pas seulement en theorie : avec ~1500
+    points de test par tete positionnee (voir toolhead_sample_spacing) et
+    plusieurs dizaines de capsules candidates par point de trajectoire
+    teste, la boucle Python pure (`for vertex in toolhead_vertices`)
+    domine largement le temps total de l'etape - mesure concretement en
+    profilant main.py sur un modele trivial (24 faces) avec le modele de
+    tete reel : plusieurs minutes pour quelques milliers de points de
+    trajectoire, alors que la meme operation vectorisee est de l'ordre de
+    la seconde. Le calcul lui-meme est inchange (meme formule que
+    _point_to_segment_distance, projection scalaire clampee), seulement
+    applique a tout le tableau de points a la fois.
+    """
+    segment = end - start
+    length_sq = float(np.dot(segment, segment))
+    if length_sq < 1e-18:
+        return np.linalg.norm(points - start, axis=1)
+    t = np.clip((points - start) @ segment / length_sq, 0.0, 1.0)
+    closest = start[None, :] + t[:, None] * segment[None, :]
+    return np.linalg.norm(points - closest, axis=1)
+
+
 def _check_printed_part(
     toolhead_vertices: np.ndarray, printed_index: _PrintedGeometryIndex, safety_margin: float
 ) -> Optional[float]:
@@ -290,10 +329,11 @@ def _check_printed_part(
     for segment in candidates:
         if not _aabb_overlaps(aabb, segment.aabb, safety_margin):
             continue
-        for vertex in toolhead_vertices:
-            distance = _point_to_segment_distance(vertex, segment.start, segment.end) - segment.radius
-            if distance < min_distance:
-                min_distance = distance
+        distances = _points_to_segment_distances(toolhead_vertices, segment.start, segment.end)
+        distances -= segment.radius
+        candidate_min = float(distances.min())
+        if candidate_min < min_distance:
+            min_distance = candidate_min
 
     if min_distance == np.inf or min_distance >= safety_margin:
         return None
@@ -423,10 +463,12 @@ def run(
     # Sommets + points le long des aretes, calcules UNE FOIS en repere local
     # (voir _surface_sample_points) : un obstacle fin peut traverser une face
     # sans passer pres d'aucun sommet, les sommets seuls manqueraient cette
-    # collision. Le pas d'echantillonnage suit nozzle_diameter (echelle
-    # pertinente : un obstacle plus fin que la buse elle-meme n'est pas un
-    # cas physique a couvrir ici).
-    toolhead_base_samples = _surface_sample_points(nozzle_model, machine_profile.nozzle_diameter)
+    # collision. Le pas d'echantillonnage suit `toolhead_sample_spacing`
+    # (echelle de la TETE, pas `nozzle_diameter` - echelle du CORDON, un
+    # concept different : confondre les deux produit des dizaines de
+    # milliers de points de test par point de trajectoire sur un modele de
+    # tete reel, voir CollisionSimParams.toolhead_sample_spacing).
+    toolhead_base_samples = _surface_sample_points(nozzle_model, params.toolhead_sample_spacing)
 
     sample_indices = _sample_point_indices(toolpath.points, params.path_sampling_step)
     printed_index = _PrintedGeometryIndex(

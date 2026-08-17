@@ -85,7 +85,9 @@ Liste de toutes les fonctionnalités discutées, au-delà du slicing plan classi
 ```
 slicer_engine/
 ├── CLAUDE.md                        # ce fichier
-├── main.py                          # PAS ENCORE ÉCRIT — orchestrateur, enchaîne les étapes
+├── main.py                          # FAIT — orchestrateur CLI, enchaîne step1 à step10
+├── scripts/
+│   └── generate_test_model.py       # FAIT — génère res/test_models/l_shape_overhang.stl (surplomb réel)
 ├── config/                          # PAS ENCORE ÉCRIT
 │   ├── params.py                    #   dataclasses de tous les paramètres globaux
 │   └── schema.py                    #   (de)sérialisation JSON <-> dataclasses, pont avec l'UI TS
@@ -117,7 +119,12 @@ slicer_engine/
 ├── file_io/                          # renommé depuis `io/` — collision avec le module
 │   │                                 #   standard Python `io` (voir limite #20)
 │   ├── mesh_loader.py                # FAIT — load_toolhead_mesh (GLB -> Trimesh mm, scene-space)
+│   ├── visualization_export.py       # FAIT — export_visualization_glb (scène GLB : mesh + couches + trajectoire)
 │   └── gcode_export.py               # PAS ENCORE ÉCRIT
+├── res/
+│   └── test_models/
+│       └── l_shape_overhang.stl      # FAIT — modèle de test avec surplomb réel (même géométrie que
+│                                      #   tests/test_step3_segmentation.py::l_shape_data)
 └── tests/
     ├── __init__.py
     ├── test_step2_overhang.py       # FAIT — 6 tests, tous passants et stables
@@ -133,9 +140,11 @@ slicer_engine/
 ```
 
 **État global : 116/116 tests passants** (step2 à step10 + core/geometry_utils.py).
-**Les 10 étapes du cœur algorithmique sont écrites, stables et testées.**
-Restent hors cœur : `main.py` (orchestrateur), `config/`, et
-`file_io/gcode_export.py` (export G-code final).
+**Les 10 étapes du cœur algorithmique sont écrites, stables et testées, et
+`main.py` les enchaîne bout en bout sur un fichier STL/3MF réel** (vérifié
+sur `res/test_models/l_shape_overhang.stl`, un modèle avec un vrai
+surplomb). Restent hors cœur : `config/` et `file_io/gcode_export.py`
+(export G-code final).
 
 **Environnement Python du projet** : venv local (`.venv/`, ignoré par git)
 sur **Python 3.14** — pas 3.12, qui a cessé de fonctionner sur cette
@@ -860,6 +869,50 @@ pour affichage/validation avant export G-code.
     doit être invariante par cette rotation — typiquement un obstacle porté
     par l'axe de rotation lui-même (`tests/test_step10_adjustment.py::_axis_straddling_toolhead`).
 
+26. **`nozzle_diameter` (largeur de buse) et le pas d'échantillonnage
+    géométrique du modèle de tête (limite #21) sont deux échelles
+    PHYSIQUEMENT DIFFÉRENTES, confondues à l'origine dans step9.**
+    `nozzle_diameter` décrit la taille du CORDON extrudé (0.4mm
+    typiquement) ; le pas d'échantillonnage des arêtes du modèle de tête
+    doit être à l'échelle de la TÊTE elle-même (plusieurs mm à quelques
+    dizaines de mm). Bug de performance réel, découvert en exécutant
+    `main.py` de bout en bout pour la première fois (jamais visible sur les
+    mesh synthétiques ~10mm des tests unitaires) : avec
+    `nozzle_diameter=0.4` comme pas d'échantillonnage sur le vrai modèle de
+    tête (`aetheris-4.glb`, arêtes de plusieurs dizaines de mm),
+    `_surface_sample_points` générait **17734 points de test par point de
+    trajectoire échantillonné** (mesuré), rendant la simulation totale
+    inutilisable même sur un modèle trivial. Corrigé par
+    `CollisionSimParams.toolhead_sample_spacing` (nouveau champ, défaut
+    5.0mm, découplé de `nozzle_diameter`) : **1540 points** avec ce défaut
+    sur le même modèle — un facteur ~11.5×, mesuré, pas estimé.
+
+27. **La boucle de distance point-capsule de `_check_printed_part` était en
+    pur Python (`for segment: for vertex`), un problème de performance
+    invisible sur les petits volumes de test unitaires mais dominant sur
+    une vraie trajectoire.** Avec ~1500 points d'échantillonnage de tête
+    (limite #26) et plusieurs dizaines de capsules candidates par point de
+    trajectoire testé, la boucle Python interprétée devenait le coût
+    dominant de l'étape entière. Corrigé par `_points_to_segment_distances`
+    (nouvelle fonction), qui vectorise le calcul sur TOUS les points de
+    test d'un candidat en une seule opération numpy au lieu d'une boucle
+    Python par sommet — même formule mathématique que
+    `_point_to_segment_distance` (conservée, toujours utilisée ponctuellement),
+    appliquée en bloc. Gain mesuré sur un cas synthétique de 1000 points de
+    trajectoire : le run ne terminait pas sous 139s de CPU (profilage tué
+    avant complétion) avant le fix, **10.86s** après. Sur le modèle de test
+    réel (`res/test_models/l_shape_overhang.stl`, 9391 points de trajectoire,
+    3482 échantillonnés par `path_sampling_step=2.0`), le débit mesuré
+    directement (pas estimé) est stable à **~15 points de trajectoire
+    testés par seconde**, sans dégradation observée jusqu'à ~2700 capsules
+    accumulées dans l'index — comportement linéaire confirmé par mesure,
+    pas supposé. À ce débit, step9 seul prend de l'ordre de quelques
+    minutes sur ce cas trivial (24 faces sources) : limite de performance
+    **connue et documentée**, pas un blocage — acceptable pour une
+    itération de visualisation, mais à garder en tête avant de traiter un
+    modèle nettement plus gros ou une trajectoire avec beaucoup plus de
+    points.
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
@@ -1141,6 +1194,43 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
   champ scalaire, limite #23) — seule la voie « réorientation » bénéficie
   de la re-vérification partielle.
 
+## Détail de `main.py` et `file_io/visualization_export.py`
+
+- `main.run_pipeline(mesh_path, params) -> PipelineResult` : relais pur
+  entre les 10 étapes, aucune logique métier propre. `PipelineParams` un
+  champ par étape (mêmes défauts que chaque `Params` déjà acté) ;
+  `PipelineResult` conserve TOUTES les sorties intermédiaires (pas
+  seulement la trajectoire finale), pour qu'un export ou un futur
+  appelant UI n'ait pas besoin de rejouer le pipeline pour retrouver une
+  sortie d'étape.
+- Dépendances multi-étapes respectées explicitement (pas seulement
+  chaînées séquentiellement) : step4/5/7 reçoivent `mesh_data`/`tet_mesh`
+  de step1 directement ; step8 consomme `colored_layers` (sortie de
+  step7), jamais les `layers` d'entrée de step7 ; step9/step10 partagent
+  la même instance de `MachineProfile` et de `CollisionSimParams`.
+- `resegmentation_hook` de l'étape 10 est laissé à `None` dans `main.py` —
+  l'implémenter réellement (re-jouer step3→step8 avec exclusion d'angles,
+  limite #23) reste un travail à part, pas fait ici. Sans hook, toute
+  collision non résolue par réorientation locale bascule directement en
+  `fallback_support`, un comportement déjà explicite et testé, pas un trou.
+- `_default_machine_profile()` charge `aetheris-4.glb` si présent (repli
+  sur `nozzle_model=None`, log, jamais un crash) — cinématique par défaut
+  = la machine actuelle documentée plus haut, un exemple d'usage parmi
+  d'autres (limite #18), pas la référence figée.
+- `file_io.visualization_export.export_visualization_glb(result, output_path)` :
+  assemble une scène GLB (mesh source semi-transparent + couches en
+  dégradé par ordre d'impression + trajectoire finale colorée par
+  extrusion + marqueurs rouges aux collisions non résolues), ne fait
+  AUCUN calcul de pipeline — relit uniquement ce que `PipelineResult`
+  contient déjà. Choisi en GLB pour cohérence avec le modèle de tête déjà
+  au même format, ouvrable dans n'importe quel visualiseur 3D classique.
+- Deux bugs de performance réels trouvés en exécutant `main.py` de bout
+  en bout pour la première fois sur le modèle de test (jamais visibles
+  sur les mesh synthétiques ~10mm des tests unitaires) — voir limites
+  #26 et #27 : le pas d'échantillonnage du modèle de tête confondu avec
+  `nozzle_diameter`, et une boucle de distance point-capsule non
+  vectorisée. Les deux corrigés dans `pipeline/step9_collision_sim.py`.
+
 ## Conventions de code à respecter
 
 - Chaque `pipeline/stepN_*.py` expose `run(input, params) -> output`, fonction pure,
@@ -1167,14 +1257,20 @@ famille de fonctions et de conventions génériques
 composition en ordre inverse de la liste) sans hypothèse figée sur le
 nombre d'axes de la machine réellement utilisée.
 
+`main.py` enchaîne maintenant step1→step10 sur un fichier STL/3MF réel
+(vérifié sur `res/test_models/l_shape_overhang.stl`, généré par
+`scripts/generate_test_model.py`), et `file_io/visualization_export.py`
+produit une scène GLB inspectable (mesh + couches + trajectoire) — voir
+« Détail de `main.py` et `file_io/visualization_export.py` » ci-dessus.
+
 Ce qui reste, hors cœur algorithmique :
 
-- **`main.py` (orchestrateur)** — enchaîner step1→step10. C'est lui, et lui
-  seul, qui doit fournir le `resegmentation_hook` de l'étape 10 (voir
-  limite #23) : il est le seul à détenir `mesh_data`, `tet_mesh`,
-  `overhang_map`, le graphe de régions, la `ColorMap` et les params des 7
-  étapes nécessaires pour re-jouer step3→step8 avec une contrainte d'angle
-  supplémentaire.
+- **Un `resegmentation_hook` réel pour l'étape 10** — `main.py` le laisse
+  à `None` pour l'instant (voir détail ci-dessus). L'implémenter
+  demanderait de re-jouer step3→step8 avec une contrainte d'angle
+  supplémentaire (limite #23) ; c'est `main.py`, seul détenteur de
+  `mesh_data`, `tet_mesh`, `overhang_map`, du graphe de régions, de la
+  `ColorMap` et des params des 7 étapes concernées, qui devra le fournir.
 - **`config/params.py` + `config/schema.py`** — centraliser les dataclasses
   de paramètres (aujourd'hui définies dans chaque `stepN_*.py`) et la
   (dé)sérialisation JSON, pont avec l'UI TypeScript. À faire sans casser
