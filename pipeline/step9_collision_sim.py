@@ -369,6 +369,56 @@ def _check_static_obstacle(
     return safety_margin - min_distance
 
 
+PLATFORM_RADIUS = 150.0      # mm, ordre de grandeur d'un plateau, faute de mieux fourni
+PLATFORM_HALF_HEIGHT = 0.5   # mm, moitie de l'epaisseur du disque (cylinder(height=1.0))
+
+
+def _check_platform_disc(
+    toolhead_vertices: np.ndarray,
+    platform_origin: Optional[np.ndarray],
+    safety_margin: float,
+) -> Optional[float]:
+    """
+    Penetration contre le plateau, calculee en FORME FERMEE (distance
+    point-disque vectorisee) plutot que par `ProximityQuery.on_surface` sur
+    un maillage de disque.
+
+    Meme raisonnement que la limite #27 (boucle point-capsule vectorisee) :
+    le plateau n'est pas une geometrie arbitraire recue de l'exterieur, c'est
+    une primitive que CE fichier synthetise lui-meme
+    (`_platform_mesh_at_angle`). Lui appliquer une requete de proximite
+    maillage generique fait payer le prix d'un cas general dont on n'a pas
+    besoin. Cout mesure sur le modele de tete reel (1540 points de test) :
+    53.02 ms par appel via `on_surface`, contre une fraction de milliseconde
+    ici - et cet appel a lieu une fois PAR CANDIDAT de reorientation a
+    l'etape 10 (jusqu'a 144 par point en collision), ou il representait 69%
+    du temps total mesure.
+
+    Precision : la forme fermee decrit le disque EXACT, la ou le maillage
+    etait un polygone inscrit a 32 cotes - la version analytique est donc
+    legerement plus grande pres du bord, et plus fidele a un vrai plateau
+    circulaire, jamais moins conservatrice.
+
+    Le disque est suppose d'axe Z et centre sur `platform_origin` (exactement
+    ce que construit `_platform_mesh_at_angle`, dont la geometrie ne depend
+    d'aucun angle - voir sa docstring).
+    """
+    if platform_origin is None:
+        return None
+
+    local = toolhead_vertices - np.asarray(platform_origin, dtype=float)
+    radial = np.hypot(local[:, 0], local[:, 1])
+    # Distance a un cylindre plein : ecart radial hors du rayon, ecart axial
+    # hors de la demi-epaisseur, combines - nulle a l'interieur (penetration).
+    dr = np.maximum(radial - PLATFORM_RADIUS, 0.0)
+    dz = np.maximum(np.abs(local[:, 2]) - PLATFORM_HALF_HEIGHT, 0.0)
+    min_distance = float(np.hypot(dr, dz).min())
+
+    if min_distance >= safety_margin:
+        return None
+    return safety_margin - min_distance
+
+
 def _platform_mesh_at_angle(
     machine_profile: MachineProfile, axis_angles: list[float]
 ) -> Optional[trimesh.Trimesh]:
@@ -384,8 +434,9 @@ def _platform_mesh_at_angle(
     if machine_profile.platform_origin is None or not machine_profile.rotation_axes:
         return None
 
-    radius = 150.0  # mm, ordre de grandeur d'un plateau, faute de mieux fourni
-    disc = trimesh.creation.cylinder(radius=radius, height=1.0, sections=32)
+    disc = trimesh.creation.cylinder(
+        radius=PLATFORM_RADIUS, height=PLATFORM_HALF_HEIGHT * 2.0, sections=32
+    )
     disc.apply_translation(np.asarray(machine_profile.platform_origin, dtype=float))
     return disc
 
@@ -416,8 +467,16 @@ def _evaluate_point(
             )
         )
 
-    platform_mesh = _platform_mesh_at_angle(machine_profile, point.axis_angles)
-    platform_penetration = _check_static_obstacle(toolhead_samples, platform_mesh, safety_margin)
+    # Forme fermee plutot que ProximityQuery sur un maillage de disque : le
+    # plateau est une primitive synthetisee ici meme, pas une geometrie
+    # arbitraire (voir _check_platform_disc). `_check_static_obstacle` reste
+    # la voie pour tout VRAI maillage d'obstacle (mandrin/mors le jour ou une
+    # geometrie sera fournie).
+    platform_penetration = None
+    if machine_profile.platform_origin is not None and machine_profile.rotation_axes:
+        platform_penetration = _check_platform_disc(
+            toolhead_samples, machine_profile.platform_origin, safety_margin
+        )
     if platform_penetration is not None:
         events.append(
             CollisionEvent(

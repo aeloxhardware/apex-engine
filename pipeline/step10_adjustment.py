@@ -133,7 +133,13 @@ def _collisions_at_points(
     if not point_indices:
         return []
 
-    samples = _surface_sample_points(nozzle_model, machine_profile.nozzle_diameter)
+    # toolhead_sample_spacing (echelle de la TETE), jamais nozzle_diameter
+    # (echelle du CORDON) - meme distinction que step9 (CLAUDE.md limite
+    # #26). Utiliser nozzle_diameter ici reproduirait exactement le meme
+    # blocage (17734 points de test par appel au lieu de ~1540, mesure
+    # concretement sur aetheris-4.glb), simplement deplace de l'etape 9 a
+    # l'etape 10 plutot qu'elimine.
+    samples = _surface_sample_points(nozzle_model, sim_params.toolhead_sample_spacing)
     printed_index = _PrintedGeometryIndex(
         machine_profile.nozzle_diameter, sim_params.grid_cell_size_multiplier
     )
@@ -209,12 +215,71 @@ def _with_angles(toolpath: ToolpathMachine, point_idx: int, angles: list[float])
     return ToolpathMachine(points=points)
 
 
+@dataclass
+class _ReorientationContext:
+    """
+    Etat partage entre TOUS les points traites par le niveau 1 (reorientation
+    locale) d'une meme iteration externe de `run()` - jamais reconstruit par
+    point ni par candidat.
+
+    Les echantillons de tete ne dependent que du modele (fixe pour toute la
+    boucle). L'index de matiere imprimee ne depend que de `position` (jamais
+    de `axis_angles`, voir `_collisions_at_points`) et grandit de facon
+    strictement monotone au fil de `problem_indices` traites en ordre
+    CROISSANT par `run()` - exactement le meme invariant que la croissance
+    de l'etape 9 (`_grow_printed_index_to` dans `step9_collision_sim.run`).
+
+    Sans cet etat partage, `_try_local_reorientation` reconstruisait son
+    propre index depuis 0 a CHAQUE point traite (jusqu'a 3588 fois sur la
+    trajectoire de test), chacun re-inserant toutes les capsules jusqu'a son
+    propre `point_idx` - mesure concretement : le taux d'appel chutait de
+    ~2.5 appels/s au debut a 0.39 appels/s au 200e appel (elapsed 512s),
+    une degradation croissante avec la position dans la trajectoire,
+    incompatible avec le cout lineaire vise.
+    """
+
+    toolhead_samples: Optional[np.ndarray]
+    printed_index: Optional[_PrintedGeometryIndex]
+    last_grown_idx: int = 0
+
+    def grow_to(self, points: list[ToolpathPoint], point_idx: int) -> None:
+        if self.printed_index is None:
+            return
+        self.last_grown_idx = _grow_printed_index_to(
+            self.printed_index, points, point_idx, self.last_grown_idx
+        )
+
+
+def _build_reorientation_context(
+    toolpath: ToolpathMachine, machine_profile: MachineProfile, sim_params: CollisionSimParams
+) -> _ReorientationContext:
+    """
+    Construit l'etat partage une seule fois par iteration externe de `run()`.
+    `last_grown_idx=0` : l'appelant doit parcourir les points en ordre
+    CROISSANT et appeler `grow_to` avant chaque test, jamais en desordre -
+    meme invariant "jamais en avance sur le point teste" que l'etape 9.
+    """
+    nozzle_model = machine_profile.nozzle_model
+    has_toolhead = isinstance(nozzle_model, trimesh.Trimesh) and len(nozzle_model.vertices) > 0
+    if not has_toolhead:
+        return _ReorientationContext(toolhead_samples=None, printed_index=None)
+
+    # toolhead_sample_spacing (echelle de la TETE), jamais nozzle_diameter
+    # (echelle du CORDON) - meme distinction que step9 (CLAUDE.md limite #26).
+    toolhead_samples = _surface_sample_points(nozzle_model, sim_params.toolhead_sample_spacing)
+    printed_index = _PrintedGeometryIndex(
+        machine_profile.nozzle_diameter, sim_params.grid_cell_size_multiplier
+    )
+    return _ReorientationContext(toolhead_samples=toolhead_samples, printed_index=printed_index)
+
+
 def _try_local_reorientation(
     toolpath: ToolpathMachine,
     point_idx: int,
     machine_profile: MachineProfile,
     sim_params: CollisionSimParams,
     params: Step10Params,
+    context: _ReorientationContext,
 ) -> Optional[list[float]]:
     """
     Cherche un jeu d'angles voisin qui elimine la collision au point
@@ -230,6 +295,12 @@ def _try_local_reorientation(
     - au-dela, le candidat reintroduirait un surplomb.
 
     Retourne les angles retenus, ou None si aucun candidat ne convient.
+
+    Performance : `context` (echantillons de tete + index de matiere
+    imprimee) est fourni par l'appelant, construit UNE SEULE FOIS par
+    iteration externe de `run()` et grossi de facon incrementale au fil des
+    points traites (voir `_ReorientationContext`) - jamais reconstruit ici,
+    ni par point ni par candidat.
     """
     axes = machine_profile.rotation_axes or []
     if not axes:
@@ -246,6 +317,12 @@ def _try_local_reorientation(
     cosines = np.clip(directions @ original_direction, -1.0, 1.0)
     deviations_deg = np.degrees(np.arccos(cosines))
 
+    has_toolhead = context.printed_index is not None
+    if has_toolhead:
+        context.grow_to(toolpath.points, point_idx)
+    toolhead_samples = context.toolhead_samples
+    printed_index = context.printed_index
+
     for candidate_idx in np.argsort(deviations_deg):
         if deviations_deg[candidate_idx] > params.max_direction_deviation_deg:
             break  # tries par ecart croissant : tout le reste depasse aussi le seuil
@@ -259,8 +336,14 @@ def _try_local_reorientation(
         ):
             continue
 
-        trial = _with_angles(toolpath, point_idx, candidate)
-        if not _collisions_at_points(trial, machine_profile, sim_params, [point_idx]):
+        if not has_toolhead:
+            return candidate  # aucun modele de tete : rien a re-verifier, meme garde que _collisions_at_points
+
+        candidate_point = replace(point, axis_angles=list(candidate))
+        events = _evaluate_point(
+            point_idx, toolhead_samples, candidate_point, machine_profile, printed_index, sim_params.safety_margin
+        )
+        if not events:
             return candidate
 
     return None
@@ -353,6 +436,11 @@ def run(
 
         full_recheck_needed = False
 
+        # Construit une seule fois par iteration externe, grossi ensuite de
+        # facon monotone au fil de `problem_indices` (deja trie CROISSANT
+        # ci-dessus) - voir _ReorientationContext.
+        reorientation_context = _build_reorientation_context(current, machine_profile, sim_params)
+
         for point_index in problem_indices:
             is_diagnostic_only = point_index in diagnostic_indices and not any(
                 event.point_index == point_index for event in pending_events
@@ -361,7 +449,7 @@ def run(
             # --- Niveau 1 : reorientation locale ------------------------------
             if not is_diagnostic_only:
                 new_angles = _try_local_reorientation(
-                    current, point_index, machine_profile, sim_params, params
+                    current, point_index, machine_profile, sim_params, params, reorientation_context
                 )
                 if new_angles is not None:
                     current = _with_angles(current, point_index, new_angles)

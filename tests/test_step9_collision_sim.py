@@ -312,10 +312,23 @@ def test_load_real_toolhead_glb_has_expected_extents():
     )
     mesh = load_toolhead_mesh(path)
 
+    # Le loader ramene le corps de la tete selon +Z machine (rotation +90 deg
+    # autour de X, voir mesh_loader.TOOLHEAD_BODY_TO_MACHINE_UP) : l'axe long
+    # de 77.15 mm est donc en Z apres chargement, pas en Y comme dans le
+    # fichier brut.
     extents = mesh.extents
     assert extents[0] == pytest.approx(76.0, abs=1.0)
-    assert extents[1] == pytest.approx(77.15, abs=1.0)
-    assert extents[2] == pytest.approx(35.0, abs=1.0)
+    assert extents[1] == pytest.approx(35.0, abs=1.0)
+    assert extents[2] == pytest.approx(77.15, abs=1.0)
 
     distances_to_origin = np.linalg.norm(mesh.vertices, axis=1)
     assert distances_to_origin.min() < 1.0  # la pointe (origine) doit etre quasi sur le maillage
+
+    # Propriete PHYSIQUE qui compte reellement, et que l'ancien ordre d'axes
+    # laissait passer : la tete doit se trouver entierement AU-DESSUS de sa
+    # pointe de buse. Sans la rotation du loader, le mesh descendait jusqu'a
+    # z=-18.9 (18.9 mm de tete sous le point de depot), ce qui faisait
+    # collisionner ~100% des points de trajectoire contre le plateau et la
+    # piece - voir mesh_loader.TOOLHEAD_BODY_TO_MACHINE_UP.
+    assert mesh.bounds[0][2] > -1.0, "le corps de la tete ne doit jamais pendre sous la buse"
+    assert mesh.bounds[1][2] == pytest.approx(77.3, abs=1.0)

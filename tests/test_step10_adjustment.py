@@ -27,6 +27,7 @@ from core.mesh_types import (
 from pipeline.step9_collision_sim import CollisionSimParams, run as collision_run
 from pipeline.step10_adjustment import (
     Step10Params,
+    _build_reorientation_context,
     _collisions_at_points,
     _direction_for_angles,
     _try_local_reorientation,
@@ -220,7 +221,8 @@ def test_try_local_reorientation_returns_none_when_no_angle_helps():
     toolpath = _wall_through_axis_toolpath(np.array([0.0, 0.0, 5.0]))
     assert collision_run(toolpath, machine, _sim_params()).has_collisions
 
-    assert _try_local_reorientation(toolpath, 2, machine, _sim_params(), Step10Params()) is None
+    context = _build_reorientation_context(toolpath, machine, _sim_params())
+    assert _try_local_reorientation(toolpath, 2, machine, _sim_params(), Step10Params(), context) is None
 
 
 def test_reorientation_rejected_when_it_would_break_overhang_threshold():
@@ -248,7 +250,8 @@ def test_reorientation_rejected_when_it_would_break_overhang_threshold():
     )
     params = Step10Params(max_direction_deviation_deg=0.0)
 
-    assert _try_local_reorientation(toolpath, 2, machine, _sim_params(), params) is None
+    context = _build_reorientation_context(toolpath, machine, _sim_params())
+    assert _try_local_reorientation(toolpath, 2, machine, _sim_params(), params, context) is None
 
 
 # ---------------------------------------------------------------------------
