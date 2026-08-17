@@ -22,8 +22,11 @@ Ce que ce fichier fait, dans l'ordre :
      geometriquement l'intersection avec le mesh original - pas besoin d'une
      deuxieme operation geometrique explicite (cf. Decision 3 du plan).
   4. Associe chaque couche aux regions de step3 qu'elle traverse, et
-     l'ordonne par rang topologique maximal (la contrainte la plus stricte
-     parmi les regions traversees, cf. Decision 4) puis par isovaleur.
+     l'ordonne par ISOVALEUR SEULE - jamais par rang topologique de region
+     (voir _compute_region_ranks et la docstring de run() plus bas pour la
+     raison : le rang, discret et assigne par tetraedre, n'est PAS toujours
+     coherent spatialement avec l'isovaleur, continue, pres d'une frontiere
+     de region).
 
 Sortie : liste ordonnee de Layer.
 """
@@ -362,6 +365,16 @@ def _compute_region_ranks(region_dependency_graph: RegionDependencyGraph) -> dic
     racine a rang 0. Accumulation en ordre topologique (meme outil -
     networkx - deja utilise par step3_segmentation pour la detection de
     cycle, nouvel usage ici).
+
+    NE SERT PLUS A TRIER LES COUCHES dans run() (voir sa docstring) : un
+    tetraedre proche d'une frontiere de region peut avoir une isovaleur
+    proche de celle de la region voisine sans que son rang topologique le
+    reflete, ce qui produisait un ordre d'impression aberrant (mesure
+    concretement sur un L a 2 regions - une couche de rang 0 isolee tres
+    haute en isovaleur se retrouvait triee avant tout le corps de la region
+    de rang 1, qui la precede pourtant physiquement). Conservee : fonction
+    pure, testee independamment, utile a un futur besoin qui raisonnerait
+    reellement sur l'ordre des regions (pas les couches elles-memes).
     """
     graph = nx.DiGraph()
     graph.add_nodes_from(region_dependency_graph.regions.keys())
@@ -431,7 +444,24 @@ def run(
 
     Returns:
         Liste ordonnee de Layer (id reassigne selon l'ordre d'impression
-        final : rang topologique des regions traversees, puis isovaleur).
+        final : ISOVALEUR SEULE, jamais le rang topologique des regions
+        traversees. Le champ scalaire est resolu globalement (FEM,
+        lissage laplacien) et son isovaleur encode deja par construction
+        la progression spatiale coherente de l'ancrage plateau vers
+        l'exterieur - un tetraedre proche d'une frontiere de region peut
+        legitimement avoir une isovaleur proche de celle de la region
+        voisine (continuite du lissage), sans que cela remette en cause
+        l'ordre physique reel. Trier par rang d'abord produisait un ordre
+        d'impression aberrant : une couche de rang 0 isolee tres haute en
+        isovaleur (donc physiquement situee pres du sommet du bras) se
+        retrouvait triee AVANT tout le corps de la region de rang 1 (le
+        bras lui-meme), qui la precede pourtant physiquement - mesure
+        concretement sur res/test_models/l_shape_overhang.stl une fois
+        step3 corrige pour scinder base/bras en 2 regions reelles (voir
+        CLAUDE.md). `pipeline/step7_scheduling.py` consomme cette liste
+        via `enumerate(layers)` comme ordre d'impression reel - ce n'est
+        pas qu'un souci d'affichage, un mauvais ordre ici casse
+        l'ordonnancement en aval.
 
     Raises:
         LayerExtractionError: si le champ n'a pas de gradient ou est
@@ -444,7 +474,6 @@ def run(
     tet_max = tet_values_per_tet.max(axis=1)
 
     tet_regions = _map_tets_to_regions(tet_mesh, mesh_data, region_dependency_graph)
-    region_ranks = _compute_region_ranks(region_dependency_graph)
     volumes = _tet_volumes(tet_mesh)
 
     scale = float(np.ptp(tet_mesh.tet_vertices, axis=0).max()) or 1.0
@@ -473,12 +502,9 @@ def run(
 
         raw_layers.append((float(isovalue), contours, region_ids, local_frame))
 
-    def _sort_key(entry: tuple) -> tuple[int, float]:
-        isovalue, _contours, region_ids, _frame = entry
-        rank = max((region_ranks.get(r, 0) for r in region_ids), default=0)
-        return (rank, isovalue)
-
-    raw_layers.sort(key=_sort_key)
+    # Isovaleur SEULE - voir la docstring de run() pour pourquoi le rang
+    # topologique de region ne doit plus intervenir ici.
+    raw_layers.sort(key=lambda entry: entry[0])
 
     return [
         Layer(

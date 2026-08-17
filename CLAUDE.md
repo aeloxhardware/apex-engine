@@ -1017,6 +1017,55 @@ pour affichage/validation avant export G-code.
     ce fix — mais à garder à l'esprit si la qualité d'orientation du bras
     doit être affinée plus tard (densité de grille IK, `ik_refine_step_multiplier`).
 
+33. **Un tri de couches par « rang topologique de région puis isovaleur »
+    (au lieu d'isovaleur seule) produit un ordre d'impression physiquement
+    aberrant dès qu'une région de rang faible possède un fragment
+    géométriquement voisin d'une région de rang élevé.** Découvert en
+    inspectant visuellement `out_test.glb` régénéré après le fix de la
+    limite #31 (scission base/bras réelle) : de longs trajets à vide en
+    éventail au niveau du coude. Diagnostic en 2 temps, la première
+    hypothèse formulée puis invalidée par mesure (pas supposée) :
+    - Hypothèse initiale : incohérence entre step4 (`nearest_face_per_tet`)
+      et step5 (`_map_tets_to_regions`), deux mappings tétraèdre→région
+      indépendants basés sur le même KDTree. **Invalidée par comparaison
+      directe** (`np.array_equal` sur les deux mappings) : les deux
+      fichiers produisent EXACTEMENT le même résultat. Les 57 tétraèdres
+      incriminés (18,6 % du volume, jonction base/coude) sont bien et
+      correctement classés région "base" (verticale) par proximité de
+      surface — leur valeur de champ élevée (9,0-11,0, proche de celle du
+      bras voisin) est un effet parfaitement normal du lissage laplacien
+      global (continuité spatiale), pas une erreur de classification.
+    - Cause réelle : `pipeline/step5_layers.py::run` triait `raw_layers`
+      par `(rang_topologique_max_des_régions_traversées, isovaleur)`
+      (`_sort_key`, retiré). Avec une région "base" (rang 0) qui possède un
+      petit fragment déconnecté à isovaleur élevée (le sommet du coude, vu
+      depuis la direction verticale de la base) et une région "bras"
+      (rang 1) qui couvre le même volume physique à isovaleur intermédiaire,
+      **toute couche touchant uniquement la région de rang 0 était triée
+      avant TOUTE couche touchant la région de rang 1**, sans égard à la
+      position physique réelle. Mesuré : isovaleur sautant de 4,09 (index
+      39, région 1) à 10,5 (index 40, région 1 encore) puis retombant à
+      4,20 (index 48, régions 0+1) — deux passages sur la même plage
+      4,2-10,7, la seconde fois seulement.
+    - Fix : tri par **isovaleur seule** (`raw_layers.sort(key=lambda e: e[0])`).
+      Justification : le champ scalaire est résolu globalement (FEM), son
+      isovaleur encode déjà par construction la progression spatiale
+      cohérente — le rang topologique de région reste correct pour son
+      usage d'origine (dépendances physiques entre régions dans
+      `RegionDependencyGraph`), mais n'a pas vocation à réordonner des
+      couches déjà cohérentes entre elles par leur isovaleur.
+      `_compute_region_ranks` conservée (fonction pure, testée), simplement
+      plus appelée pour trier. `pipeline/step7_scheduling.py` consomme
+      `layers` via `enumerate(layers)` comme ordre d'impression réel — ce
+      n'était pas qu'un défaut d'affichage GLB, un mauvais tri ici cassait
+      l'ordonnancement en aval.
+    - Piège pour les fixtures de test : `tests/test_step5_layers.py::l_shape_data`
+      utilise `SegmentationParams()` par défaut (`direction_deviation_weight=0.0`),
+      donc ne scinde PAS la pièce — elle n'a jamais exercé ce cas, avant
+      comme après ce fix. Nouvelle fixture dédiée
+      `l_shape_split_data` (même géométrie, `direction_deviation_weight=0.2`
+      explicite) pour réellement tester le scénario à 2 régions.
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)

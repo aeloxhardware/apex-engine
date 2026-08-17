@@ -37,7 +37,10 @@ from pipeline.step5_layers import (
 # ---------------------------------------------------------------------------
 
 def _pipeline_data_from_trimesh(
-    mesh: trimesh.Trimesh, resolution: float = 1.5, platform_z: float = -5.0
+    mesh: trimesh.Trimesh,
+    resolution: float = 1.5,
+    platform_z: float = -5.0,
+    segmentation_params: SegmentationParams | None = None,
 ):
     import tempfile
     import os
@@ -51,11 +54,9 @@ def _pipeline_data_from_trimesh(
         os.unlink(path)
 
     overhang_map = overhang_run(mesh_data, OverhangParams(overhang_angle_threshold_deg=45.0))
-    regions = segmentation_run(
-        mesh_data,
-        overhang_map,
-        SegmentationParams(platform_z=platform_z, platform_contact_tolerance=0.5),
-    )
+    if segmentation_params is None:
+        segmentation_params = SegmentationParams(platform_z=platform_z, platform_contact_tolerance=0.5)
+    regions = segmentation_run(mesh_data, overhang_map, segmentation_params)
     field = field_run(tet_mesh, mesh_data, overhang_map, regions, [], FieldSolverParams())
     return mesh_data, tet_mesh, overhang_map, regions, field
 
@@ -76,17 +77,49 @@ def hollow_box_data():
     return _pipeline_data_from_trimesh(hollow, resolution=1.5, platform_z=-5.0)
 
 
-@pytest.fixture
-def l_shape_data():
-    """Forme en L : au moins une couche doit traverser 2 regions."""
+def _l_shape_mesh() -> trimesh.Trimesh:
     vertical = trimesh.creation.box(extents=[4, 4, 20])
     vertical.apply_translation([0, 0, 10])
 
     horizontal = trimesh.creation.box(extents=[20, 4, 4])
     horizontal.apply_translation([8, 0, 20])
 
-    combined = vertical.union(horizontal, engine="manifold")
-    return _pipeline_data_from_trimesh(combined, resolution=2.0, platform_z=0.0)
+    return vertical.union(horizontal, engine="manifold")
+
+
+@pytest.fixture
+def l_shape_data():
+    """
+    Forme en L : au moins une couche doit traverser 2 regions.
+
+    Segmentation aux parametres PAR DEFAUT de SegmentationParams
+    (direction_deviation_weight=0.0, desactive) : cette fixture ne scinde
+    PAS la piece en 2 regions separees (une seule region couvre toute la
+    piece, comme avant le fix de step3 documente dans CLAUDE.md) - elle
+    n'exerce donc jamais le cas d'ordre aberrant traite par le fix de
+    step5 ci-dessous. Voir `l_shape_split_data` pour ce cas.
+    """
+    return _pipeline_data_from_trimesh(_l_shape_mesh(), resolution=2.0, platform_z=0.0)
+
+
+@pytest.fixture
+def l_shape_split_data():
+    """
+    Meme geometrie que l_shape_data, mais avec direction_deviation_weight
+    actif (meme valeur calibree que main.py/PipelineParams, voir CLAUDE.md
+    limites #31/#32) : produit reellement 2 regions separees (base
+    verticale + bras incline), le cas qui exerce le fix de step5 (tri par
+    isovaleur seule, pas par rang topologique de region).
+    """
+    return _pipeline_data_from_trimesh(
+        _l_shape_mesh(),
+        resolution=2.0,
+        segmentation_params=SegmentationParams(
+            platform_z=0.0,
+            platform_contact_tolerance=0.5,
+            direction_deviation_weight=0.2,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -252,27 +285,39 @@ def test_l_shape_layer_spans_multiple_regions(l_shape_data):
         assert len(layer.region_ids) >= 1, f"Couche {layer.id} devrait etre associee a au moins une region"
 
 
-def test_l_shape_layers_have_valid_ordering(l_shape_data):
+def test_l_shape_layers_ordered_by_isovalue_not_region_rank(l_shape_split_data):
     """
-    L'ordre final des couches ne doit jamais violer le rang topologique :
-    une couche de rang effectif strictement inferieur ne doit jamais
-    apparaitre apres une couche de rang superieur dans la liste retournee.
+    L'ordre final des couches doit suivre l'ISOVALEUR SEULE, jamais le rang
+    topologique de region - voir la docstring de step5_layers.run() pour le
+    diagnostic complet.
+
+    Utilise l_shape_split_data (direction_deviation_weight actif, 2 regions
+    reelles - contrairement a l_shape_data ci-dessus, qui ne scinde pas et
+    n'exerce donc jamais ce cas). Avant ce fix, cette meme fixture
+    produisait un ordre non-monotone en isovaleur : une couche de rang 0
+    (region "base", verticale) tres haute en isovaleur (proche du sommet du
+    bras) se retrouvait triee avant tout le corps de la region de rang 1
+    (le bras), qui la precede pourtant physiquement - mesure concretement
+    sur res/test_models/l_shape_overhang.stl (sauts d'isovaleur ~4.1 -> 10.5
+    -> 4.2 dans colored_layers, produisant un trajet a vide en eventail
+    visible sur out_test.glb).
     """
-    mesh_data, tet_mesh, overhang_map, regions, field = l_shape_data
+    mesh_data, tet_mesh, overhang_map, regions, field = l_shape_split_data
     params = LayerParams(layer_height_base=1.0)
 
-    from pipeline.step5_layers import _compute_region_ranks
+    assert len(regions.regions) > 1, (
+        "fixture invalide : l_shape_split_data devrait produire plusieurs "
+        "regions (sinon ce test n'exerce pas le cas vise)"
+    )
 
-    ranks = _compute_region_ranks(regions)
     layers = layers_run(tet_mesh, mesh_data, field, regions, params)
-    assert len(layers) > 0
+    assert len(layers) > 1
 
-    effective_ranks = [
-        max((ranks.get(r, 0) for r in layer.region_ids), default=0) for layer in layers
-    ]
-    assert all(a <= b for a, b in zip(effective_ranks, effective_ranks[1:])), (
-        f"Les rangs effectifs des couches devraient etre non-decroissants dans "
-        f"l'ordre retourne, obtenu: {effective_ranks}"
+    isovalues = [layer.isovalue for layer in layers]
+    assert all(a <= b for a, b in zip(isovalues, isovalues[1:])), (
+        f"L'isovaleur des couches devrait etre non-decroissante dans l'ordre "
+        f"retourne (ordre = progression spatiale reelle du champ), obtenu: "
+        f"{[round(v, 2) for v in isovalues]}"
     )
 
 
