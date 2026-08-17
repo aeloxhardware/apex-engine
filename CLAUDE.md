@@ -100,7 +100,7 @@ slicer_engine/
 │   ├── step6_toolpath2d.py          # FAIT — remplissage 2D par couche (8 tests)
 │   ├── step7_scheduling.py          # FAIT — couleur + ordonnancement trous/purges (19 tests)
 │   ├── step8_machine_toolpath.py    # FAIT — resolution IK generique N-axes (16 tests)
-│   ├── step9_collision_sim.py       # PAS ENCORE ÉCRIT
+│   ├── step9_collision_sim.py       # FAIT — collision incrementale (capsules), N-axes (18 tests)
 │   └── step10_adjustment.py         # PAS ENCORE ÉCRIT
 ├── core/
 │   ├── __init__.py
@@ -114,9 +114,10 @@ slicer_engine/
 │   └── constraints.py               # FAIT — registre extensible d'assembleurs de contraintes
 │                                     #   utilisateur (ATTACH_POINT/AESTHETIC/STRUCTURAL), point
 │                                     #   d'extension pour tout nouveau type sans toucher step4
-├── io/                               # PAS ENCORE ÉCRIT
-│   ├── mesh_loader.py
-│   └── gcode_export.py
+├── file_io/                          # renommé depuis `io/` — collision avec le module
+│   │                                 #   standard Python `io` (voir limite #20)
+│   ├── mesh_loader.py                # FAIT — load_toolhead_mesh (GLB -> Trimesh mm, scene-space)
+│   └── gcode_export.py               # PAS ENCORE ÉCRIT
 └── tests/
     ├── __init__.py
     ├── test_step2_overhang.py       # FAIT — 6 tests, tous passants et stables
@@ -126,11 +127,12 @@ slicer_engine/
     ├── test_step6_toolpath2d.py     # FAIT — 8 tests
     ├── test_step7_scheduling.py     # FAIT — 19 tests
     ├── test_geometry_utils.py       # FAIT — 6 tests (composed_rotation_directions)
-    └── test_step8_machine_toolpath.py  # FAIT — 16 tests
+    ├── test_step8_machine_toolpath.py  # FAIT — 16 tests
+    └── test_step9_collision_sim.py  # FAIT — 18 tests
 ```
 
-**État global : 83/83 tests passants** (step2 à step8 + core/geometry_utils.py).
-Étapes 1 à 8 du pipeline stables et testées ; step9 (simulation de
+**État global : 101/101 tests passants** (step2 à step9 + core/geometry_utils.py).
+Étapes 1 à 9 du pipeline stables et testées ; step10 (ajustement en cas de
 collision) est la prochaine à écrire.
 
 **Environnement Python du projet** : venv local (`.venv/`, ignoré par git)
@@ -451,25 +453,50 @@ re-dériver la logique d'ordonnancement.
 
 ## Étape 9 — Simulation de collision avec le modèle 3D de la tête
 
-**Ce que le code fait précisément :**
-- Charge `MachineProfile.nozzle_model` (mesh de la tête complète : buse + porte-buse + partie basse du carriage, dans son repère local outil).
-- Pour chaque point échantillonné de `ToolpathMachine` (pas = `path_sampling_step`) :
-  - Positionne/oriente une copie transformée de `nozzle_model` selon la position + rotation courante de la trajectoire.
-  - Teste l'intersection de ce mesh positionné contre : (a) le mesh de la pièce **déjà imprimée jusqu'à ce point** (pas le mesh final complet — état incrémental), (b) le mandrin/mors de la machine, (c) le plateau lui-même selon son angle courant.
-  - Teste avec une marge `safety_margin` (dilate légèrement le mesh de la tête ou réduit la distance seuil d'intersection).
-- Chaque collision détectée est enregistrée avec : point de trajectoire concerné, type d'obstacle touché, profondeur de pénétration.
+**Ce que le code fait précisément (`pipeline/step9_collision_sim.py`, FAIT) :**
+- `MachineProfile.nozzle_model` doit déjà être un `trimesh.Trimesh` chargé
+  (ex: `file_io.mesh_loader.load_toolhead_mesh`) — step9 ne charge rien
+  lui-même. Absent/invalide : `CollisionReport(nozzle_model_checked=False)`,
+  jamais d'exception.
+- Échantillonne `ToolpathMachine.points` selon `path_sampling_step`
+  (distance cumulée, pas un point sur N).
+- Pour chaque point échantillonné, positionne une copie des points de test
+  du modèle (sommets **et** points le long des arêtes, voir plus bas)
+  selon `position` + `axis_angles`, avec la MÊME convention de composition
+  N-axes que step3/step7/step8 (rotations en ordre inverse de la liste,
+  translation après) — jamais une nouvelle logique de rotation.
+- Fait grandir un index spatial de la matière déjà imprimée **au fur et à
+  mesure**, sous forme de capsules (segment + rayon `nozzle_diameter/2`),
+  jamais une union booléenne (coût prohibitif sur plusieurs milliers de
+  points). Une capsule n'est jamais ajoutée en avance sur le point testé,
+  et le cordon en cours de dépôt lui-même est exclu (la buse est par
+  définition confondue avec le cordon qu'elle vient de déposer — sans
+  cette exclusion, chaque point en extrusion se signalerait comme collision
+  contre sa propre matière, faux positif structurel mesuré concrètement).
+- Teste contre cet index (distance point-capsule, formule fermée) et contre
+  le plateau (`ProximityQuery`, jamais `mesh_data.kdtree` — limite #15),
+  avec un broad-phase AABB commun avant tout calcul de distance précis.
+- Le mandrin/mors n'a aucune géométrie disponible à ce stade : jamais testé
+  silencieusement — `CollisionReport.chuck_checked` reste `False`, signal
+  explicite et structuré plutôt qu'un skip invisible.
 
-**Sortie :** `CollisionReport[]` (liste de collisions, vide si aucune).
+**Sortie :** `CollisionReport` — `events: list[CollisionEvent]` (point
+concerné, type d'obstacle, profondeur de pénétration), plus
+`chuck_checked`/`nozzle_model_checked` (booléens explicites, jamais un
+silence sur ce qui n'a pas été vérifié).
 
 
 ### Modèle 3D de tête d'impression reçu (`res/3d/toolheads/`)
 
 Un premier modèle réel a été reçu pour `MachineProfile.nozzle_model`,
-destiné à l'étape 9 ci-dessus. Cette section documente uniquement le
-FICHIER reçu (emplacement, format, convention de repère) — **aucun code
-n'existe encore pour le charger dans le pipeline** : ni `io/mesh_loader.py`
-(toujours "PAS ENCORE ÉCRIT"), ni branchement dans `MachineProfile.nozzle_model`
-(le champ existe déjà, typé `Any` génériquement, mais reste non alimenté).
+utilisé par l'étape 9 ci-dessus. Chargement via
+`file_io/mesh_loader.load_toolhead_mesh(path)` (FAIT) : `Scene` GLB ->
+`Trimesh` unique en espace scène (`scene.to_geometry()`), conversion m -> mm
+(×1000) — les deux pièges documentés ci-dessous sont gérés à l'intérieur de
+cette fonction, aucun appelant n'a besoin de les reproduire. step9 ne charge
+pas lui-même le fichier (ne connaît pas le système de fichiers) : c'est
+l'appelant de `pipeline/step9_collision_sim.run()` qui doit peupler
+`MachineProfile.nozzle_model` via ce loader avant l'appel.
 
 - **Emplacement** : `res/3d/toolheads/aetheris-4/aetheris-4.glb` — un
   sous-dossier par modèle de tête (convention pour accueillir plusieurs
@@ -488,7 +515,9 @@ n'existe encore pour le charger dans le pipeline** : ni `io/mesh_loader.py`
   lire les sommets bruts sans appliquer la transformation de nœud** :
   utiliser `scene.dump(concatenate=True)` (ou `scene.to_geometry()`) pour
   obtenir directement un seul `Trimesh` déjà exprimé dans l'espace de la
-  scène, plutôt que de reconstruire la transformation à la main.
+  scène, plutôt que de reconstruire la transformation à la main
+  (`scene.dump(concatenate=True)` est dépréciée depuis avril 2025 — le
+  loader utilise `scene.to_geometry()`).
 - **Unité : mètres dans le fichier source** (la spec glTF impose le mètre
   comme unité de base ; confirmé sur ce fichier, aucune extension
   déclarant une unité alternative). **Conversion ×1000 obligatoire** vers
@@ -498,15 +527,10 @@ n'existe encore pour le charger dans le pipeline** : ni `io/mesh_loader.py`
   parties du système). Extentes résultantes après transform de scène et
   conversion : environ 76 × 77 × 35 mm.
 - **Non étanche (`is_watertight=False`), accepté tel quel — pas de
-  réparation nécessaire.** L'usage prévu à l'étape 9 est un test
-  d'**intersection** entre le mesh de la tête positionné et d'autres mesh
-  (pièce imprimée incrémentale, mandrin/mors, plateau), via
-  `intersects_location` ou équivalent (même famille d'opération déjà
-  utilisée par `step7_scheduling._blocking_layer_along_ray` sur
-  `mesh_data.bvh`) — une intersection surface-surface ne requiert pas
-  l'étanchéité. Seule une opération de volume/inclusion (`contains()`,
-  volume signé) l'exigerait, et ce n'est pas l'opération dont l'étape 9 a
-  besoin pour détecter une collision buse/pièce.
+  réparation nécessaire.** Confirmé par l'implémentation de l'étape 9 :
+  la détection ne teste jamais l'inclusion/le volume, seulement des
+  distances (point-capsule pour la pièce imprimée, `ProximityQuery` pour
+  le plateau), aucune des deux n'exige l'étanchéité.
 - **Convention de repère du modèle (à respecter par l'étape 9 lors du
   positionnement/orientation de `nozzle_model` le long de la trajectoire)** :
   - **Origine** = point de dépôt de matière (pointe de la buse) — vérifié
@@ -741,6 +765,35 @@ n'existe encore pour le charger dans le pipeline** : ni `io/mesh_loader.py`
     géométriquement : un point exactement centré ne contraint par
     construction aucune orientation de matière réelle.
 
+20. **Le dossier `io/` du projet entre en conflit avec le module standard
+    Python `io` (builtin/frozen).** `from io.mesh_loader import ...` échoue
+    avec `ModuleNotFoundError: 'io' is not a package` — Python résout
+    `io` vers le module standard avant de considérer un package local du
+    même nom, quel que soit l'ordre de `sys.path`. Détecté concrètement en
+    écrivant l'étape 9 (premier consommateur réel du module). Renommé en
+    **`file_io/`** — tous les imports doivent utiliser `file_io.mesh_loader`,
+    `file_io.gcode_export`, jamais `io.*`.
+
+21. **Un mesh de tête positionné testé uniquement par ses SOMMETS peut
+    manquer une collision réelle.** Un obstacle fin (ex: un mur imprimé)
+    peut traverser une FACE du mesh sans passer près d'aucun sommet — faux
+    négatif mesuré concrètement en écrivant l'étape 9 (une boîte de test
+    traversée en son milieu par un mur n'était détectée par aucun de ses 8
+    sommets, tous à plusieurs mm du mur). `step9_collision_sim._surface_sample_points`
+    ajoute des points échantillonnés le long de chaque ARÊTE du mesh
+    (pas ~`nozzle_diameter`), pas seulement ses sommets — suffisant pour un
+    mesh de tête de taille modeste (aetheris-4.glb : ~377 sommets, ~1000
+    arêtes), sans recourir à un calcul point-triangle plus coûteux.
+
+22. **La buse est par construction confondue avec le cordon qu'elle vient
+    de déposer.** Tester un point en extrusion contre la matière imprimée
+    "jusqu'à ce point INCLUS" déclenche une collision à chaque point en
+    extrusion (distance quasi nulle à son propre cordon) — faux positif
+    structurel, pas un cas limite rare. `step9_collision_sim._grow_printed_index_to`
+    exclut la capsule qui se termine AU point testé ; elle ne devient une
+    collision possible qu'au(x) point(s) suivant(s), une fois que la buse
+    s'en est réellement éloignée.
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
@@ -779,7 +832,7 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
   exactement 2 DOF nommés "plateau"/"tête" — hypothèse invalidée par la
   généralisation à N axes composés, limite #18. La traduction vers une
   commande firmware précise (X/Y/Z/B) est délibérément hors de ce type,
-  reportée à un futur `io/gcode_export.py`), `Step8Diagnostic`
+  reportée à un futur `file_io/gcode_export.py`), `Step8Diagnostic`
   (**donnée pure** — position, layer_id, segment_index, erreur angulaire
   résiduelle en degrés — signalant une orientation désirée inatteignable
   dans les plages d'axes disponibles ; l'étape 8 ne lève JAMAIS d'exception
@@ -948,7 +1001,45 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 - `ToolpathPoint.axis_angles` est la seule sortie de step8 — délibérément
   agnostique de tout firmware. La traduction vers une commande machine
   précise (ordre X/Y/Z/B, noms d'axes) est repoussée à un futur
-  `io/gcode_export.py`, pas codée ici.
+  `file_io/gcode_export.py`, pas codée ici.
+
+## Détail de `pipeline/step9_collision_sim.py`
+
+- `run(toolpath, machine_profile, params) -> CollisionReport`. Ne charge
+  jamais `nozzle_model` lui-même (pas de dépendance au système de
+  fichiers) — l'appelant doit le peupler au préalable, typiquement via
+  `file_io.mesh_loader.load_toolhead_mesh`.
+- `_positioned_toolhead_vertices` : même convention de composition N-axes
+  que `composed_rotation_angles_and_directions`/`step8._axis_chain_world_lines`
+  (rotations en ordre inverse de la liste, translation après) — appliquée
+  ici à un tableau de sommets complet plutôt qu'à un seul vecteur
+  direction, mais sans inventer de nouvelle convention.
+- `_surface_sample_points` : sommets **+** points échantillonnés le long
+  des arêtes (limite #21) — jamais les sommets seuls, sous peine de
+  manquer une collision avec un obstacle fin traversant une face.
+- `_PrintedGeometryIndex`/`_grow_printed_index_to` : capsules (segment +
+  rayon), jamais une union booléenne (coût prohibitif sur plusieurs
+  milliers de points). Grille spatiale maison (dict cellule -> indices),
+  insertion O(1), pas de reconstruction périodique. Croissance strictement
+  incrémentale, jamais en avance sur le point testé, et le cordon en cours
+  de dépôt est explicitement exclu (limite #22).
+- `_check_printed_part` (distance point-segment fermée, sans bibliothèque)
+  vs `_check_static_obstacle` (`ProximityQuery`, jamais `mesh_data.kdtree`
+  — limite #15) : deux méthodes de distance pour deux natures d'obstacle
+  (primitif capsule vs mesh réel), un même seuil `safety_margin`. Broad-phase
+  AABB commun aux deux avant tout calcul précis.
+- `_platform_mesh_at_angle` : approxime le plateau par un disque (aucune
+  géométrie réelle fournie à ce stade, contrairement à `nozzle_model`) ;
+  retourne `None` si `platform_origin`/`rotation_axes` sont absents — le
+  test est alors simplement sauté, pas de faux positif ni d'exception.
+- Le mandrin/mors n'a délibérément **pas** de nouveau champ dans
+  `MachineProfile` (aucune géométrie reçue, contrairement au modèle de
+  tête) — `CollisionReport.chuck_checked` reste `False` en toutes
+  circonstances, signal explicite plutôt qu'un champ spéculatif ou un skip
+  silencieux.
+- Aucune nouvelle dépendance (`python-fcl`/`CollisionManager` écartés) :
+  AABB (numpy) + distance point-segment (formule fermée) + `ProximityQuery`
+  (déjà utilisé par step7) couvrent le besoin.
 
 ---
 
@@ -969,24 +1060,30 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 
 ## Prochaine étape
 
-Étapes 1 à 8 stables et testées (83/83 tests). `MachineProfile` décrit une
+Étapes 1 à 9 stables et testées (101/101 tests). `MachineProfile` décrit une
 cinématique générique à N axes de rotation composés (`rotation_axes:
-list[RotationAxisSpec]`, voir limites #18/#19) ; step3, step7 et step8
-dispatchent tous sur la même famille de fonctions génériques
-(`composed_rotation_directions`/`composed_rotation_angles_and_directions`)
-sans hypothèse figée sur le nombre d'axes de la machine réellement
-utilisée. step8 résout position/orientation désirée en angles concrets par
-recherche + affinement local (pas de cinématique inverse analytique,
-généralisable à N axes sans jacobien par-N) — voir « Détail de
-`pipeline/step8_machine_toolpath.py` » ci-dessus.
+list[RotationAxisSpec]`, voir limites #18/#19) ; step3, step7, step8 et step9
+dispatchent tous sur la même famille de fonctions/conventions génériques
+(`composed_rotation_directions`/`composed_rotation_angles_and_directions`,
+`_positioned_toolhead_vertices` pour step9) sans hypothèse figée sur le
+nombre d'axes de la machine réellement utilisée. step9 simule la collision
+de `MachineProfile.nozzle_model` (modèle réel chargé via
+`file_io.mesh_loader.load_toolhead_mesh`) contre une géométrie imprimée
+reconstruite incrémentalement (capsules, jamais une union booléenne) et le
+plateau — voir « Détail de `pipeline/step9_collision_sim.py` » ci-dessus,
+et les limites #20 (renommage `io/` -> `file_io/`), #21 (échantillonnage
+des arêtes, pas seulement les sommets) et #22 (exclusion du cordon en
+cours de dépôt) pour les bugs réels trouvés et corrigés pendant son
+écriture.
 
-`pipeline/step9_collision_sim.py` est la prochaine étape non écrite :
-simulation de collision du modèle 3D de la tête (`MachineProfile.nozzle_model`)
-contre la pièce déjà imprimée (état incrémental, pas le mesh final complet),
-le mandrin/mors, et le plateau à son angle courant, en consommant
-`ToolpathMachine.points` (positions + `axis_angles`) produit par l'étape 8.
-Un plan dédié à step9 doit encore trancher : comment reconstruire la
-géométrie « déjà imprimée jusqu'à ce point » de façon incrémentale sans
-recalculer un mesh complet à chaque échantillon, et comment positionner
-`nozzle_model` à partir de `axis_angles` (générique, N axes) plutôt que
-d'une paire angle plateau/tête figée en dur.
+`pipeline/step10_adjustment.py` est la prochaine étape non écrite : boucle
+d'ajustement itérative sur les collisions rapportées par `CollisionReport`
+(réorientation locale de l'angle du point concerné, sinon ré-segmentation
+ciblée en retournant à l'étape 3, sinon support de secours en dernier
+recours), puis relance de l'étape 9 uniquement sur la portion de
+trajectoire modifiée. Un plan dédié à step10 doit encore trancher comment
+délimiter précisément "la portion modifiée" à re-simuler sans rejouer toute
+la trajectoire, et comment interpréter `CollisionReport.chuck_checked=False`
+(actuellement toujours `False`, faute de géométrie de mandrin/mors) —
+probablement comme un avertissement à faire remonter à l'utilisateur plutôt
+qu'un blocage, à confirmer dans ce plan.

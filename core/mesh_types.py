@@ -384,7 +384,16 @@ class CollisionEvent:
 
 @dataclass
 class CollisionReport:
+    """
+    `chuck_checked`/`nozzle_model_checked` sont des signaux EXPLICITES
+    d'absence de verification, jamais un silence - meme famille de motif
+    que `Step8Diagnostic` (donnee pure, pas d'exception, pas de skip
+    silencieux). Sans eux, une liste `events` vide serait ambigue entre
+    "verifie, aucune collision" et "jamais verifie du tout".
+    """
     events: list[CollisionEvent] = field(default_factory=list)
+    chuck_checked: bool = False          # False = aucune geometrie de mandrin disponible - evenements "chuck" non exhaustifs
+    nozzle_model_checked: bool = False   # False = nozzle_model absent/non chargeable - AUCUN test n'a eu lieu
 
     @property
     def has_collisions(self) -> bool:
