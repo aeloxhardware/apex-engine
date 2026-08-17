@@ -406,3 +406,40 @@ class AdjustmentLogEntry:
     point_index: int
     method: str                     # "local_reorientation" | "region_resegmentation" | "fallback_support"
     detail: str = ""
+
+
+@dataclass
+class ResegmentationRequest:
+    """
+    Demande de ré-segmentation ciblée émise par l'étape 10 vers son
+    appelant (orchestrateur), quand la réorientation locale ne suffit pas.
+
+    L'étape 10 décide QUOI (quel point, quelle plage d'angles exclure) ;
+    l'appelant décide COMMENT re-jouer la chaîne step3 -> step8. Ce
+    découpage est délibéré : une ré-segmentation change `target_direction`
+    d'une région, donc le terme de gradient du système STATIQUE de step4,
+    donc le champ scalaire (résolu globalement par FEM), donc les couches,
+    les trajectoires, l'ordonnancement et les angles — il n'existe aucune
+    ré-exécution réellement locale. Faire porter cette chaîne par l'étape
+    10 en ferait l'orchestrateur, rôle qui revient à `main.py`.
+    """
+    point_index: int
+    position: Vec3
+    # Une entrée par axe de MachineProfile.rotation_axes, même ordre.
+    # None = aucune exclusion pour cet axe.
+    excluded_axis_ranges_deg: list[Optional[tuple[float, float]]] = field(default_factory=list)
+    reason: str = ""
+
+
+@dataclass
+class AdjustmentReport:
+    """
+    Sortie de l'étape 10. `converged` est un signal EXPLICITE, jamais un
+    silence (même discipline que `CollisionReport.chuck_checked` et
+    `Step8Diagnostic`) : une liste `unresolved_collisions` vide avec
+    `converged=False` serait ambiguë sans lui.
+    """
+    entries: list[AdjustmentLogEntry] = field(default_factory=list)
+    converged: bool = True
+    unresolved_collisions: list["CollisionEvent"] = field(default_factory=list)
+    iterations_used: int = 0

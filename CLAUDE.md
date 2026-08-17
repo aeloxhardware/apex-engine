@@ -101,7 +101,7 @@ slicer_engine/
 │   ├── step7_scheduling.py          # FAIT — couleur + ordonnancement trous/purges (19 tests)
 │   ├── step8_machine_toolpath.py    # FAIT — resolution IK generique N-axes (16 tests)
 │   ├── step9_collision_sim.py       # FAIT — collision incrementale (capsules), N-axes (18 tests)
-│   └── step10_adjustment.py         # PAS ENCORE ÉCRIT
+│   └── step10_adjustment.py         # FAIT — boucle d'ajustement 3 niveaux (15 tests)
 ├── core/
 │   ├── __init__.py
 │   ├── mesh_types.py                # FAIT — toutes les dataclasses partagées (voir détail plus bas)
@@ -128,12 +128,14 @@ slicer_engine/
     ├── test_step7_scheduling.py     # FAIT — 19 tests
     ├── test_geometry_utils.py       # FAIT — 6 tests (composed_rotation_directions)
     ├── test_step8_machine_toolpath.py  # FAIT — 16 tests
-    └── test_step9_collision_sim.py  # FAIT — 18 tests
+    ├── test_step9_collision_sim.py  # FAIT — 18 tests
+    └── test_step10_adjustment.py    # FAIT — 15 tests
 ```
 
-**État global : 101/101 tests passants** (step2 à step9 + core/geometry_utils.py).
-Étapes 1 à 9 du pipeline stables et testées ; step10 (ajustement en cas de
-collision) est la prochaine à écrire.
+**État global : 116/116 tests passants** (step2 à step10 + core/geometry_utils.py).
+**Les 10 étapes du cœur algorithmique sont écrites, stables et testées.**
+Restent hors cœur : `main.py` (orchestrateur), `config/`, et
+`file_io/gcode_export.py` (export G-code final).
 
 **Environnement Python du projet** : venv local (`.venv/`, ignoré par git)
 sur **Python 3.14** — pas 3.12, qui a cessé de fonctionner sur cette
@@ -550,14 +552,40 @@ l'appelant de `pipeline/step9_collision_sim.run()` qui doit peupler
 
 ## Étape 10 — Ajustement en cas de collision détectée
 
-**Ce que le code fait précisément (boucle itérative, jusqu'à `max_adjustment_iterations`) :**
-- Pour chaque collision reportée, tente dans l'ordre :
-  1. **Réorientation locale** : ajuste l'angle de rotation plateau à ce point précis (recherche locale dans une plage d'angles voisins qui élimine la collision tout en respectant encore le seuil de surplomb).
-  2. **Ré-ordonnancement de région** : si la réorientation locale est impossible sans casser la contrainte de surplomb, retourne à l'étape 3 avec une contrainte supplémentaire "cette région ne peut pas utiliser cette plage d'angles" et relance la segmentation pour cette zone uniquement (pas tout le modèle).
-  3. **Marquage support de secours** : si aucune des deux options ne résout la collision (cas limite), marque la zone comme nécessitant un support classique en dernier recours, avec log explicite pour l'utilisateur.
-- Après ajustement, relance l'étape 9 uniquement sur la portion de trajectoire modifiée (pas la simulation complète), jusqu'à convergence ou épuisement des itérations.
+**Ce que le code fait précisément (`pipeline/step10_adjustment.py`, FAIT — boucle jusqu'à `max_adjustment_iterations`) :**
+- Consomme `CollisionReport` (étape 9) **et** `list[Step8Diagnostic]` (étape 8).
+  Pour chaque problème, tente dans l'ordre :
+  1. **Réorientation locale** (`_try_local_reorientation`) : candidats issus de
+     `composed_rotation_angles_and_directions` (la MÊME grille que l'IK de
+     step8, jamais une nouvelle méthode), essayés par écart angulaire
+     **croissant** vis-à-vis de la direction de dépôt d'origine, et
+     **arrêtés** dès que l'écart dépasse `max_direction_deviation_deg` —
+     c'est exactement la condition « tout en respectant encore le seuil de
+     surplomb ». Un candidat qui violerait `max_angular_velocity` vis-à-vis
+     de ses voisins est rejeté (voir limite #24).
+  2. **Ré-segmentation ciblée** : émet une `ResegmentationRequest` (point,
+     plage d'angles à exclure par axe) vers un **hook injecté par
+     l'orchestrateur** — l'étape 10 ne re-joue PAS elle-même step3→step8
+     (voir limite #23).
+  3. **Support de secours** : `AdjustmentLogEntry(method="fallback_support")`,
+     log explicite.
+- Après une réorientation, ne re-vérifie QUE les points modifiés
+  (`_collisions_at_points`) : les capsules de l'étape 9 dépendent de
+  `position` seule, jamais de `axis_angles`, donc une réorientation laisse
+  la matière imprimée strictement identique et aucun point en aval ne peut
+  changer d'état. Après une ré-segmentation, au contraire, passe complète
+  (la trajectoire entière est invalidée).
+- **Critère d'arrêt** : convergence = zéro collision restante. À
+  l'épuisement des itérations avec des collisions ouvertes, celles-ci
+  basculent **de force** en support de secours et `converged=False` —
+  jamais d'exception (même discipline que `Step8Diagnostic` et
+  `CollisionReport.chuck_checked` : une donnée explicite, pas un blocage
+  qui priverait l'utilisateur de toute sortie).
 
-**Sortie finale :** `ToolpathMachine[]` validé + `AdjustmentLog[]` (zones modifiées, méthode utilisée, éventuels supports de secours ajoutés) — transmis à l'UI TypeScript pour affichage/validation avant export G-code.
+**Sortie finale :** `(ToolpathMachine ajustée, AdjustmentReport)` —
+`AdjustmentReport` porte `entries` (le journal), `converged`,
+`unresolved_collisions` et `iterations_used`, transmis à l'UI TypeScript
+pour affichage/validation avant export G-code.
 
 ---
 
@@ -794,6 +822,44 @@ l'appelant de `pipeline/step9_collision_sim.run()` qui doit peupler
     collision possible qu'au(x) point(s) suivant(s), une fois que la buse
     s'en est réellement éloignée.
 
+23. **Une ré-segmentation ne peut PAS être locale, contrairement à ce que
+    laissait entendre la formulation initiale de l'étape 10 (« relance la
+    segmentation pour cette zone uniquement »).** Changer la direction
+    d'impression d'une région change son `target_direction` (step3), donc le
+    terme de gradient du système **statique** de step4 — pas la partie
+    contrainte, la partie structurelle — donc le champ scalaire, résolu
+    **globalement** par FEM, donc les couches, les trajectoires,
+    l'ordonnancement et les angles. Aucune ré-exécution partielle n'est
+    géométriquement cohérente. Conséquence actée : `step10` n'appelle PAS
+    lui-même step3→step8 (il lui faudrait `mesh_data`, `tet_mesh`,
+    `overhang_map`, le graphe de régions, le champ, les couches, la
+    `ColorMap` et les params de 7 étapes — il deviendrait l'orchestrateur,
+    rôle qui revient à `main.py`). Il émet une `ResegmentationRequest` vers
+    un **hook injecté** ; l'appelant décide comment re-jouer la chaîne et
+    rend une nouvelle `ToolpathMachine`. `step10` reste une fonction pure et
+    testable avec un hook synthétique.
+
+24. **Une réorientation ponctuelle peut casser le lissage temporel que
+    l'étape 8 venait d'appliquer.** Modifier l'angle d'un seul point
+    ré-introduit exactement le saut de vitesse angulaire que
+    `step8._clamp_rate` avait éliminé — « résoudre » une collision en
+    produisant une trajectoire mécaniquement inexécutable. `step10._violates_rate_limits`
+    rejette donc tout candidat violant `max_angular_velocity` vis-à-vis de
+    ses voisins immédiats. **Limite assumée non résolue** : seule la vitesse
+    est re-vérifiée, pas l'accélération (qui exigerait de raisonner sur trois
+    points consécutifs et de re-lisser toute la série, donc de rejouer
+    step8).
+
+25. **Corollaire de la limite #21 pour la conception des FIXTURES de test.**
+    Comme l'étape 9 n'échantillonne que sommets et arêtes, un obstacle qui
+    traverse l'**intérieur d'une face** peut être écarté par une simple
+    rotation, sans que la géométrie ait « vraiment » bougé. Mesuré en
+    écrivant les tests de step10 : une tête large et symétrique censée
+    rendre la collision irrésolvable voyait sa collision disparaître à 30°.
+    Une fixture qui doit rendre une collision **irrésolvable par rotation**
+    doit être invariante par cette rotation — typiquement un obstacle porté
+    par l'axe de rotation lui-même (`tests/test_step10_adjustment.py::_axis_straddling_toolhead`).
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
@@ -839,7 +905,12 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
   pour ce cas, elle accumule ces diagnostics pour l'étape 10),
   `ToolpathMachine` — étape 8
 - `CollisionEvent`, `CollisionReport` — étape 9
-- `AdjustmentLogEntry` — étape 10
+- `AdjustmentLogEntry` (point, méthode, détail) ; `ResegmentationRequest`
+  (**contrat du hook de l'étape 10** — point, position, plage d'angles
+  exclue par axe, raison ; l'étape 10 décide QUOI, l'appelant décide
+  COMMENT re-jouer step3→step8, voir limite #23) ; `AdjustmentReport`
+  (**`converged` explicite**, jamais un silence — plus `entries`,
+  `unresolved_collisions`, `iterations_used`) — étape 10
 
 ## Détail de `core/geometry_utils.py`
 
@@ -1043,6 +1114,33 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 
 ---
 
+## Détail de `pipeline/step10_adjustment.py`
+
+- `run(toolpath, collision_report, machine_profile, sim_params, params,
+  step8_diagnostics=None, resegmentation_hook=None) -> (ToolpathMachine, AdjustmentReport)`.
+  Fonction pure : l'entrée n'est jamais mutée (vérifié par test).
+- `_try_local_reorientation` réutilise `composed_rotation_angles_and_directions`
+  (grille de recherche de step8), candidats triés par écart angulaire
+  croissant et **coupés** au-delà de `max_direction_deviation_deg` — le
+  seuil de surplomb est donc une condition d'admissibilité, pas un
+  post-contrôle.
+- `_collisions_at_points` réutilise les primitives de step9
+  (`_PrintedGeometryIndex`, `_grow_printed_index_to`, `_evaluate_point`,
+  `_surface_sample_points`), jamais une seconde implémentation de la
+  détection. La re-vérification est réduite aux seuls points réorientés :
+  les capsules ne dépendent que de `position`, jamais de `axis_angles`.
+- `_violates_rate_limits` : garde-fou contre une réorientation
+  mécaniquement inexécutable (limite #24).
+- Les `Step8Diagnostic` **sautent le niveau 1** : l'étape 8 a déjà épuisé
+  la recherche IK locale pour ces points, la relancer à l'identique ne peut
+  rien produire de nouveau.
+- Aucune exception pour une collision non résolue — bascule forcée en
+  support de secours + `converged=False`.
+- Limite connue non résolue : quand le hook rend une nouvelle trajectoire,
+  la re-vérification est **complète** (une ré-segmentation invalide tout le
+  champ scalaire, limite #23) — seule la voie « réorientation » bénéficie
+  de la re-vérification partielle.
+
 ## Conventions de code à respecter
 
 - Chaque `pipeline/stepN_*.py` expose `run(input, params) -> output`, fonction pure,
@@ -1060,30 +1158,32 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 
 ## Prochaine étape
 
-Étapes 1 à 9 stables et testées (101/101 tests). `MachineProfile` décrit une
-cinématique générique à N axes de rotation composés (`rotation_axes:
-list[RotationAxisSpec]`, voir limites #18/#19) ; step3, step7, step8 et step9
-dispatchent tous sur la même famille de fonctions/conventions génériques
+**Les 10 étapes du cœur algorithmique sont écrites, stables et testées
+(116/116 tests).** `MachineProfile` décrit une cinématique générique à N
+axes de rotation composés (`rotation_axes: list[RotationAxisSpec]`, limites
+#18/#19) ; step3, step7, step8, step9 et step10 dispatchent tous sur la même
+famille de fonctions et de conventions génériques
 (`composed_rotation_directions`/`composed_rotation_angles_and_directions`,
-`_positioned_toolhead_vertices` pour step9) sans hypothèse figée sur le
-nombre d'axes de la machine réellement utilisée. step9 simule la collision
-de `MachineProfile.nozzle_model` (modèle réel chargé via
-`file_io.mesh_loader.load_toolhead_mesh`) contre une géométrie imprimée
-reconstruite incrémentalement (capsules, jamais une union booléenne) et le
-plateau — voir « Détail de `pipeline/step9_collision_sim.py` » ci-dessus,
-et les limites #20 (renommage `io/` -> `file_io/`), #21 (échantillonnage
-des arêtes, pas seulement les sommets) et #22 (exclusion du cordon en
-cours de dépôt) pour les bugs réels trouvés et corrigés pendant son
-écriture.
+composition en ordre inverse de la liste) sans hypothèse figée sur le
+nombre d'axes de la machine réellement utilisée.
 
-`pipeline/step10_adjustment.py` est la prochaine étape non écrite : boucle
-d'ajustement itérative sur les collisions rapportées par `CollisionReport`
-(réorientation locale de l'angle du point concerné, sinon ré-segmentation
-ciblée en retournant à l'étape 3, sinon support de secours en dernier
-recours), puis relance de l'étape 9 uniquement sur la portion de
-trajectoire modifiée. Un plan dédié à step10 doit encore trancher comment
-délimiter précisément "la portion modifiée" à re-simuler sans rejouer toute
-la trajectoire, et comment interpréter `CollisionReport.chuck_checked=False`
-(actuellement toujours `False`, faute de géométrie de mandrin/mors) —
-probablement comme un avertissement à faire remonter à l'utilisateur plutôt
-qu'un blocage, à confirmer dans ce plan.
+Ce qui reste, hors cœur algorithmique :
+
+- **`main.py` (orchestrateur)** — enchaîner step1→step10. C'est lui, et lui
+  seul, qui doit fournir le `resegmentation_hook` de l'étape 10 (voir
+  limite #23) : il est le seul à détenir `mesh_data`, `tet_mesh`,
+  `overhang_map`, le graphe de régions, la `ColorMap` et les params des 7
+  étapes nécessaires pour re-jouer step3→step8 avec une contrainte d'angle
+  supplémentaire.
+- **`config/params.py` + `config/schema.py`** — centraliser les dataclasses
+  de paramètres (aujourd'hui définies dans chaque `stepN_*.py`) et la
+  (dé)sérialisation JSON, pont avec l'UI TypeScript. À faire sans casser
+  les imports existants.
+- **`file_io/gcode_export.py`** — traduction de `ToolpathPoint.axis_angles`
+  (générique, N axes) vers la commande firmware réelle
+  (`G00 Y<C> X<R> Z<Z> B<B> F<feedrate>` pour la machine actuelle). Cette
+  traduction est **spécifique à une machine** et a été délibérément tenue
+  hors de step8/step9/step10 ; un plan dédié devra trancher le format
+  exact, la gestion de la rétraction, et comment décrire le mapping
+  axe générique → nom d'axe firmware sans re-figer le moteur sur une seule
+  machine.
