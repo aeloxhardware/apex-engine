@@ -102,7 +102,7 @@ slicer_engine/
 │   ├── step4_field_solver.py        # FAIT — résolution FEM du champ scalaire (7 tests)
 │   ├── step5_layers.py              # FAIT — extraction des couches courbes (12 tests)
 │   ├── step6_toolpath2d.py          # FAIT — remplissage 2D par couche (8 tests)
-│   ├── step7_scheduling.py          # FAIT — couleur + ordonnancement trous/purges (19 tests)
+│   ├── step7_scheduling.py          # FAIT — couleur + ordonnancement trous/purges (22 tests)
 │   ├── step8_machine_toolpath.py    # FAIT — resolution IK generique N-axes (16 tests)
 │   ├── step9_collision_sim.py       # FAIT — collision incrementale (capsules), N-axes (18 tests)
 │   └── step10_adjustment.py         # FAIT — boucle d'ajustement 3 niveaux (15 tests)
@@ -134,14 +134,14 @@ slicer_engine/
     ├── test_step4_field_solver.py   # FAIT — 7 tests
     ├── test_step5_layers.py         # FAIT — 12 tests
     ├── test_step6_toolpath2d.py     # FAIT — 8 tests
-    ├── test_step7_scheduling.py     # FAIT — 19 tests
+    ├── test_step7_scheduling.py     # FAIT — 22 tests
     ├── test_geometry_utils.py       # FAIT — 6 tests (composed_rotation_directions)
     ├── test_step8_machine_toolpath.py  # FAIT — 16 tests
     ├── test_step9_collision_sim.py  # FAIT — 18 tests
     └── test_step10_adjustment.py    # FAIT — 15 tests
 ```
 
-**État global : 117/117 tests passants** (step2 à step10 + core/geometry_utils.py).
+**État global : 120/120 tests passants** (step2 à step10 + core/geometry_utils.py).
 **Les 10 étapes du cœur algorithmique sont écrites, stables et testées, et
 `main.py` les enchaîne bout en bout sur un fichier STL/3MF réel** (vérifié
 sur `res/test_models/l_shape_overhang.stl`, un modèle avec un vrai
@@ -1066,6 +1066,51 @@ pour affichage/validation avant export G-code.
       `l_shape_split_data` (même géométrie, `direction_deviation_weight=0.2`
       explicite) pour réellement tester le scénario à 2 régions.
 
+34. **Une couche peut légitimement contenir des segments de trajectoire
+    spatialement DISJOINTS (clusters à des dizaines de mm l'un de l'autre)
+    même une fois l'ordre inter-couches corrigé (limite #33) — problème
+    DIFFÉRENT, ne pas confondre les deux.** Après le fix de la limite #33,
+    `out_test.glb` régénéré montrait encore un faisceau de trajets à vide
+    au niveau du coude. Vérifié que ce N'ÉTAIT PAS un reliquat non corrigé
+    de la limite #33 : l'isovaleur des couches était déjà strictement
+    monotone. Cause distincte, mesurée : `pipeline/step7_scheduling.py`
+    construisait chaque `PrintPass` en concaténant les segments d'une
+    couche dans leur ordre d'extraction de step6 (paroi/infill par bloc
+    géométrique local), sans tenir compte de la POSITION DE LA TÊTE à la
+    fin de la passe précédente. Résultat mesuré sur le modèle de test :
+    83 sauts de trajectoire > 10 mm sur 10088 segments, un aller-retour
+    quasi complet base↔bras à CHAQUE couche de la zone de jonction (chaque
+    couche listant systématiquement tout son cluster proche de la base
+    puis tout son cluster proche du bras, dans cet ordre fixe).
+    Fix : `_order_segments_by_proximity` (nouvelle fonction) réordonne les
+    segments d'une passe par plus proche voisin glouton, en partant de la
+    position réelle de fin de la passe précédente (`head_position`, état
+    maintenu dans `_schedule_passes` comme `active_color` l'est déjà).
+    Résultat mesuré : 83 → 33 sauts > 10 mm — **pas zéro, et c'est le
+    résultat ATTENDU, pas un échec partiel** : 35 passes sur 109 touchent
+    réellement les deux clusters à la fois (mesuré), et réordonner des
+    SEGMENTS entre eux (jamais les POINTS à l'intérieur d'un segment,
+    scope volontairement limité) ne peut pas éliminer la traversée
+    lorsqu'une passe unique doit de toute façon visiter les deux clusters
+    — seulement la placer une fois par passe concernée plutôt qu'à répétition
+    entre passes consécutives. Les grands sauts restants sont désormais
+    strictement internes à une passe (vérifié : le point de fin d'une passe
+    et le point de début de la suivante coïncident systématiquement,
+    `head_position` fonctionne comme prévu), plus jamais un aller-retour
+    entre deux passes déjà bien enchaînées.
+
+    **Distinction explicite avec la limite #33, à ne jamais fusionner** :
+    #33 est un défaut d'ORDRE DES COUCHES (une couche entière imprimée au
+    mauvais moment dans la séquence globale) — un vrai bug de correction
+    physique, résolu. #34 est un choix de TRAJECTOIRE DE DÉPLACEMENT DE
+    TÊTE à l'intérieur d'une séquence de couches déjà correctement ordonnée
+    — une optimisation de coût (minimiser les trajets à vide), pas une
+    correction de validité. Ce fix ne prétend RIEN résoudre côté ordre
+    physique inter-couches ; si un futur diagnostic révèle un vrai problème
+    d'ordre entre couches (pas seulement de distance de trajet), il devra
+    être traité comme la limite #33 (dans step5/step3), jamais confondu
+    avec l'optimisation de trajectoire de la limite #34 (step7).
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
@@ -1402,7 +1447,7 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 ## Prochaine étape
 
 **Les 10 étapes du cœur algorithmique sont écrites, stables et testées
-(117/117 tests).** `MachineProfile` décrit une cinématique générique à N
+(120/120 tests).** `MachineProfile` décrit une cinématique générique à N
 axes de rotation composés (`rotation_axes: list[RotationAxisSpec]`, limites
 #18/#19) ; step3, step7, step8, step9 et step10 dispatchent tous sur la même
 famille de fonctions et de conventions génériques

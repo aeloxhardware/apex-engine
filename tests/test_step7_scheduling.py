@@ -16,7 +16,7 @@ import numpy as np
 import pytest
 import trimesh
 
-from core.mesh_types import ColorMap
+from core.mesh_types import ColorMap, Layer
 from pipeline.step1_ingest import run as ingest_run
 from pipeline.step2_overhang import OverhangParams, run as overhang_run
 from pipeline.step3_segmentation import SegmentationParams, run as segmentation_run
@@ -28,7 +28,9 @@ from pipeline.step7_scheduling import (
     PurgeCostModel,
     SchedulingError,
     Step7Params,
+    _ColorGroup,
     _color_runs,
+    _order_segments_by_proximity,
     _smooth_edge_colors,
     run as scheduling_run,
 )
@@ -475,3 +477,98 @@ def test_segment_colors_unset_before_step7(flat_box_pipeline):
     assert all(layer.toolpath_2d is not None for layer in layers), (
         "step6 doit avoir rempli toolpath_2d"
     )
+
+
+# ---------------------------------------------------------------------------
+# Cas 7 - Reordonnancement par proximite (segments spatialement disjoints)
+# ---------------------------------------------------------------------------
+
+def _two_cluster_layer() -> Layer:
+    """
+    Couche synthetique avec 2 clusters de segments spatialement DISJOINTS
+    dans le repere local 2D (donc en 3D via local_frame=identite : origine a
+    zero, axe_u=X, axe_v=Y) - reproduit directement le motif mesure sur
+    res/test_models/l_shape_overhang.stl (cluster "base" pres de x=0,
+    cluster "bras" pres de x=20, a chaque fois plusieurs petits segments).
+
+    toolpath_2d ordonne EXACTEMENT comme step6 le produit dans ce cas reel :
+    tout le cluster proche d'abord (indices 0-2), puis tout le cluster
+    lointain (indices 3-5) - c'est cet ordre "en bloc" qui, combine a un
+    depart de tete au mauvais endroit, produit l'aller-retour a corriger.
+    """
+    near = [np.array([[0.0, 0.0], [0.5, 0.0]]) for _ in range(3)]
+    far = [np.array([[20.0, 0.0], [20.5, 0.0]]) for _ in range(3)]
+    toolpath_2d = near + far
+
+    return Layer(
+        id=0,
+        contour_3d=[],
+        region_ids=[0, 1],
+        local_frame=(np.zeros(3), np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0])),
+        toolpath_2d=toolpath_2d,
+    )
+
+
+def _path_length(layer: Layer, ordered_segments: list[tuple[int, int]], start: np.ndarray) -> float:
+    """Longueur totale du trajet (dernier point -> premier point du segment suivant), depart inclus."""
+    position = start
+    total = 0.0
+    for _layer_id, segment_index in ordered_segments:
+        polyline = layer.toolpath_2d[segment_index]
+        start_point = polyline[0]
+        total += float(np.linalg.norm(start_point - position[:2]))
+        position = np.array([polyline[-1, 0], polyline[-1, 1], 0.0])
+    return total
+
+
+def test_order_segments_by_proximity_reduces_travel_distance():
+    """
+    Avec une position de depart proche du cluster lointain (x=20), l'ordre
+    reordonne par proximite doit visiter ce cluster EN PREMIER plutot que de
+    suivre l'ordre d'origine (proche d'abord) qui forcerait un grand aller-
+    retour - c'est exactement le mecanisme qui produisait des dizaines de
+    sauts de ~17-20mm sur le modele de test reel (CLAUDE.md).
+    """
+    layer = _two_cluster_layer()
+    groups = [_ColorGroup(layer_index=0, layer_id=0, color_id=None, segment_indices=list(range(6)), region_ids=[0, 1])]
+
+    start_far = np.array([19.5, 0.0, 0.0])
+
+    original_order = [(0, i) for i in range(6)]
+    reordered = _order_segments_by_proximity(groups, layer, start_far)
+
+    original_length = _path_length(layer, original_order, start_far)
+    reordered_length = _path_length(layer, reordered, start_far)
+
+    assert reordered_length < original_length, (
+        f"Le reordonnancement devrait reduire la distance de trajet "
+        f"(original={original_length:.1f}, reordonne={reordered_length:.1f})"
+    )
+    # Le premier segment visite doit appartenir au cluster proche du depart
+    # (loin, x=20) - pas au cluster proche de l'origine (x=0), qui etait
+    # pourtant premier dans l'ordre d'origine.
+    first_polyline = layer.toolpath_2d[reordered[0][1]]
+    assert first_polyline[0, 0] > 10.0, (
+        "Le premier segment reordonne devrait etre celui du cluster le plus "
+        "proche de la position de depart"
+    )
+
+
+def test_order_segments_by_proximity_preserves_segment_set():
+    """Le reordonnancement ne doit jamais perdre ni dupliquer un segment."""
+    layer = _two_cluster_layer()
+    groups = [_ColorGroup(layer_index=0, layer_id=0, color_id=None, segment_indices=list(range(6)), region_ids=[0, 1])]
+
+    reordered = _order_segments_by_proximity(groups, layer, np.array([19.5, 0.0, 0.0]))
+
+    assert sorted(reordered) == [(0, i) for i in range(6)]
+
+
+def test_order_segments_by_proximity_noop_without_start_position():
+    """Sans position de depart (toute premiere passe), l'ordre d'origine est conserve tel quel."""
+    layer = _two_cluster_layer()
+    groups = [_ColorGroup(layer_index=0, layer_id=0, color_id=None, segment_indices=list(range(6)), region_ids=[0, 1])]
+
+    reordered = _order_segments_by_proximity(groups, layer, None)
+
+    assert reordered == [(0, i) for i in range(6)]

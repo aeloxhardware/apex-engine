@@ -616,14 +616,92 @@ class _PendingHole:
     deadline: int
 
 
-def _make_pass(
-    groups: list[_ColorGroup], color_id: Optional[int], is_hole_fill: bool
-) -> Optional[PrintPass]:
-    segments = [
+def _segment_endpoints_3d(layer: Layer, segment_index: int) -> tuple[np.ndarray, np.ndarray]:
+    """Premier et dernier point 3D d'un segment (layer.toolpath_2d[segment_index])."""
+    polyline_2d = layer.toolpath_2d[segment_index]
+    ends_2d = polyline_2d[[0, -1]]
+    ends_3d = _lift_to_3d(ends_2d, layer.local_frame)
+    return ends_3d[0], ends_3d[1]
+
+
+def _order_segments_by_proximity(
+    groups: list[_ColorGroup],
+    layer: Layer,
+    start_position: Optional[np.ndarray],
+) -> list[tuple[int, int]]:
+    """
+    Ordonne TOUS les segments (layer_id, index) des groupes fournis (une meme
+    couche, potentiellement plusieurs groupes de couleur) par plus proche
+    voisin GLOUTON sur leurs extremites 3D, en partant de `start_position`
+    (position de fin de la passe precedente). Si `start_position` est None
+    (toute premiere passe imprimee), l'ordre d'origine est conserve tel quel.
+
+    Pourquoi necessaire : une couche peut contenir plusieurs polylignes
+    formant des clusters spatialement DISJOINTS (ex: base et bout d'un bras
+    en porte-a-faux, a des dizaines de mm l'un de l'autre en 3D bien qu'a
+    isovaleur proche) - l'ordre d'extraction de step6 ne tient compte que de
+    la structure geometrique LOCALE a une couche (parois puis infill), pas
+    de la distance de trajet entre couches consecutives. Sans reordonnancement,
+    la tete traverse systematiquement le meme grand ecart a chaque
+    transition de couche - mesure concretement sur
+    res/test_models/l_shape_overhang.stl : des dizaines de sauts consecutifs
+    de ~17-20mm entre positions proches de la base et positions au bout du
+    bras, un aller-retour complet PAR COUCHE.
+
+    Glouton (O(k^2) sur le nombre de segments d'une couche, jamais des
+    milliers) plutot qu'un TSP exact - coherent avec le reste de step7
+    (deadlines d'accessibilite), deja une heuristique assumee, pas un
+    optimum global.
+
+    Ne reordonne QUE les segments entre eux, jamais les POINTS a l'interieur
+    d'un segment (pas d'inversion de sens de parcours) - le motif observe
+    vient de l'ordre des segments, pas du sens de parcours de chacun.
+    """
+    all_segments = [
         (group.layer_id, segment_index)
         for group in groups
         for segment_index in group.segment_indices
     ]
+    if start_position is None or len(all_segments) <= 1:
+        return all_segments
+
+    remaining = list(all_segments)
+    ordered: list[tuple[int, int]] = []
+    current_position = start_position
+
+    while remaining:
+        best_idx = -1
+        best_distance = np.inf
+        for i, (_layer_id, segment_index) in enumerate(remaining):
+            start, _end = _segment_endpoints_3d(layer, segment_index)
+            distance = float(np.linalg.norm(start - current_position))
+            if distance < best_distance:
+                best_distance = distance
+                best_idx = i
+
+        chosen = remaining.pop(best_idx)
+        ordered.append(chosen)
+        _start, end = _segment_endpoints_3d(layer, chosen[1])
+        current_position = end
+
+    return ordered
+
+
+def _make_pass(
+    groups: list[_ColorGroup],
+    color_id: Optional[int],
+    is_hole_fill: bool,
+    ordered_segments: Optional[list[tuple[int, int]]] = None,
+) -> Optional[PrintPass]:
+    segments = (
+        ordered_segments
+        if ordered_segments is not None
+        else [
+            (group.layer_id, segment_index)
+            for group in groups
+            for segment_index in group.segment_indices
+        ]
+    )
     if not segments:
         return None
 
@@ -639,8 +717,21 @@ def _make_pass(
     )
 
 
+def _pass_end_position(pass_: PrintPass, layers_by_id: dict[int, Layer]) -> Optional[np.ndarray]:
+    """Position 3D du dernier point du dernier segment d'une passe - pour chainer la passe suivante."""
+    if not pass_.segments:
+        return None
+    layer_id, segment_index = pass_.segments[-1]
+    layer = layers_by_id.get(layer_id)
+    if layer is None or layer.toolpath_2d is None:
+        return None
+    _start, end = _segment_endpoints_3d(layer, segment_index)
+    return end
+
+
 def _schedule_passes(
     groups_per_layer: list[list[_ColorGroup]],
+    colored_layers: list[Layer],
     deadline_of: "callable",
     params: Step7Params,
 ) -> PrintSchedule:
@@ -654,10 +745,31 @@ def _schedule_passes(
     Les trous en attente sont combles en earliest-deadline-first : des qu'un
     trou approche sa deadline, ou que `max_open_holes` est atteint, la passe
     de comblement est inseree.
+
+    Les segments de la passe DOMINANTE de chaque couche (`printed_pass`, le
+    cas le plus frequent) sont reordonnes par proximite avant d'etre figes
+    dans la passe (`_order_segments_by_proximity`), en partant de la ou la
+    tete se trouve reellement a la fin de la passe precedente
+    (`head_position`, etat maintenu ici comme `active_color` l'est deja) -
+    minimise les grands trajets a vide quand une couche contient des
+    clusters de segments spatialement disjoints. Les autres passes (trous,
+    purges) restent dans leur ordre d'origine : un seul groupe, un seul
+    point d'entree naturel, aucun gain a reordonner.
     """
     passes: list[PrintPass] = []
     pending: list[_PendingHole] = []
     active_color: Optional[int] = None
+    head_position: Optional[np.ndarray] = None
+    layers_by_id = {layer.id: layer for layer in colored_layers}
+
+    def _append_pass(pass_: Optional[PrintPass]) -> None:
+        nonlocal head_position
+        if pass_ is None:
+            return
+        passes.append(pass_)
+        end = _pass_end_position(pass_, layers_by_id)
+        if end is not None:
+            head_position = end
 
     def flush_holes(up_to_layer_index: int, force_all: bool = False) -> None:
         """Comble les trous dont la deadline est atteinte (EDF)."""
@@ -670,19 +782,20 @@ def _schedule_passes(
                 remaining.append(hole)
                 continue
             fill_pass = _make_pass([hole.group], hole.group.color_id, is_hole_fill=True)
+            _append_pass(fill_pass)
             if fill_pass is not None:
-                passes.append(fill_pass)
                 active_color = hole.group.color_id
         pending[:] = remaining
 
     for layer_index, groups in enumerate(groups_per_layer):
         free_groups = [g for g in groups if g.color_id is None]
         colored_groups = [g for g in groups if g.color_id is not None]
+        layer = colored_layers[layer_index]
 
         if not colored_groups:
-            free_pass = _make_pass(free_groups, active_color, is_hole_fill=False)
-            if free_pass is not None:
-                passes.append(free_pass)
+            ordered = _order_segments_by_proximity(free_groups, layer, head_position)
+            free_pass = _make_pass(free_groups, active_color, is_hole_fill=False, ordered_segments=ordered)
+            _append_pass(free_pass)
             flush_holes(layer_index)
             continue
 
@@ -696,9 +809,12 @@ def _schedule_passes(
 
         # La matiere invisible part avec la passe courante : elle est
         # imprimable avec n'importe quelle couleur deja chargee.
-        printed_pass = _make_pass([chosen, *free_groups], chosen.color_id, is_hole_fill=False)
-        if printed_pass is not None:
-            passes.append(printed_pass)
+        printed_groups = [chosen, *free_groups]
+        ordered = _order_segments_by_proximity(printed_groups, layer, head_position)
+        printed_pass = _make_pass(
+            printed_groups, chosen.color_id, is_hole_fill=False, ordered_segments=ordered
+        )
+        _append_pass(printed_pass)
         active_color = chosen.color_id
 
         for group in colored_groups:
@@ -715,9 +831,9 @@ def _schedule_passes(
                 pending.append(_PendingHole(group=group, deadline=deadline))
             else:
                 purge_pass = _make_pass([group], group.color_id, is_hole_fill=False)
+                _append_pass(purge_pass)
                 if purge_pass is not None:
-                    passes.append(purge_pass)
-                active_color = group.color_id
+                    active_color = group.color_id
 
         flush_holes(layer_index)
 
@@ -821,6 +937,6 @@ def run(
             )
         return deadline_cache[key]
 
-    schedule = _schedule_passes(groups_per_layer, deadline_of, params)
+    schedule = _schedule_passes(groups_per_layer, colored_layers, deadline_of, params)
 
     return colored_layers, schedule
