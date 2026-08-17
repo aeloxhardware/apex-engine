@@ -98,7 +98,7 @@ slicer_engine/
 │   ├── step1_ingest.py              # FAIT — ingestion mesh + tétraédrisation (+ détection
 │   │                                 #   automatique des cavités internes pour tetgen, voir limite #7)
 │   ├── step2_overhang.py            # FAIT — détection surplombs + ponts internes
-│   ├── step3_segmentation.py        # FAIT — tests pytest formalisés (9 tests)
+│   ├── step3_segmentation.py        # FAIT — tests pytest formalisés (10 tests)
 │   ├── step4_field_solver.py        # FAIT — résolution FEM du champ scalaire (7 tests)
 │   ├── step5_layers.py              # FAIT — extraction des couches courbes (12 tests)
 │   ├── step6_toolpath2d.py          # FAIT — remplissage 2D par couche (8 tests)
@@ -130,7 +130,7 @@ slicer_engine/
 └── tests/
     ├── __init__.py
     ├── test_step2_overhang.py       # FAIT — 6 tests, tous passants et stables
-    ├── test_step3_segmentation.py   # FAIT — 9 tests
+    ├── test_step3_segmentation.py   # FAIT — 10 tests
     ├── test_step4_field_solver.py   # FAIT — 7 tests
     ├── test_step5_layers.py         # FAIT — 12 tests
     ├── test_step6_toolpath2d.py     # FAIT — 8 tests
@@ -141,7 +141,7 @@ slicer_engine/
     └── test_step10_adjustment.py    # FAIT — 15 tests
 ```
 
-**État global : 116/116 tests passants** (step2 à step10 + core/geometry_utils.py).
+**État global : 117/117 tests passants** (step2 à step10 + core/geometry_utils.py).
 **Les 10 étapes du cœur algorithmique sont écrites, stables et testées, et
 `main.py` les enchaîne bout en bout sur un fichier STL/3MF réel** (vérifié
 sur `res/test_models/l_shape_overhang.stl`, un modèle avec un vrai
@@ -963,6 +963,60 @@ pour affichage/validation avant export G-code.
     itération externe de `run()`, grossi de façon monotone (même invariant
     que step9) : taux devenu stable, 0.30 → 0.44 calls/s.
 
+31. **Un critère de fusion purement binaire (« au moins une direction
+    compatible existe ») fusionne des régions qui ne devraient pas l'être,
+    même quand un coût d'angle est ajouté ailleurs.** Diagnostiqué en
+    inspectant `out_test.glb` : la base verticale d'un L (aucun surplomb)
+    apparaissait courbée dès les premières couches. Racine tracée jusqu'à
+    step3, pas step4 : `_region_growing` fusionnait la base et le bras en
+    **une seule région** dès qu'**une** direction candidate satisfaisait les
+    24 faces réunies (mesuré : 54.8° de la verticale, direction ex-æquo au
+    minimum de risque résiduel avec 2 autres candidats sur 27 — le
+    départage par `np.argmin` n'était PAS en cause, la verticale pure avait
+    un résiduel réellement pire, 3.9281 contre 0.0000). **Un coût de
+    déviation ajouté seulement dans `_select_region_directions` ne peut pas
+    corriger ça** : cette fonction choisit une direction à l'intérieur
+    d'une région déjà figée par `_region_growing`, elle ne peut jamais
+    scinder une région existante — vérifié par mesure, resserrer
+    `max_angle_from_direction_deg` de 45° à 30° ne changeait rien au nombre
+    de régions (`_region_growing` reste un test binaire, insensible à ce
+    levier). Fix : `SegmentationParams.direction_deviation_weight` (défaut
+    `0.0`, jamais actif par défaut pour ne pas changer le comportement des
+    appelants existants) rend la décision de fusion sensible au coût
+    (`_best_direction_cost`, fonction partagée avec `_select_region_directions`
+    — jamais deux formules divergentes) : fusionner n'est retenu que si son
+    coût ne dépasse pas la somme des coûts séparés + `region_count_penalty`.
+
+32. **`region_count_penalty` était présent dans `SegmentationParams` et
+    transmis à `_region_growing` depuis le début, mais n'était JAMAIS lu
+    dans le corps de la fonction** — seulement mentionné dans un
+    commentaire affirmant qu'il « module indirectement » la fusion via
+    l'ordre de traitement, ce qui était faux (l'ordre ne dépendait que de
+    `risk_score`). Le fix de la limite #31 lui donne son premier usage réel
+    ; sa valeur par défaut (`0.1`) n'avait donc jamais été validée
+    empiriquement, et s'est révélée **10× trop élevée** : mesuré sur le L
+    de test, la scission base/bras se maintient jusqu'à
+    `region_count_penalty=0.01`, se rompt dès `0.02` (retombe à 1 seule
+    région). Nouveau défaut `0.005` (marge de sécurité, moitié du seuil de
+    rupture mesuré), robuste sur un balayage `direction_deviation_weight`
+    de 0.10 à 0.50. `direction_deviation_weight=0.2` activé explicitement
+    dans `main.py`/`PipelineParams` (pas dans le défaut de
+    `SegmentationParams` lui-même) une fois validé par
+    `tests/test_step3_segmentation.py::test_l_shape_with_deviation_weight_splits_base_from_arm`.
+    Résultat vérifié sur `out_test.glb` régénéré : amplitude Z des couches
+    basses passée de ~3-4 mm à ≤0.01 mm (109 couches, contre 142 avant —
+    la base ne génère plus de couches artificiellement inclinées).
+    Effet de bord observé et non traité ici : le nombre d'orientations
+    machine inatteignables signalées par l'étape 8
+    (`Step8Diagnostic`) est passé de 0 à 851/10089 points (8.4 %, erreur
+    résiduelle médiane 8.0°, max 8.3°), concentrées sur le bras — la
+    direction demandée y est désormais plus franche (49.2° au lieu d'être
+    diluée dans une moyenne à 54.8° sur toute la pièce), ce qui sollicite
+    davantage la grille de recherche IK de step8. Comportement structuré et
+    documenté (`Step8Diagnostic`, jamais une exception), pas un défaut de
+    ce fix — mais à garder à l'esprit si la qualité d'orientation du bras
+    doit être affinée plus tard (densité de grille IK, `ik_refine_step_multiplier`).
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
@@ -1299,7 +1353,7 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 ## Prochaine étape
 
 **Les 10 étapes du cœur algorithmique sont écrites, stables et testées
-(116/116 tests).** `MachineProfile` décrit une cinématique générique à N
+(117/117 tests).** `MachineProfile` décrit une cinématique générique à N
 axes de rotation composés (`rotation_axes: list[RotationAxisSpec]`, limites
 #18/#19) ; step3, step7, step8, step9 et step10 dispatchent tous sur la même
 famille de fonctions et de conventions génériques

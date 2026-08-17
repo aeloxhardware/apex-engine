@@ -113,7 +113,22 @@ class PipelineParams:
     resolution: float = 1.5  # partage step1 (densite de tetraedrisation) et FieldSolverParams.resolution
     allow_multi_mesh: bool = False
     overhang: OverhangParams = field(default_factory=OverhangParams)
-    segmentation: SegmentationParams = field(default_factory=SegmentationParams)
+    # direction_deviation_weight active explicitement ici (defaut 0.0 dans
+    # SegmentationParams lui-meme, jamais change silencieusement pour les
+    # appelants existants) : sans lui, une seule direction compatible avec
+    # TOUTES les faces d'une piece (ex: un L) suffit a fusionner toute la
+    # piece en une region unique, meme inclinee a plus de 50 deg de la
+    # verticale la ou aucun surplomb ne le justifie (mesure concretement
+    # sur res/test_models/l_shape_overhang.stl : base verticale a 54.8 deg
+    # sans raison avant ce fix). Valeur 0.2 calibree par balayage direct
+    # (0.1 a 0.5 tous robustes sur ce cas), avec region_count_penalty=0.005
+    # (recalibre dans SegmentationParams meme, voir CLAUDE.md) pour que la
+    # scission base/bras se maintienne. Pipeline reel = premier appelant a
+    # activer ce mecanisme, apres validation par
+    # tests/test_step3_segmentation.py::test_l_shape_with_deviation_weight_splits_base_from_arm.
+    segmentation: SegmentationParams = field(
+        default_factory=lambda: SegmentationParams(direction_deviation_weight=0.2)
+    )
     field_solver: FieldSolverParams = field(default_factory=FieldSolverParams)
     constraints: Optional[list[Constraint]] = None
     layers: LayerParams = field(default_factory=LayerParams)

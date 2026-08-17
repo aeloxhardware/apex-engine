@@ -41,7 +41,15 @@ class SegmentationError(Exception):
 class SegmentationParams:
     direction_candidate_count: int = 26
     max_angle_from_direction_deg: float = 45.0
-    region_count_penalty: float = 0.1
+    # Defaut recalibre a 0.005 (etait 0.1, jamais valide empiriquement - ce
+    # champ n'avait AUCUN effet dans le code avant ce fix, voir CLAUDE.md).
+    # Mesure sur le L de test : a direction_deviation_weight actif, la
+    # scission base/bras se maintient jusqu'a region_count_penalty=0.01,
+    # se rompt des 0.02 (retombe a 1 seule region, base et bras a nouveau
+    # confondus) - 0.1 aurait donc TOUJOURS empeche la scission. 0.005
+    # choisi avec marge (moitie du seuil de rupture mesure), robuste sur
+    # tout un balayage de direction_deviation_weight (0.10 a 0.50).
+    region_count_penalty: float = 0.005
     platform_z: float = 0.0
     platform_contact_tolerance: float = 0.5
     # Si None ou liste vide : utilise fibonacci_sphere_directions (orientation
@@ -53,6 +61,19 @@ class SegmentationParams:
     # composee (ex: plateau + tete d'une machine a 2 DOF).
     rotation_axes: Optional[list[RotationAxisSpec]] = None
     up_vector: np.ndarray = None
+    # Cout additif (residual_risk + direction_deviation_weight * angle_rad)
+    # applique au choix de direction ET a la decision de fusion de
+    # _region_growing - PAS seulement un departage a posteriori dans
+    # _select_region_directions, qui a elle seule est insuffisante : cette
+    # derniere choisit une direction A L'INTERIEUR d'une region deja figee
+    # par _region_growing, elle ne peut jamais scinder une region existante.
+    # Defaut 0.0 (desactive) : un cout ajoute par defaut changerait le
+    # comportement de tous les appelants existants, y compris ceux dont le
+    # resultat est deja correct (cube, sphere) - meme discipline que
+    # toolhead_sample_spacing (step9), jamais de changement de comportement
+    # par defaut sur un fichier deja teste. Voir CLAUDE.md pour le
+    # diagnostic complet (base d'un L inclinee a 54.8 deg sans raison).
+    direction_deviation_weight: float = 0.0
 
     def __post_init__(self):
         if self.up_vector is None:
@@ -180,6 +201,46 @@ def _face_direction_compatibility(
 
 
 # ---------------------------------------------------------------------------
+# Etape 3bis - Cout de deviation angulaire (partage entre growing et selection)
+# ---------------------------------------------------------------------------
+
+def _deviation_cost(directions: np.ndarray, up_vector: np.ndarray, weight: float) -> np.ndarray:
+    """
+    Cout angulaire (radians * weight) de chaque direction candidate par
+    rapport a `up_vector` - terme ADDITIF au risque residuel, jamais un
+    remplacement : une direction qui laisse des faces en surplomb doit
+    rester ecartee avant toute consideration d'angle, le residu domine
+    toujours pour un `weight` raisonnable.
+
+    Une seule fonction, appelee depuis _region_growing ET
+    _select_region_directions - jamais deux formules de cout divergentes
+    pour la meme notion.
+    """
+    if weight == 0.0:
+        return np.zeros(len(directions))
+    up = up_vector / np.linalg.norm(up_vector)
+    cosines = np.clip(directions @ up, -1.0, 1.0)
+    return weight * np.arccos(cosines)
+
+
+def _best_direction_cost(
+    compat_mask: np.ndarray, face_risk: np.ndarray, deviation_cost: np.ndarray
+) -> float:
+    """
+    Cout minimal (residu + deviation) atteignable pour un groupe de faces
+    (`face_risk`, un risque par face du groupe) etant donne son masque de
+    compatibilite (n_faces, D). Fonction partagee par _region_growing (cout
+    de fusion vs cout separe) et _select_region_directions (meme formule,
+    jamais deux calculs divergents).
+    """
+    if compat_mask.shape[0] == 0:
+        return 0.0
+    incompatible = ~compat_mask
+    residual = (incompatible * face_risk[:, None]).sum(axis=0)  # (D,)
+    return float((residual + deviation_cost).min())
+
+
+# ---------------------------------------------------------------------------
 # Etape 4 - Region growing pondere
 # ---------------------------------------------------------------------------
 
@@ -188,12 +249,27 @@ def _region_growing(
     compatibility: np.ndarray,
     risk_score: np.ndarray,
     region_count_penalty: float,
+    deviation_cost: np.ndarray,
 ) -> np.ndarray:
     """
     Regroupe les faces en regions par croissance iterative : deux faces
     adjacentes fusionnent si elles partagent au moins une direction
-    candidate compatible commune. Les faces a risque eleve sont traitees en
-    priorite (elles contraignent le plus fortement le choix de direction).
+    candidate compatible commune ET que fusionner coute moins cher que
+    rester separees. Les faces a risque eleve sont traitees en priorite
+    (elles contraignent le plus fortement le choix de direction).
+
+    Le garde-fou geometrique reste inconditionnel : si AUCUNE direction
+    commune ne rend les deux groupes imprimables ensemble, la fusion est
+    refusee independamment du cout (une region ne peut pas retenir une
+    direction qui laisse une de ses faces en surplomb non resolu).
+
+    Quand une fusion est geometriquement possible, elle n'est retenue que
+    si son cout ne depasse pas le cout des deux groupes gardes separes plus
+    `region_count_penalty` (le cout fixe d'avoir une region de plus) : avec
+    `deviation_cost` nul partout (defaut, voir SegmentationParams), cela
+    revient a comparer un residu combine a la somme des residus separes -
+    proche du test binaire d'origine mais pas strictement identique (voir
+    CLAUDE.md pour la verification de non-regression menee sur ce point).
 
     Retourne un tableau region_id (M,) - un identifiant de region par face.
     """
@@ -202,6 +278,11 @@ def _region_growing(
     # ensemble de directions compatibles restantes par region (intersection
     # cumulative des faces qui la composent)
     region_compat = {i: compatibility[i].copy() for i in range(face_count)}
+    # risques des faces membres, par region - necessaire pour calculer le
+    # cout de CHAQUE groupe separement (pas seulement leur intersection de
+    # compatibilite), donc pour comparer fusion vs separation.
+    region_own_risk = {i: np.array([risk_score[i]]) for i in range(face_count)}
+    region_own_compat = {i: compatibility[i:i + 1].copy() for i in range(face_count)}
 
     adjacency_coo = face_adjacency.tocoo()
     # traite les paires de faces les plus a risque en premier : une fusion
@@ -225,16 +306,32 @@ def _region_growing(
         shared_compat = region_compat[r1] & region_compat[r2]
         if not np.any(shared_compat):
             # aucune direction commune ne rend les deux regions imprimables
-            # ensemble : fusion refusee, la regularisation anti-fragmentation
-            # (region_count_penalty) module indirectement ce refus en amont
-            # via l'ordre de traitement (regions a fort risque fusionnees
-            # en priorite), pas ici par un terme de cout explicite.
+            # ensemble : fusion refusee, garde-fou geometrique inconditionnel.
+            continue
+
+        merged_risk = np.concatenate([region_own_risk[r1], region_own_risk[r2]])
+        merged_compat = np.vstack([region_own_compat[r1], region_own_compat[r2]])
+        merged_cost = _best_direction_cost(merged_compat, merged_risk, deviation_cost)
+
+        separate_cost = (
+            _best_direction_cost(region_own_compat[r1], region_own_risk[r1], deviation_cost)
+            + _best_direction_cost(region_own_compat[r2], region_own_risk[r2], deviation_cost)
+            + region_count_penalty
+        )
+
+        if merged_cost > separate_cost:
+            # fusionner couterait plus cher (en deviation evitee) que garder
+            # deux regions separees, meme apres le cout fixe de fragmentation.
             continue
 
         # fusionne r2 dans r1
         region_id[r2] = r1
         region_compat[r1] = shared_compat
+        region_own_risk[r1] = merged_risk
+        region_own_compat[r1] = merged_compat
         del region_compat[r2]
+        del region_own_risk[r2]
+        del region_own_compat[r2]
 
     # normalise les ids finaux (path compression complete + relabeling contigu)
     final_ids = np.array([find(f) for f in range(face_count)])
@@ -251,14 +348,21 @@ def _select_region_directions(
     compatibility: np.ndarray,
     risk_score: np.ndarray,
     directions: np.ndarray,
+    deviation_cost: np.ndarray,
 ) -> dict[int, np.ndarray]:
     """
     Pour chaque region, choisit parmi les directions candidates compatibles
-    avec l'ensemble de ses faces celle qui minimise le risque residuel
-    total. Si aucune direction n'est compatible avec toutes les faces de la
-    region (ne devrait pas arriver si _region_growing a fonctionne
-    correctement, mais gere en filet de securite), choisit la direction qui
-    minimise le risque residuel meme partiellement.
+    avec l'ensemble de ses faces celle qui minimise (risque residuel +
+    deviation_cost). Si aucune direction n'est compatible avec toutes les
+    faces de la region (ne devrait pas arriver si _region_growing a
+    fonctionne correctement, mais gere en filet de securite), choisit la
+    direction qui minimise le cout meme partiellement.
+
+    Le residu reste le critere dominant par construction : deviation_cost
+    n'entre en jeu pour departager que quand plusieurs directions ont un
+    residu egal ou proche (voir _deviation_cost). Meme formule que
+    _best_direction_cost/_region_growing - jamais deux calculs divergents
+    pour la meme notion de cout.
     """
     region_direction: dict[int, np.ndarray] = {}
 
@@ -267,12 +371,11 @@ def _select_region_directions(
         region_compat = compatibility[face_mask]  # (n_faces_in_region, D)
         region_risk = risk_score[face_mask]
 
-        # risque residuel par direction candidate = somme des risques des
-        # faces NON compatibles avec cette direction
         incompatible = ~region_compat  # (n_faces_in_region, D)
         residual_risk = (incompatible * region_risk[:, None]).sum(axis=0)  # (D,)
+        total_cost = residual_risk + deviation_cost
 
-        best_direction_idx = int(np.argmin(residual_risk))
+        best_direction_idx = int(np.argmin(total_cost))
         region_direction[int(region)] = directions[best_direction_idx]
 
     return region_direction
@@ -419,14 +522,15 @@ def run(
     compatibility = _face_direction_compatibility(
         mesh_data.face_normals, directions, params.max_angle_from_direction_deg
     )
+    deviation_cost = _deviation_cost(directions, params.up_vector, params.direction_deviation_weight)
 
     face_adjacency = build_face_adjacency(mesh_data.faces, mesh_data.face_count)
     region_labels = _region_growing(
-        face_adjacency, compatibility, effective_risk, params.region_count_penalty
+        face_adjacency, compatibility, effective_risk, params.region_count_penalty, deviation_cost
     )
 
     region_directions = _select_region_directions(
-        region_labels, compatibility, effective_risk, directions
+        region_labels, compatibility, effective_risk, directions, deviation_cost
     )
 
     return _build_dependency_graph(

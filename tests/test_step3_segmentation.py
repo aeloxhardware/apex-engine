@@ -215,6 +215,99 @@ def test_l_shape_overhang_region_uses_alternate_direction(l_shape_data):
     )
 
 
+def test_l_shape_with_deviation_weight_splits_base_from_arm(l_shape_data):
+    """
+    Avec direction_deviation_weight actif, la base verticale (aucun
+    surplomb) et le bras horizontal (surplomb franc) doivent former des
+    regions SEPAREES, la base retenant une direction proche de la
+    verticale - pas seulement "l'angle moyen retenu est plus petit
+    qu'avant" (un critere trop faible : une seule region a 30 deg au lieu
+    de 54.8 passerait ce test sans resoudre le vrai probleme diagnostique
+    sur out_test.glb : la base doit rester PLATE, pas juste moins inclinee).
+
+    Valeurs calibrees empiriquement (balayage direct, pas devinees) :
+    - direction_deviation_weight=0.2 : avec region_count_penalty=0.005,
+      produit une scission stable sur tout un balayage 0.10-0.50 (marge
+      confortable des deux cotes, voir CLAUDE.md).
+    - region_count_penalty=0.005 : mesure precise du seuil de rupture -
+      la scission se maintient jusqu'a 0.01, se rompt des 0.02 (retombe a
+      1 seule region). 0.005 = moitie du seuil de rupture, marge de
+      securite. L'ancien defaut (0.1) aurait TOUJOURS empeche la scission.
+    """
+    mesh_data, overhang_map = l_shape_data
+    params = SegmentationParams(
+        platform_z=0.0,
+        platform_contact_tolerance=0.5,
+        direction_deviation_weight=0.2,
+        region_count_penalty=0.005,
+    )
+    result = segmentation_run(mesh_data, overhang_map, params)
+
+    up = np.array([0.0, 0.0, 1.0])
+
+    # Faces du bras identifiees par le surplomb REEL (dessous du bras en
+    # porte-a-faux, z=18, cf. l_shape_data), en excluant les coins de la
+    # base au contact du plateau (z=0) : ceux-ci sont geometriquement
+    # "is_overhang" (normale vers le bas) mais leur risque est force a 0 par
+    # _effective_risk_score (ils reposent sur une surface stable, limite #1
+    # CLAUDE.md) - les compter comme "surplomb du bras" serait une erreur de
+    # test, pas un defaut de step3 (verifie concretement : 2 des 4 faces
+    # is_overhang sont a z=0, pas z=18).
+    #
+    # Faces de la base identifiees loin du coude (z<15, cf. l_shape_data :
+    # bras translate a z=20, coude autour de z=18-20.7 mesure), PAS "tout ce
+    # qui n'est pas surplomb" - une face proche du coude peut legitimement
+    # appartenir a la region du bras sans etre elle-meme la face de surplomb
+    # (verifie : region du bras = 5 faces, z de 18.0 a 20.7, dont seulement
+    # 2 sont is_overhang). Un seuil large donnerait un faux negatif de test.
+    face_centers = mesh_data.vertices[mesh_data.faces].mean(axis=1)
+    is_platform_contact = face_centers[:, 2] < (params.platform_z + params.platform_contact_tolerance)
+    overhang_face_ids = np.where(overhang_map.is_overhang & ~is_platform_contact)[0]
+    base_face_ids = np.where(face_centers[:, 2] < 15.0)[0]
+    assert len(base_face_ids) > 0, "fixture invalide : aucune face de base identifiee sous z=15"
+    assert len(overhang_face_ids) > 0, "fixture invalide : aucune face de surplomb du bras (cf. test_step2)"
+
+    def region_ids_for(face_ids: np.ndarray) -> set[int]:
+        ids = set()
+        for region in result.regions.values():
+            if np.intersect1d(region.face_ids, face_ids).size > 0:
+                ids.add(region.id)
+        return ids
+
+    base_region_ids = region_ids_for(base_face_ids)
+    overhang_region_ids = region_ids_for(overhang_face_ids)
+
+    # 1. Ce sont bien des regions DIFFERENTES - le vrai critere, pas un angle moyen.
+    assert base_region_ids.isdisjoint(overhang_region_ids), (
+        "La base verticale et le bras en surplomb devraient former des "
+        "regions separees, pas une region unique inclinee "
+        f"(base={base_region_ids}, bras={overhang_region_ids})"
+    )
+
+    # 2. La region de la base a retenu une direction proche de la verticale.
+    for region_id in base_region_ids:
+        angle = np.degrees(np.arccos(np.clip(
+            np.dot(result.regions[region_id].target_direction, up), -1.0, 1.0
+        )))
+        assert angle < 5.0, (
+            f"La region de la base (region {region_id}) devrait rester "
+            f"quasi-verticale (<5deg), obtenu {angle:.1f}deg"
+        )
+
+    # 3. La region du bras garde une direction significativement inclinee -
+    #    elle DOIT s'ecarter de la verticale, sinon le surplomb du bras
+    #    redevient non supporte (non-regression de
+    #    test_l_shape_overhang_region_uses_alternate_direction ci-dessus).
+    for region_id in overhang_region_ids:
+        angle = np.degrees(np.arccos(np.clip(
+            np.dot(result.regions[region_id].target_direction, up), -1.0, 1.0
+        )))
+        assert angle > 20.0, (
+            f"La region du bras (region {region_id}) doit rester inclinee "
+            f"pour supporter son surplomb, obtenu {angle:.1f}deg"
+        )
+
+
 def test_l_shape_produces_acyclic_graph(l_shape_data):
     mesh_data, overhang_map = l_shape_data
     params = SegmentationParams(platform_z=0.0, platform_contact_tolerance=0.5)
