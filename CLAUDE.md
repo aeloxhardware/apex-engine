@@ -462,6 +462,68 @@ re-dériver la logique d'ordonnancement.
 **Sortie :** `CollisionReport[]` (liste de collisions, vide si aucune).
 
 
+### Modèle 3D de tête d'impression reçu (`res/3d/toolheads/`)
+
+Un premier modèle réel a été reçu pour `MachineProfile.nozzle_model`,
+destiné à l'étape 9 ci-dessus. Cette section documente uniquement le
+FICHIER reçu (emplacement, format, convention de repère) — **aucun code
+n'existe encore pour le charger dans le pipeline** : ni `io/mesh_loader.py`
+(toujours "PAS ENCORE ÉCRIT"), ni branchement dans `MachineProfile.nozzle_model`
+(le champ existe déjà, typé `Any` génériquement, mais reste non alimenté).
+
+- **Emplacement** : `res/3d/toolheads/aetheris-4/aetheris-4.glb` — un
+  sous-dossier par modèle de tête (convention pour accueillir plusieurs
+  têtes interchangeables à l'avenir, cohérent avec la généricité déjà
+  actée pour `MachineProfile.rotation_axes`).
+- **Modèle physique** : BIQU H2 V2S Lite, buse longue (dimensions
+  constructeur : 72.1 × 37.9 × 80.6 mm, avec ventilateur).
+- **Format** : GLB (glTF binaire). `trimesh.load(path)` retourne une
+  `Scene`, **pas** un `Trimesh` direct — la géométrie est nommée
+  `"toolhead"` dans `scene.geometry`. Le mesh brut (`scene.geometry["toolhead"].vertices`)
+  est dans l'espace LOCAL du nœud, pas dans l'espace de la scène : ce
+  fichier porte une rotation + mise à l'échelle composées sur la
+  hiérarchie de nœuds (échelle nette ×0.01 entre le mesh et la racine de
+  la scène, vérifié directement sur ce fichier — extentes locales brutes
+  3.5×7.7×7.6 contre extentes de scène 0.076×0.077×0.035 m). **Ne jamais
+  lire les sommets bruts sans appliquer la transformation de nœud** :
+  utiliser `scene.dump(concatenate=True)` (ou `scene.to_geometry()`) pour
+  obtenir directement un seul `Trimesh` déjà exprimé dans l'espace de la
+  scène, plutôt que de reconstruire la transformation à la main.
+- **Unité : mètres dans le fichier source** (la spec glTF impose le mètre
+  comme unité de base ; confirmé sur ce fichier, aucune extension
+  déclarant une unité alternative). **Conversion ×1000 obligatoire** vers
+  millimètres avant toute utilisation dans le pipeline, qui travaille
+  entièrement en mm (même piège que `platform_z`/`merge_tolerance` déjà
+  documenté ailleurs : une unité qui diverge silencieusement entre deux
+  parties du système). Extentes résultantes après transform de scène et
+  conversion : environ 76 × 77 × 35 mm.
+- **Non étanche (`is_watertight=False`), accepté tel quel — pas de
+  réparation nécessaire.** L'usage prévu à l'étape 9 est un test
+  d'**intersection** entre le mesh de la tête positionné et d'autres mesh
+  (pièce imprimée incrémentale, mandrin/mors, plateau), via
+  `intersects_location` ou équivalent (même famille d'opération déjà
+  utilisée par `step7_scheduling._blocking_layer_along_ray` sur
+  `mesh_data.bvh`) — une intersection surface-surface ne requiert pas
+  l'étanchéité. Seule une opération de volume/inclusion (`contains()`,
+  volume signé) l'exigerait, et ce n'est pas l'opération dont l'étape 9 a
+  besoin pour détecter une collision buse/pièce.
+- **Convention de repère du modèle (à respecter par l'étape 9 lors du
+  positionnement/orientation de `nozzle_model` le long de la trajectoire)** :
+  - **Origine** = point de dépôt de matière (pointe de la buse) — vérifié
+    géométriquement sur ce fichier : le sommet le plus proche de l'origine
+    de la scène est à 0.1 mm, situé exactement à une extrémité du
+    maillage, cohérent avec la convention.
+  - **Axe X (rX)** = axe de rotation de la tête.
+  - **Axe Y** = axe de déplacement de la tête.
+  - **Axe Z** = sens de la tête ; le haut de Z pointe vers le haut
+    physique de la tête.
+  - Cette convention est celle du FICHIER (repère local du modèle de
+    tête), à distinguer du repère `(R, C, Z, B)` de la machine — l'étape 9
+    devra composer les deux (orientation de `nozzle_model` selon
+    `axis_angles` du point de trajectoire courant, puis translation à sa
+    position) au moment de son implémentation, non faite ici.
+
+
 ## Étape 10 — Ajustement en cas de collision détectée
 
 **Ce que le code fait précisément (boucle itérative, jusqu'à `max_adjustment_iterations`) :**
