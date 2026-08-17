@@ -67,12 +67,12 @@ def test_single_axis_locked_produces_one_sample():
 
 
 # ---------------------------------------------------------------------------
-# Cas HPI/HPE : couverture spherique complete MESUREE, pas supposee
+# Cas machine actuelle : couverture spherique complete MESUREE, pas supposee
 # ---------------------------------------------------------------------------
 
-def test_two_axis_hpi_hpe_kinematics_covers_full_sphere():
+def test_two_axis_current_machine_kinematics_covers_full_sphere():
     """
-    Machine HPI/HPE : axe plateau (tour complet) + axe tete perpendiculaire
+    Machine actuelle : axe plateau (tour complet) + axe tete perpendiculaire
     (demi-plage 0-180deg). CLAUDE.md limite #18 affirme que cette
     configuration couvre la sphere complete - verifie ici par le calcul
     (dispersion des z, x, y sur toute leur plage possible), pas suppose vrai
@@ -101,7 +101,8 @@ def test_two_axis_hpi_hpe_kinematics_covers_full_sphere():
 def test_two_axis_restricted_kinematics_does_not_cover_full_sphere():
     """
     Contre-preuve explicitement requise : une cinematique a 2 axes tous deux
-    a plage restreinte (0-90deg chacun, PAS une configuration HPI/HPE) ne
+    a plage restreinte (0-90deg chacun, PAS la configuration de la machine
+    actuelle) ne
     doit PAS couvrir la sphere complete - prouve que le systeme ne fait
     aucune hypothese cachee du type "2 axes => sphere complete", ce qui
     serait retomber sur une reference figee deguisee.
@@ -118,10 +119,10 @@ def test_two_axis_restricted_kinematics_does_not_cover_full_sphere():
 
     # une cinematique restreinte sur les deux DOF ne peut pas atteindre tout
     # l'hemisphere oppose a la reference - la composante correspondante ne
-    # doit pas approcher +1 comme dans le cas HPI/HPE
+    # doit pas approcher +1 comme dans le cas de la machine actuelle
     assert directions[:, 2].max() < 0.95, (
         "Une cinematique a 2 axes tous deux restreints ne devrait pas "
-        "couvrir la sphere complete, contrairement au cas HPI/HPE"
+        "couvrir la sphere complete, contrairement au cas de la machine actuelle"
     )
 
 

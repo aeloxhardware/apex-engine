@@ -286,7 +286,7 @@ class RotationAxisSpec:
     liste — même convention que l'ordre d'application matricielle).
 
     `angle_range_deg` peut être `(0, 360)` pour un tour complet, une plage
-    restreinte (ex: `(0, 180)` pour la tête de la machine HPI/HPE actuelle),
+    restreinte (ex: `(0, 180)` pour la tête de la machine actuelle),
     ou `(v, v)` pour un DOF figé à une seule valeur — dégénérescence utile
     qui permet de décrire un axe verrouillé sans le retirer de la liste.
     """
@@ -299,7 +299,7 @@ class MachineProfile:
     """
     Cinématique de la machine, décrite comme une liste ORDONNÉE et
     PARAMÉTRABLE d'axes de rotation — PAS un modèle figé sur une seule
-    machine. La machine actuelle (HPI/HPE : plateau C + tête B∈[0°,180°])
+    machine. La machine actuelle (plateau C + tête B∈[0°,180°])
     n'est qu'UN cas d'usage à valider parmi d'autres cinématiques futures
     (un seul DOF, deux DOF différemment agencés, plus de deux DOF) ; voir
     CLAUDE.md limite de conception #18.
@@ -309,7 +309,7 @@ class MachineProfile:
     - 2 éléments comme la machine actuelle : un exemple parmi d'autres
       configurations possibles, pas la référence du type lui-même.
 
-    Commande firmware de la machine HPI/HPE actuelle (gabarit symbolique,
+    Commande firmware de la machine actuelle (gabarit symbolique,
     pas de valeurs numériques fictives) : `G00 Y<C> X<R> Z<Z> B<B> F<feedrate>`.
     """
     rotation_axes: list["RotationAxisSpec"] = field(default_factory=list)
@@ -331,17 +331,38 @@ class MachineProfile:
 @dataclass
 class ToolpathPoint:
     """
-    Un point de trajectoire dans la cinématique réelle (R, C, Z, B) — PAS un
-    unique `rotation_angle` générique, structurellement insuffisant pour
-    représenter deux rotations indépendantes (plateau + tête).
+    Un point de trajectoire dans la cinématique GÉNÉRIQUE de la machine —
+    `axis_angles` porte un angle par élément de `MachineProfile.rotation_axes`,
+    même ordre, quel que soit N (0, 1, 2, ...). Remplace les anciens champs
+    `radius`/`platform_angle`/`head_angle`, qui figeaient la structure sur
+    exactement 2 DOF nommés "plateau"/"tête" — une hypothèse invalidée par la
+    généralisation à N axes composés (voir CLAUDE.md limite #18).
+
+    La traduction finale vers une commande firmware précise (ordre X/Y/Z/B,
+    noms d'axes) est délibérément HORS de ce type : c'est la responsabilité
+    d'un futur module d'export (`io/gcode_export.py`), spécifique à une
+    machine donnée, jamais de step8 ni de ce contrat de données générique.
     """
     position: Vec3                  # cartésien machine, pour vérification/debug (étape 9)
-    radius: float                   # R, mm
-    platform_angle: float           # C, degrés
-    head_angle: float                # B, degrés — contraint à [0, 180] par construction
+    axis_angles: list[float]        # un angle en degrés par MachineProfile.rotation_axes, même ordre
     extrusion: float
     feedrate: float
     color_id: Optional[int] = None
+
+
+@dataclass
+class Step8Diagnostic:
+    """
+    Signal "orientation désirée inatteignable dans les plages d'axes
+    disponibles à cette position" — donnée pure remontée par l'étape 8 vers
+    l'étape 10 (ajustement), qui n'a besoin d'aucune connaissance de la
+    résolution IK interne à l'étape 8 pour la consommer.
+    """
+    point_index: int                # index dans ToolpathMachine.points
+    layer_id: int
+    segment_index: int              # index dans Layer.toolpath_2d de la couche layer_id
+    residual_angle_error_deg: float
+    position: Vec3
 
 
 @dataclass

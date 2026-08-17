@@ -99,7 +99,7 @@ slicer_engine/
 │   ├── step5_layers.py              # FAIT — extraction des couches courbes (12 tests)
 │   ├── step6_toolpath2d.py          # FAIT — remplissage 2D par couche (8 tests)
 │   ├── step7_scheduling.py          # FAIT — couleur + ordonnancement trous/purges (19 tests)
-│   ├── step8_machine_toolpath.py    # PAS ENCORE ÉCRIT
+│   ├── step8_machine_toolpath.py    # FAIT — resolution IK generique N-axes (16 tests)
 │   ├── step9_collision_sim.py       # PAS ENCORE ÉCRIT
 │   └── step10_adjustment.py         # PAS ENCORE ÉCRIT
 ├── core/
@@ -107,7 +107,10 @@ slicer_engine/
 │   ├── mesh_types.py                # FAIT — toutes les dataclasses partagées (voir détail plus bas)
 │   ├── geometry_utils.py            # FAIT — build_face_adjacency, fibonacci_sphere_directions,
 │   │                                 #   rotation_axis_circle_directions, composed_rotation_directions
-│   │                                 #   (N axes composes, cinematique generique), point_in_polygon_2d
+│   │                                 #   (N axes composes, cinematique generique),
+│   │                                 #   composed_rotation_angles_and_directions,
+│   │                                 #   refine_axis_angles_local_search (IK generique, step8),
+│   │                                 #   point_in_polygon_2d
 │   └── constraints.py               # FAIT — registre extensible d'assembleurs de contraintes
 │                                     #   utilisateur (ATTACH_POINT/AESTHETIC/STRUCTURAL), point
 │                                     #   d'extension pour tout nouveau type sans toucher step4
@@ -122,12 +125,23 @@ slicer_engine/
     ├── test_step5_layers.py         # FAIT — 12 tests
     ├── test_step6_toolpath2d.py     # FAIT — 8 tests
     ├── test_step7_scheduling.py     # FAIT — 19 tests
-    └── test_geometry_utils.py       # FAIT — 6 tests (composed_rotation_directions)
+    ├── test_geometry_utils.py       # FAIT — 6 tests (composed_rotation_directions)
+    └── test_step8_machine_toolpath.py  # FAIT — 16 tests
 ```
 
-**État global : 67/67 tests passants** (step2 à step7 + core/geometry_utils.py).
-Étapes 1 à 7 du pipeline stables et testées ; step8 (trajectoire machine)
-est la prochaine à écrire.
+**État global : 83/83 tests passants** (step2 à step8 + core/geometry_utils.py).
+Étapes 1 à 8 du pipeline stables et testées ; step9 (simulation de
+collision) est la prochaine à écrire.
+
+**Environnement Python du projet** : venv local (`.venv/`, ignoré par git)
+sur **Python 3.14** — pas 3.12, qui a cessé de fonctionner sur cette
+machine (interpréteur plantant avec `STATUS_DLL_INIT_FAILED` dès `python -c
+"print(1+1)"`, indépendant du code du projet). Toutes les dépendances
+listées ci-dessous s'installent sans compilation sur 3.14 (wheels
+précompilées disponibles pour chacune, y compris `tetgen` dont la wheel est
+`cp312-abi3` mais compatible ABI3 avec 3.14). Recréer l'environnement :
+`python -m venv .venv` puis `.venv\Scripts\python.exe -m pip install
+trimesh scipy tetgen rtree manifold3d networkx shapely pytest`.
 
 **Dépendances Python requises** (installer via pip) :
 ```
@@ -151,14 +165,14 @@ MachineProfile {
   // future (un seul DOF, deux DOF différemment agencés, plus de deux DOF)
   // se décrit par sa propre liste rotation_axes, sans changer le contrat.
   // Voir limite de conception #18 (composition de N rotations, la machine
-  // HPI/HPE n'est qu'un cas d'usage parmi d'autres) et #19 (singularité au
+  // actuelle n'est qu'un cas d'usage parmi d'autres) et #19 (singularité au
   // centre du premier axe de rotation, si applicable).
   rotation_axes: RotationAxisSpec[] {
     axis: Vec3                        // unitaire, dans le repère du DOF parent
     angle_range_deg: {min: float, max: float}  // (0,360) tour complet, plage
                                                  // restreinte, ou (v,v) fige
   }
-  // Exemple d'usage — machine HPI/HPE actuelle (commande firmware, gabarit
+  // Exemple d'usage — machine actuelle (commande firmware, gabarit
   // symbolique) : G00 Y<C> X<R> Z<Z> B<B> F<feedrate>
   //   R (firmware "X") = rayon du plateau, mm ; C (firmware "Y") = rotation
   //   du plateau, degrés ; Z (firmware "Z") = hauteur ; B (firmware "B") =
@@ -234,7 +248,7 @@ Voici la spécification complète, étape par étape, avec les données précise
 MachineProfile {
   // Cinématique décrite par rotation_axes (liste paramétrable de N axes) —
   // voir le premier bloc MachineProfile ci-dessus pour le détail complet
-  // (gabarit générique, exemple HPI/HPE, limites #18/#19). Rappel synthétique :
+  // (gabarit générique, exemple machine actuelle, limites #18/#19). Rappel synthétique :
   rotation_axes: RotationAxisSpec[]   // N axes ordonnés, chacun {axis, angle_range_deg}
   platform_origin: Vec3             // centre du premier axe (si applicable) — singularité éventuelle
   nozzle_model: Mesh                                 // maillage 3D de la tête (buse + porte-buse + carriage proche)
@@ -645,7 +659,7 @@ re-dériver la logique d'ordonnancement.
     complète → dégénère exactement vers le cercle à 1 DOF).
     `SegmentationParams`/`Step7Params` exposent `rotation_axes: list[RotationAxisSpec]`
     ; `MachineProfile.rotation_axes` décrit la cinématique réelle de la
-    machine utilisée. **Résultat mesuré (pas supposé) pour la machine HPI/HPE
+    machine utilisée. **Résultat mesuré (pas supposé) pour la machine
     actuelle en particulier**, un cas d'usage parmi d'autres possibles, pas
     la référence du type : `C` balaie un tour complet et `B ∈ [0°, 180°]`
     (jamais négatif), donc l'ensemble des directions de dépôt atteignables
@@ -697,9 +711,18 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
   repère de son parent) ; `MachineProfile` (**`rotation_axes: list[RotationAxisSpec]`**
   — cinématique décrite génériquement, N axes ordonnés et paramétrables,
   jamais figée sur une seule machine, voir limite #18)
-- `ToolpathPoint` (**`radius`/`platform_angle`/`head_angle`** — (R, C, B)
-  explicites, PAS un `rotation_angle` unique, structurellement insuffisant
-  pour deux rotations indépendantes), `ToolpathMachine` — étape 8
+- `ToolpathPoint` (**`axis_angles: list[float]`** — un angle par élément de
+  `MachineProfile.rotation_axes`, même ordre ; remplace les anciens
+  `radius`/`platform_angle`/`head_angle`, qui figeaient la structure sur
+  exactement 2 DOF nommés "plateau"/"tête" — hypothèse invalidée par la
+  généralisation à N axes composés, limite #18. La traduction vers une
+  commande firmware précise (X/Y/Z/B) est délibérément hors de ce type,
+  reportée à un futur `io/gcode_export.py`), `Step8Diagnostic`
+  (**donnée pure** — position, layer_id, segment_index, erreur angulaire
+  résiduelle en degrés — signalant une orientation désirée inatteignable
+  dans les plages d'axes disponibles ; l'étape 8 ne lève JAMAIS d'exception
+  pour ce cas, elle accumule ces diagnostics pour l'étape 10),
+  `ToolpathMachine` — étape 8
 - `CollisionEvent`, `CollisionReport` — étape 9
 - `AdjustmentLogEntry` — étape 10
 
@@ -724,6 +747,22 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
 - `point_in_polygon_2d(point, polygon) -> bool` — ray-casting standard, utilisé
   par step5 (test de cohérence) et step6 (classification contour/trou) pour
   l'imbrication géométrique — voir limite #11.
+- `composed_rotation_angles_and_directions(axes, reference_direction, samples_per_axis) -> (ndarray, ndarray)` —
+  même grille produit que `composed_rotation_directions`, mais retourne
+  aussi les angles par axe (degrés) associés à chaque direction. Requis par
+  step8 : une résolution cinématique inverse doit repartir d'angles
+  concrets une fois le plus proche voisin trouvé, pas seulement de la
+  direction résultante. `composed_rotation_directions` est désormais un
+  wrapper mince autour de cette fonction (comportement inchangé, vérifié
+  par la suite de tests existante).
+- `refine_axis_angles_local_search(axes, reference_direction, initial_angles_deg, target_direction, iterations, initial_step_deg) -> (ndarray, float)` —
+  affinement générique par coordinate-descent d'un jeu d'angles vers une
+  direction cible, utilisé par step8 après la recherche de plus proche
+  voisin. Seule primitive par-axe : `_rodrigues_rotate` (déjà existante) —
+  généralise à N axes sans jacobien analytique par-N. Le pas initial DOIT
+  être dérivé de l'écart de la grille NN (`360/samples_per_axis`), pas une
+  constante fixe, sous peine de rester piégé près du candidat NN (mesuré :
+  résidu ~15-20° avec un pas fixe de 2° contre <0.1° avec un pas dérivé).
 
 ## Détail de `core/constraints.py`
 
@@ -804,6 +843,51 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
   couleur active aussi longtemps que possible) + EDF sur les trous, pas un
   optimum global du nombre de purges.
 
+## Détail de `pipeline/step8_machine_toolpath.py`
+
+- `run(layers, schedule, machine_profile, params) -> (ToolpathMachine,
+  list[Step8Diagnostic])`. `layers` doit être les couches **retournées par
+  step7** (`colored_layers`), pas celles d'entrée de step7 : `PrintPass.segments`
+  pointe vers `toolpath_2d` re-découpé par couleur.
+- `_resolve_axis_angles` : pas de cinématique inverse analytique (impossible
+  à écrire génériquement pour N axes arbitraires). Recherche du plus proche
+  voisin sur `composed_rotation_angles_and_directions`, puis affinement par
+  `refine_axis_angles_local_search` — le pas initial de l'affinement est
+  dérivé de l'écart de la grille NN (`Step8Params.ik_refine_step_multiplier
+  * 360/ik_samples_per_axis`), pas une constante fixe (voir détail
+  `core/geometry_utils.py` ci-dessus).
+- `_detect_singular_axes` / `_inherit_angle_at_singularity` : généralise
+  « R≈0 ⇒ C indéterminé » (limite #19) à **n'importe quel axe** de la
+  chaîne, pas seulement le premier — pour chaque axe, distance
+  perpendiculaire de la position courante à sa droite de rotation propre
+  (`_axis_chain_world_lines`, toutes ancrées à `MachineProfile.platform_origin`).
+  Un axe signalé singulier hérite l'angle du point précédent, **avant** le
+  lissage temporel, pour que le filtre de lissage ne voie jamais un saut
+  artificiel à corriger.
+- Aucune exception pour une orientation inatteignable : `Step8Diagnostic`
+  (position, layer_id, segment_index, erreur résiduelle en degrés) est une
+  donnée pure accumulée par `run`, consommée par l'étape 10 sans connaître
+  la résolution IK interne. `ToolpathResolutionError` reste réservée aux
+  entrées structurellement invalides (`toolpath_2d` manquant, segment hors
+  limites) — même distinction que `SchedulingError` à l'étape 7.
+- `_clamp_rate` : limiteur de taux causal (vitesse puis accélération),
+  préféré à une spline car les limites machine sont des contraintes dures
+  qu'un clamp respecte par construction. `_unwrap_angle_sequence`/
+  `_rewrap_angle_sequence` gèrent le wraparound uniquement pour un axe à
+  tour complet (`angle_range_deg` couvrant ≥360°) — une plage bornée
+  strictement ne peut par construction pas boucler, le dépliage y serait
+  une discontinuité inventée.
+- `_iter_schedule_points` : détecte les frontières de trajet à vide par
+  changement de clé `(layer_id, index)` entre segments consécutifs de
+  `PrintPass.segments`, y compris entre deux passes non contiguës —
+  `toolpath_2d` ne porte aucun marqueur de trajet à vide par construction
+  (décision actée à l'étape 6), c'est entièrement la responsabilité de
+  l'étape 8.
+- `ToolpathPoint.axis_angles` est la seule sortie de step8 — délibérément
+  agnostique de tout firmware. La traduction vers une commande machine
+  précise (ordre X/Y/Z/B, noms d'axes) est repoussée à un futur
+  `io/gcode_export.py`, pas codée ici.
+
 ---
 
 ## Conventions de code à respecter
@@ -823,24 +907,24 @@ type ne nécessite jamais de modifier `step4_field_solver.py` :
 
 ## Prochaine étape
 
-Étapes 1 à 7 stables et testées (67/67 tests). `MachineProfile` décrit
-maintenant une cinématique générique à N axes de rotation composés
-(`rotation_axes: list[RotationAxisSpec]`, voir limites #18/#19) ; step3 et
-step7 dispatchent tous deux sur `composed_rotation_directions` sans
-hypothèse figée sur le nombre d'axes de la machine réellement utilisée.
+Étapes 1 à 8 stables et testées (83/83 tests). `MachineProfile` décrit une
+cinématique générique à N axes de rotation composés (`rotation_axes:
+list[RotationAxisSpec]`, voir limites #18/#19) ; step3, step7 et step8
+dispatchent tous sur la même famille de fonctions génériques
+(`composed_rotation_directions`/`composed_rotation_angles_and_directions`)
+sans hypothèse figée sur le nombre d'axes de la machine réellement
+utilisée. step8 résout position/orientation désirée en angles concrets par
+recherche + affinement local (pas de cinématique inverse analytique,
+généralisable à N axes sans jacobien par-N) — voir « Détail de
+`pipeline/step8_machine_toolpath.py` » ci-dessus.
 
-`pipeline/step8_machine_toolpath.py` lui-même n'est pas encore écrit, ni
-planifié en détail : consommer `PrintSchedule.passes` **dans l'ordre**
-(aucune logique d'ordonnancement à re-dériver, gelée à l'étape 7), relever
-chaque segment `(layer_id, index)` du repère local 2D vers le cartésien
-machine via `Layer.local_frame` (`step6._lift_to_3d` fait déjà la moitié du
-travail), PUIS résoudre position/orientation désirée en valeurs concrètes
-d'angles pour CHAQUE axe de `MachineProfile.rotation_axes` (pas seulement
-2, le cas HPI/HPE), en respectant la plage de chaque axe et la singularité
-géométrique au centre du premier axe si applicable (limite #19), lisser la
-série temporelle d'angles pour `max_angular_velocity`/`max_angular_acceleration`,
-garantir la continuité d'extrusion. Un plan dédié à step8 doit encore
-trancher l'algorithme précis de résolution multi-axes (notamment le cas où
-la plage d'un axe interne est dépassée : réessai via un axe externe, ou
-signal vers l'étape 10) — non fait ici, et à concevoir génériquement plutôt
-que spécifiquement pour 2 axes.
+`pipeline/step9_collision_sim.py` est la prochaine étape non écrite :
+simulation de collision du modèle 3D de la tête (`MachineProfile.nozzle_model`)
+contre la pièce déjà imprimée (état incrémental, pas le mesh final complet),
+le mandrin/mors, et le plateau à son angle courant, en consommant
+`ToolpathMachine.points` (positions + `axis_angles`) produit par l'étape 8.
+Un plan dédié à step9 doit encore trancher : comment reconstruire la
+géométrie « déjà imprimée jusqu'à ce point » de façon incrémentale sans
+recalculer un mesh complet à chaque échantillon, et comment positionner
+`nozzle_model` à partir de `axis_angles` (générique, N axes) plutôt que
+d'une paire angle plateau/tête figée en dur.
