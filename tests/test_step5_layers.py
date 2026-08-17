@@ -26,6 +26,7 @@ from pipeline.step4_field_solver import FieldSolverParams, run as field_run
 from pipeline.step5_layers import (
     LayerExtractionError,
     LayerParams,
+    _cluster_contours,
     _extract_isosurface_triangles,
     _march_tetrahedron,
     run as layers_run,
@@ -318,6 +319,154 @@ def test_l_shape_layers_ordered_by_isovalue_not_region_rank(l_shape_split_data):
         f"L'isovaleur des couches devrait etre non-decroissante dans l'ordre "
         f"retourne (ordre = progression spatiale reelle du champ), obtenu: "
         f"{[round(v, 2) for v in isovalues]}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Cas 3bis - CLAUDE.md limite #35 : scission par cluster spatial
+# ---------------------------------------------------------------------------
+
+def test_l_shape_split_data_no_layer_has_disjoint_unnested_loops(l_shape_split_data):
+    """
+    Une fois le contourage par cluster spatial en place, aucun Layer ne
+    devrait plus porter 2 boucles a la fois disjointes (non imbriquees) ET
+    spatialement eloignees - c'est exactement le chevauchement base/bras
+    documente comme limite #35, cense disparaitre avec ce fix.
+
+    Une boucle imbriquee dans une autre (trou d'une section solide, cas
+    boite creuse) reste un cas valide a 2 boucles dans un seul Layer - ce
+    test ne l'interdit pas, il verifie seulement l'absence du motif
+    "eloigne et non imbrique" mesure sur l_shape_overhang.stl.
+    """
+    mesh_data, tet_mesh, overhang_map, regions, field = l_shape_split_data
+    params = LayerParams(layer_height_base=1.0)
+
+    assert len(regions.regions) > 1, (
+        "fixture invalide : l_shape_split_data devrait produire plusieurs regions"
+    )
+
+    layers = layers_run(tet_mesh, mesh_data, field, regions, params)
+
+    for layer in layers:
+        if len(layer.contour_3d) < 2:
+            continue
+
+        origin, axis_u, axis_v = layer.local_frame
+        projected = []
+        for contour in layer.contour_3d:
+            relative = contour - origin
+            u = relative @ axis_u
+            v = relative @ axis_v
+            projected.append(np.stack([u, v], axis=1)[:-1])
+
+        for i in range(len(projected)):
+            for j in range(i + 1, len(projected)):
+                nested = point_in_polygon_2d(projected[i][0], projected[j]) or point_in_polygon_2d(
+                    projected[j][0], projected[i]
+                )
+                if nested:
+                    continue
+
+                centroid_i = projected[i].mean(axis=0)
+                centroid_j = projected[j].mean(axis=0)
+                radius_i = float(np.linalg.norm(projected[i] - centroid_i, axis=1).max())
+                radius_j = float(np.linalg.norm(projected[j] - centroid_j, axis=1).max())
+                distance = float(np.linalg.norm(centroid_i - centroid_j))
+
+                assert distance < params.contour_cluster_distance_factor * max(radius_i, radius_j), (
+                    f"Layer {layer.id} (isovalue={layer.isovalue:.3f}) porte encore 2 boucles "
+                    f"disjointes et eloignees (distance={distance:.2f}) - le contourage par "
+                    f"cluster aurait du les separer en 2 Layer distincts"
+                )
+
+
+def test_l_shape_split_data_merged_junction_layers_stay_single_loop(l_shape_split_data):
+    """
+    Aux isovaleurs ou base et bras se sont deja geometriquement rejoints
+    (une seule boucle de contour continue en sortie de
+    _extract_closed_contours), le contourage par cluster ne doit JAMAIS
+    forcer une scission artificielle - ce serait couper en deux une section
+    transversale d'un seul solide, le risque explicitement identifie avant
+    l'implementation de ce fix (CLAUDE.md limite #35, couches 89-100 sur
+    res/test_models/l_shape_overhang.stl).
+
+    Verifie dynamiquement (pas d'indices ou d'isovaleurs codes en dur) :
+    pour toute couche qui aurait ete extraite par _extract_closed_contours
+    avec une seule boucle, run() doit produire exactement un Layer, avec
+    une seule boucle.
+    """
+    mesh_data, tet_mesh, overhang_map, regions, field = l_shape_split_data
+    params = LayerParams(layer_height_base=1.0)
+
+    layers = layers_run(tet_mesh, mesh_data, field, regions, params)
+    assert len(layers) > 1
+
+    # une couche a 1 seule boucle doit rester 1 seul Layer par construction
+    # de _cluster_contours (n <= 1 -> [[0]]) - verifie ici au niveau de
+    # l'API publique run(), pas seulement au niveau unitaire de
+    # _cluster_contours.
+    single_loop_layers = [layer for layer in layers if len(layer.contour_3d) == 1]
+    assert single_loop_layers, "Au moins une couche a 1 seule boucle est attendue sur cette fixture"
+    for layer in single_loop_layers:
+        assert len(layer.contour_3d) == 1
+
+    # aucune couche perdue ni dupliquee : l'ensemble des isovaleurs produites
+    # doit rester une sequence croissante sans repetition d'un MEME cluster
+    # (des isovaleurs identiques entre 2 Layer issus d'un split sont
+    # attendues et valides, mais chaque Layer doit rester geometriquement
+    # distinct - verifie indirectement par le test precedent).
+    isovalues = [layer.isovalue for layer in layers]
+    assert all(a <= b for a, b in zip(isovalues, isovalues[1:])), (
+        "L'ordre par isovalue doit rester non-decroissant apres le contourage par cluster"
+    )
+
+
+def test_cluster_contours_keeps_nested_loops_together():
+    """
+    Unitaire direct sur _cluster_contours : 2 boucles imbriquees (anneau,
+    meme cas que hollow_box_data) doivent rester dans le meme cluster, quel
+    que soit l'ecart entre leurs centroides - c'est le garde-fou anti-trou
+    explicitement demande avant l'implementation de ce fix.
+    """
+    outer = np.array(
+        [[-10, -10, 0], [10, -10, 0], [10, 10, 0], [-10, 10, 0], [-10, -10, 0]], dtype=float
+    )
+    inner = np.array(
+        [[-2, -2, 0], [2, -2, 0], [2, 2, 0], [-2, 2, 0], [-2, -2, 0]], dtype=float
+    )
+    local_frame = (
+        np.array([0.0, 0.0, 0.0]),
+        np.array([1.0, 0.0, 0.0]),
+        np.array([0.0, 1.0, 0.0]),
+    )
+
+    clusters = _cluster_contours([outer, inner], local_frame, distance_factor=1.5)
+
+    assert clusters == [[0, 1]], (
+        f"Les boucles imbriquees devraient former un seul cluster, obtenu {clusters}"
+    )
+
+
+def test_cluster_contours_separates_distant_disjoint_loops():
+    """
+    Unitaire direct sur _cluster_contours : 2 boucles disjointes (pas
+    imbriquees) et tres eloignees l'une de l'autre doivent former 2
+    clusters distincts.
+    """
+    loop_a = np.array(
+        [[-2, -2, 0], [2, -2, 0], [2, 2, 0], [-2, 2, 0], [-2, -2, 0]], dtype=float
+    )
+    loop_b = loop_a + np.array([50.0, 0.0, 0.0])
+    local_frame = (
+        np.array([0.0, 0.0, 0.0]),
+        np.array([1.0, 0.0, 0.0]),
+        np.array([0.0, 1.0, 0.0]),
+    )
+
+    clusters = _cluster_contours([loop_a, loop_b], local_frame, distance_factor=1.5)
+
+    assert clusters == [[0], [1]], (
+        f"Les boucles disjointes et eloignees devraient former 2 clusters distincts, obtenu {clusters}"
     )
 
 

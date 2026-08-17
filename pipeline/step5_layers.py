@@ -39,6 +39,7 @@ import networkx as nx
 import numpy as np
 import trimesh
 
+from core.geometry_utils import point_in_polygon_2d
 from core.mesh_types import Layer, MeshData, RegionDependencyGraph, ScalarField, TetMesh
 
 
@@ -54,6 +55,17 @@ class LayerParams:
     # bord dus au bruit flottant plutot qu'a une vraie discontinuite
     # geometrique (cf. Decision 5 du plan).
     weld_tolerance_factor: float = 1e-6
+    # Seuil de regroupement des boucles de contour non-imbriquees d'une
+    # meme couche en clusters spatiaux distincts (voir _cluster_contours et
+    # CLAUDE.md limite #35) : deux boucles sont dans le meme cluster si la
+    # distance entre leurs centroides projetes est < ce facteur * le plus
+    # grand rayon des deux boucles. Calibre empiriquement sur
+    # res/test_models/l_shape_overhang.stl : separe correctement les 49
+    # couches a 2 boucles disjointes (base/bras, ecart mesure >= ~4mm pour
+    # un rayon de boucle ~2mm) sans jamais scinder les 12 couches ou les
+    # boucles ont deja fusionne en 1 seule (donc hors du champ d'action de
+    # ce seuil, qui ne voit jamais qu'une boucle a ces couches-la).
+    contour_cluster_distance_factor: float = 1.5
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +432,77 @@ def _compute_local_frame(
 
 
 # ---------------------------------------------------------------------------
+# Decision 7 - Regroupement des boucles de contour en clusters spatiaux
+# (CLAUDE.md limite #35 : resout le chevauchement base/bras a la racine,
+# plutot que de laisser step7 optimiser un trajet impose par un seul Layer
+# portant des boucles eloignees.)
+# ---------------------------------------------------------------------------
+
+def _cluster_contours(
+    contours: list[np.ndarray],
+    local_frame: tuple[np.ndarray, np.ndarray, np.ndarray],
+    distance_factor: float,
+) -> list[list[int]]:
+    """
+    Regroupe les indices de `contours` (boucles fermees (K,3) d'une meme
+    isovaleur) en clusters spatialement distincts, pour que step5 puisse
+    emettre un Layer par cluster plutot qu'un seul Layer partageant des
+    boucles eloignees (limite #35).
+
+    Deux boucles restent dans le MEME cluster si :
+      (a) l'une est imbriquee dans l'autre (test point_in_polygon_2d sur un
+          point de l'une contre le polygone de l'autre) - c'est un trou
+          dans une section solide unique (cas boite creuse), jamais une
+          scission valide ; OU
+      (b) leurs centroides projetes sont plus proches que
+          `distance_factor * max(rayon_a, rayon_b)` - evite de separer des
+          boucles disjointes mais adjacentes (cas des couches ou base et
+          coude sont sur le point de fusionner).
+
+    Une couche a 1 seule boucle retourne trivialement [[0]] (comportement
+    actuel inchange). Aucune geometrie n'est modifiee ici : uniquement un
+    regroupement des boucles deja extraites par _extract_closed_contours.
+    """
+    n = len(contours)
+    if n <= 1:
+        return [[i] for i in range(n)]
+
+    origin, axis_u, axis_v = local_frame
+
+    projected = []
+    centroids = []
+    radii = []
+    for contour in contours:
+        relative = contour - origin
+        u = relative @ axis_u
+        v = relative @ axis_v
+        poly = np.stack([u, v], axis=1)[:-1]  # sans le point de fermeture duplique
+        projected.append(poly)
+        centroid = poly.mean(axis=0)
+        centroids.append(centroid)
+        radii.append(float(np.linalg.norm(poly - centroid, axis=1).max()) if len(poly) else 0.0)
+
+    graph = nx.Graph()
+    graph.add_nodes_from(range(n))
+
+    for i in range(n):
+        for j in range(i + 1, n):
+            nested = point_in_polygon_2d(projected[i][0], projected[j]) or point_in_polygon_2d(
+                projected[j][0], projected[i]
+            )
+            if nested:
+                graph.add_edge(i, j)
+                continue
+
+            centroid_distance = float(np.linalg.norm(centroids[i] - centroids[j]))
+            threshold = distance_factor * max(radii[i], radii[j])
+            if centroid_distance < threshold:
+                graph.add_edge(i, j)
+
+    return [sorted(component) for component in nx.connected_components(graph)]
+
+
+# ---------------------------------------------------------------------------
 # Point d'entree principal de l'etape
 # ---------------------------------------------------------------------------
 
@@ -479,6 +562,8 @@ def run(
     scale = float(np.ptp(tet_mesh.tet_vertices, axis=0).max()) or 1.0
     weld_tolerance = params.weld_tolerance_factor * scale
 
+    tet_centers = tet_mesh.tet_vertices[tet_mesh.tetrahedra].mean(axis=1)
+
     raw_layers: list[tuple[float, list[np.ndarray], list[int], tuple[np.ndarray, np.ndarray, np.ndarray]]] = []
 
     for isovalue in isovalues:
@@ -494,13 +579,37 @@ def run(
             continue
 
         unique_tets = np.unique(source_tets)
-        region_ids = sorted({int(r) for r in tet_regions[unique_tets] if r >= 0})
-
         local_frame = _compute_local_frame(
             contours, scalar_field.gradient[unique_tets], volumes[unique_tets]
         )
 
-        raw_layers.append((float(isovalue), contours, region_ids, local_frame))
+        # Limite #35 : regroupe les boucles non-imbriquees et spatialement
+        # eloignees en clusters distincts, pour emettre un Layer par
+        # cluster plutot qu'un seul Layer partageant des boucles eloignees
+        # (voir _cluster_contours et CLAUDE.md). Un cluster hérite le
+        # local_frame de la couche entiere (approximation deliberee - un
+        # nouveau plan par cluster serait plus precis mais introduirait une
+        # normale locale differente entre clusters d'une meme isovaleur,
+        # non justifiee : le champ, lui, reste global).
+        clusters = _cluster_contours(contours, local_frame, params.contour_cluster_distance_factor)
+
+        for cluster_indices in clusters:
+            cluster_contours = [contours[i] for i in cluster_indices]
+
+            # region_ids du cluster : tetraedres sources dont le centroide
+            # est le plus proche d'un point de CE cluster precisement (pas
+            # de la couche entiere) - reutilise le meme pont KDTree que
+            # _map_tets_to_regions, mais restreint aux tetraedres candidats
+            # de cette isovaleur pour rester coherent avec source_tets.
+            cluster_points = np.concatenate(cluster_contours, axis=0)
+            candidate_centers = tet_centers[unique_tets]
+            dists = np.linalg.norm(
+                candidate_centers[:, None, :] - cluster_points[None, :, :], axis=2
+            )
+            nearest_candidate = unique_tets[np.argmin(dists, axis=0)]
+            region_ids = sorted({int(r) for r in tet_regions[nearest_candidate] if r >= 0})
+
+            raw_layers.append((float(isovalue), cluster_contours, region_ids, local_frame))
 
     # Isovaleur SEULE - voir la docstring de run() pour pourquoi le rang
     # topologique de region ne doit plus intervenir ici.
