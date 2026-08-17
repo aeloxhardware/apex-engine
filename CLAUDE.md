@@ -87,7 +87,9 @@ slicer_engine/
 ├── CLAUDE.md                        # ce fichier
 ├── main.py                          # FAIT — orchestrateur CLI, enchaîne step1 à step10
 ├── scripts/
-│   └── generate_test_model.py       # FAIT — génère res/test_models/l_shape_overhang.stl (surplomb réel)
+│   ├── generate_test_model.py       # FAIT — génère res/test_models/l_shape_overhang.stl (surplomb réel)
+│   └── export_slicing_preview.py    # FAIT — GLB du slicing SEUL (step1→step8), court-circuite
+│                                     #   step9/step10 le temps que la zone de garde buse soit faite
 ├── config/                          # PAS ENCORE ÉCRIT
 │   ├── params.py                    #   dataclasses de tous les paramètres globaux
 │   └── schema.py                    #   (de)sérialisation JSON <-> dataclasses, pont avec l'UI TS
@@ -902,16 +904,64 @@ pour affichage/validation avant export G-code.
     trajectoire : le run ne terminait pas sous 139s de CPU (profilage tué
     avant complétion) avant le fix, **10.86s** après. Sur le modèle de test
     réel (`res/test_models/l_shape_overhang.stl`, 9391 points de trajectoire,
-    3482 échantillonnés par `path_sampling_step=2.0`), le débit mesuré
-    directement (pas estimé) est stable à **~15 points de trajectoire
-    testés par seconde**, sans dégradation observée jusqu'à ~2700 capsules
-    accumulées dans l'index — comportement linéaire confirmé par mesure,
-    pas supposé. À ce débit, step9 seul prend de l'ordre de quelques
-    minutes sur ce cas trivial (24 faces sources) : limite de performance
-    **connue et documentée**, pas un blocage — acceptable pour une
-    itération de visualisation, mais à garder en tête avant de traiter un
-    modèle nettement plus gros ou une trajectoire avec beaucoup plus de
-    points.
+    3482 échantillonnés par `path_sampling_step=2.0`), le débit initial
+    mesuré est de ~15 points de trajectoire testés par seconde.
+    **CORRECTION (mesure ultérieure plus longue)** : la première rédaction
+    de cette limite concluait « stable, sans dégradation, comportement
+    linéaire confirmé par mesure » — c'était **faux**, conclusion tirée
+    d'un échantillon trop court (les premières centaines de points). Une
+    mesure poussée jusqu'au 1750ᵉ point montre une dégradation nette et
+    continue : **16.5 → 10.3 → 7.7 → 6.0 → 4.9 → 4.2 → 3.7 pts/s** à
+    mesure que l'index passe de quelques centaines à ~2700 capsules. La
+    grille spatiale de `_PrintedGeometryIndex` réduit le nombre de
+    candidats mais ne le borne pas. Point ouvert, à traiter après la zone
+    de garde buse (voir « Prochaine étape »).
+
+28. **La pointe de buse touche la pièce et le plateau PAR CONSTRUCTION —
+    la tester comme un obstacle produit une collision à chaque point.**
+    L'origine du modèle de tête EST le point de dépôt (convention voulue et
+    vérifiée), et `_surface_sample_points` inclut ce sommet parmi les points
+    de test. Avec `safety_margin=1.0 mm`, ce seul point suffit à déclencher
+    une collision contre un cordon voisin et contre le plateau à chaque
+    point de trajectoire. Mesuré sur `l_shape_overhang.stl` : **exactement
+    2 collisions par point échantillonné, sans exception** (498 à 250
+    points, 998 à 500, 3498 à 1750) — 3588 collisions au total, soit ~100 %
+    des points, ce qui rend l'étape 10 à la fois interminable et
+    ininterprétable. La limite #22 ne couvre que le cordon en cours de
+    dépôt, pas les cordons voisins ni le plateau. Correction prévue
+    (`nozzle_contact_clearance`) décrite dans « Prochaine étape ».
+
+29. **L'orientation d'un modèle de tête doit être vérifiée par MESURE, pas
+    déduite de la convention documentée.** `aetheris-4.glb` a son corps
+    étendu selon **+Y** dans le fichier (axe long mesuré : 77.2 mm en Y,
+    contre 76.0 en X et 35.0 en Z), alors que la note de convention de ce
+    même document affirmait « Axe Z = sens de la tête ». Conséquence
+    concrète avant correction : le mesh chargé allait de `z=-18.9` à
+    `z=+16.1`, soit **18.9 mm de tête pendant SOUS la pointe de buse** — à
+    une buse posée à `z=1 mm`, **47 % des points d'échantillonnage de la
+    tête tombaient sous le plateau** (20 % encore à `z=11 mm`). Corrigé par
+    `mesh_loader.TOOLHEAD_BODY_TO_MACHINE_UP` (rotation +90° autour de X,
+    appliquée dans le loader donc une seule fois à la source). Si un futur
+    modèle respecte réellement la convention Z, cette rotation devra
+    devenir une propriété **par modèle**, pas une constante globale.
+    Corollaire pour les tests : l'ancien test ne vérifiait que les
+    `extents` (invariants à l'orientation à un ordre d'axes près) et
+    laissait donc passer le défaut ; il assert désormais la propriété
+    physique — la tête ne pend jamais sous sa buse.
+
+30. **Une re-vérification conçue « une fois par point » ne doit jamais être
+    appelée depuis une boucle de recherche.** `_collisions_at_points`
+    (step10) reconstruit à chaque appel les échantillons de tête ET un
+    index de matière imprimée regrossi depuis 0. Correct pour son usage
+    d'origine (une passe en fin d'itération), catastrophique appelé depuis
+    la boucle de candidats de `_try_local_reorientation` (jusqu'à 144
+    candidats × 3588 points) : coût `O(collisions × candidats × position)`.
+    Deux pièges successifs mesurés en corrigeant : hoister l'index hors de
+    la boucle de **candidats** ne suffisait pas — il restait reconstruit à
+    chaque **point** en collision, laissant une dégradation de 2.48 → 0.39
+    calls/s. Il a fallu un `_ReorientationContext` partagé sur toute une
+    itération externe de `run()`, grossi de façon monotone (même invariant
+    que step9) : taux devenu stable, 0.30 → 0.44 calls/s.
 
 ---
 
@@ -1262,6 +1312,58 @@ nombre d'axes de la machine réellement utilisée.
 `scripts/generate_test_model.py`), et `file_io/visualization_export.py`
 produit une scène GLB inspectable (mesh + couches + trajectoire) — voir
 « Détail de `main.py` et `file_io/visualization_export.py` » ci-dessus.
+
+### PRIORITÉ IMMÉDIATE — zone de garde autour de la pointe de buse (`nozzle_contact_clearance`)
+
+**L'étape 9 produit actuellement un faux positif structurel à CHAQUE point
+de trajectoire** : le pipeline complet est donc inexploitable de bout en
+bout, alors que step1→step8 (le slicing proprement dit) fonctionne et donne
+un résultat visuellement cohérent.
+
+Mesure directe (`l_shape_overhang.stl`, modèle de tête réel) : **exactement
+2 collisions par point échantillonné**, sans aucune exception — 498
+collisions à 250 points, 998 à 500, 1498 à 750, 3498 à 1750. Un
+`printed_part` + un `platform` à chaque point. Ce n'est pas un motif de
+collision réel, c'est une propriété structurelle.
+
+**Cause** : l'origine du modèle de tête EST la pointe de buse (convention
+vérifiée et voulue), et `_surface_sample_points` inclut ce sommet à
+l'origine parmi les points de test. Or la pointe de buse est **par
+définition** en contact avec la matière qu'elle vient de déposer et à
+quelques dixièmes de millimètre du plateau aux premières couches. La tester
+avec `safety_margin=1.0 mm` garantit une collision à chaque point.
+
+La limite #22 (exclusion du cordon en cours de dépôt) ne suffit pas : elle
+n'exclut que la capsule qui se termine AU point testé, pas les cordons
+voisins déjà posés sur la même couche, ni le plateau.
+
+**Correction prévue** : nouveau champ `CollisionSimParams.nozzle_contact_clearance`
+(mm) — les points d'échantillonnage du modèle de tête situés à moins de
+cette distance de l'origine locale (la buse) sont exclus des tests de
+collision, la zone de contact buse/matière étant attendue par construction.
+Points d'attention pour l'implémentation :
+- Le filtrage doit se faire **une fois** sur les points en repère LOCAL
+  (dans `_surface_sample_points` ou juste après), jamais par point de
+  trajectoire — sinon on repaye le coût à chaque appel.
+- Le défaut doit être à l'échelle de la buse et de la marge de sécurité
+  (ordre de quelques mm), pas de `nozzle_diameter` — même piège que les
+  limites #26 et #21.
+- Ne PAS exclure la géométrie au-delà de cette zone : c'est précisément le
+  corps de la tête (qui monte 77 mm depuis la buse, voir
+  `mesh_loader.TOOLHEAD_BODY_TO_MACHINE_UP`) qui doit rester testé.
+
+**En attendant**, `scripts/export_slicing_preview.py` produit le GLB de
+visualisation en court-circuitant explicitement step9/step10 (step1→step8
+en ~30 s), avec `CollisionReport(nozzle_model_checked=False)` et
+`AdjustmentReport(converged=False)` — jamais un rapport vide qui
+prétendrait qu'aucune collision n'existe.
+
+**Second point, indépendant et non résolu** : le débit de step9 se dégrade
+avec la matière accumulée (mesuré : 16.5 → 3.7 pts/s entre le 250ᵉ et le
+1750ᵉ point échantillonné, index passant de quelques centaines à ~2700
+capsules). La grille spatiale de `_PrintedGeometryIndex` limite le nombre de
+candidats mais pas assez ; à regarder après la zone de garde, une fois que
+le nombre de collisions réelles sera revenu à une valeur plausible.
 
 Ce qui reste, hors cœur algorithmique :
 

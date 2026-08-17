@@ -4,3 +4,9 @@ __pycache__/
 *.egg-info/
 .venv/
 venv/
+
+# Sorties de visualisation regenerables (scripts/export_slicing_preview.py,
+# main.py --output-glb) - ~30s a reproduire, pas un asset source
+*.glb
+!res/3d/toolheads/**/*.glb
+pipeline_run.log
