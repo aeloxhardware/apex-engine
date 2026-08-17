@@ -1111,6 +1111,63 @@ pour affichage/validation avant export G-code.
     être traité comme la limite #33 (dans step5/step3), jamais confondu
     avec l'optimisation de trajectoire de la limite #34 (step7).
 
+35. **Le chevauchement d'isovaleur base/bras qui motivait le fix #34 est une
+    CONSÉQUENCE STRUCTURELLE du fix #31/#32 (scission de région), pas un
+    bug indépendant de step5 ou step7 — confirmé par mesure comparative
+    directe, pas supposé.** Test : régénérer les couches sur
+    `l_shape_overhang.stl` avec `direction_deviation_weight=0.0` (1 seule
+    région, comportement d'avant #31/#32) vs `0.2` (2 régions, comportement
+    actuel), et compter par couche les cas où le contour a un écart en X
+    entre deux nuages de points > 10mm (signature d'un chevauchement spatial
+    base/bras dans une même couche) :
+    - `weight=0.0` (1 région) : **0 couche sur 142** n'a jamais ce
+      chevauchement — chaque isosurface est un blob spatialement contigu,
+      parce que toute la pièce partage une seule direction de gradient et
+      l'isovaleur croît de façon monotone avec la distance le long de cette
+      direction unique, pour toute la pièce.
+    - `weight=0.2` (2 régions) : **16 couches sur 109** (indices 40-55,
+      `layer.region_ids=[0, 1]` sur chacune, écart X mesuré entre 10.0mm et
+      13.9mm, plage d'isovaleur 4.196-5.750) contiennent simultanément un
+      fragment de la base (x≈-2) et un fragment du bras (x≈18).
+    - Cause : `step4`/`step5` résolvent et contourent un champ scalaire
+      **global**, une seule fois pour tout le `TetMesh` — pas un champ par
+      région. Deux régions adjacentes avec des directions de gradient
+      différentes (quasi-verticale pour la base, ~49° pour le bras, limite
+      #32) produisent nécessairement une zone de transition où une même
+      isovaleur du champ global correspond à des positions physiques dans
+      les DEUX régions à la fois. Ce n'est pas un artefact de
+      l'implémentation actuelle : c'est inhérent à tout schéma qui (a) donne
+      à des régions adjacentes des directions d'impression différentes et
+      (b) extrait les couches par contourage d'un unique champ résolu
+      globalement — exactement le choix d'architecture central du projet
+      (voir "Objectif du projet").
+    - Conséquence actée pour #33/#34 : les deux fixes restent corrects et
+      nécessaires (isovaleur monotone = ordre physique valide ; réordon-
+      nancement par proximité = trajet minimal DANS cet ordre), mais aucun
+      des deux ne pouvait éliminer le phénomène à la racine, puisque ni l'un
+      ni l'autre n'en est la cause. Revenir à 1 seule région (annuler
+      #31/#32) supprimerait le chevauchement mais réintroduirait le défaut
+      documenté qui a motivé #31/#32 (la base, plate, imprimée comme une
+      couche courbée à 54.8°) — donc PAS une option valable.
+    - **Décision actée pour ce projet** : accepter ce coût en trajets à vide
+      résiduels aux frontières de région comme une limite structurelle
+      connue du modèle (champ global + directions locales divergentes),
+      documentée ici plutôt que "corrigée" — la mitigation de #34 (33 sauts
+      résiduels sur `l_shape_overhang.stl`, contre 83 avant) est le niveau
+      de qualité retenu pour l'instant. Deux pistes de réduction (pas
+      d'élimination garantie) identifiées mais **non retenues pour l'instant,
+      à réévaluer seulement si la qualité de trajectoire aux frontières de
+      région devient bloquante en pratique** :
+      1. Lisser la direction cible entre régions adjacentes dans step3 (au
+         lieu d'un saut net à la frontière) — réduirait la largeur de la
+         zone à double-région, risque de réintroduire une légère courbure
+         near-frontière côté base (compromis, pas un gain pur).
+      2. Contourer par sous-domaine de région dans step5 plutôt que
+         globalement — élimine le chevauchement par construction, mais
+         risque une discontinuité visible à la frontière entre régions (les
+         couches de la base et du bras ne s'aligneraient plus forcément) —
+         changement architectural plus profond, non exploré.
+
 ---
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
