@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<title>S4-Slicer -- pilotage manuel</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #1a1a1a; color: #e8e8e8; display: flex; height: 100vh; }
+  #panel { width: 340px; padding: 16px; box-sizing: border-box; overflow-y: auto; background: #202020; border-right: 1px solid #3a3a3a; }
+  #viewer { flex: 1; position: relative; }
+  h1 { font-size: 15px; margin: 0 0 4px 0; }
+  .sub { font-size: 11px; color: #999; margin-bottom: 16px; }
+  label { display: block; font-size: 11px; color: #bbb; margin-top: 10px; margin-bottom: 2px; font-family: monospace; }
+  input[type=number] { width: 100%; box-sizing: border-box; background: #2c2c2c; border: 1px solid #444; color: #eee; padding: 5px 6px; border-radius: 4px; font-family: monospace; }
+  input[type=checkbox] { transform: scale(1.1); margin-right: 6px; }
+  .checkbox-row { display: flex; align-items: center; margin-top: 10px; font-size: 12px; font-family: monospace; color: #bbb; }
+  button { width: 100%; padding: 10px; margin-top: 14px; border: none; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer; }
+  #btn-iterate { background: #3b82f6; color: white; }
+  #btn-iterate:disabled { background: #2a3f5f; color: #7f95b8; cursor: not-allowed; }
+  #btn-reset { background: #4a4a4a; color: #eee; }
+  #btn-reset:disabled { background: #333; color: #777; cursor: not-allowed; }
+  #counter { font-size: 28px; font-weight: 700; margin: 10px 0 2px 0; }
+  #counter-label { font-size: 11px; color: #999; }
+  #progress-wrap { margin-top: 14px; height: 6px; background: #333; border-radius: 3px; overflow: hidden; display: none; }
+  #progress-bar { height: 100%; background: linear-gradient(90deg, #3b82f6, #60a5fa); transition: width 0.2s ease; }
+  #progress-bar.indeterminate { width: 30%; animation: slide 1.1s ease-in-out infinite; }
+  @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  #progress-label { font-size: 11px; color: #8ab4f8; margin-top: 6px; min-height: 14px; font-family: monospace; }
+  #progress-pct { font-weight: 700; }
+  #info { margin-top: 16px; padding-top: 12px; border-top: 1px solid #3a3a3a; font-size: 11px; font-family: monospace; color: #aaa; line-height: 1.6; }
+  #error { margin-top: 10px; font-size: 11px; color: #f87171; white-space: pre-wrap; }
+  #history { margin-top: 12px; font-size: 10px; font-family: monospace; color: #888; max-height: 120px; overflow-y: auto; }
+  #history div { padding: 2px 0; border-bottom: 1px solid #2a2a2a; }
+  #viewer canvas { display: block; }
+  #hint { position: absolute; bottom: 10px; left: 12px; font-size: 11px; color: #888; font-family: monospace; }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <h1>S4-Slicer -- pilotage manuel</h1>
+  <div class="sub">Modele: <span id="model-name">-</span></div>
+
+  <div id="counter">0</div>
+  <div id="counter-label">iterations effectuees</div>
+
+  <label>NEIGHBOUR_LOSS_WEIGHT</label>
+  <input type="number" id="p_NEIGHBOUR_LOSS_WEIGHT" step="1" />
+
+  <label>MAX_OVERHANG (deg)</label>
+  <input type="number" id="p_MAX_OVERHANG" step="1" />
+
+  <label>ROTATION_MULTIPLIER</label>
+  <input type="number" id="p_ROTATION_MULTIPLIER" step="0.1" />
+
+  <label>INITIAL_ROTATION_FIELD_SMOOTHING</label>
+  <input type="number" id="p_INITIAL_ROTATION_FIELD_SMOOTHING" step="1" />
+
+  <label>MAX_POS_ROTATION_DEG</label>
+  <input type="number" id="p_MAX_POS_ROTATION_DEG" step="10" />
+
+  <label>MAX_NEG_ROTATION_DEG</label>
+  <input type="number" id="p_MAX_NEG_ROTATION_DEG" step="10" />
+
+  <label>ROTATE_ITERATIONS (budget least_squares, rotation)</label>
+  <input type="number" id="p_ROTATE_ITERATIONS" step="10" />
+
+  <label>DEFORM_ITERATIONS (budget least_squares, deformation)</label>
+  <input type="number" id="p_DEFORM_ITERATIONS" step="100" />
+
+  <div class="checkbox-row">
+    <input type="checkbox" id="p_SET_INITIAL_ROTATION_TO_ZERO" />
+    <label style="margin:0;" for="p_SET_INITIAL_ROTATION_TO_ZERO">SET_INITIAL_ROTATION_TO_ZERO</label>
+  </div>
+  <div class="checkbox-row">
+    <input type="checkbox" id="p_STEEP_OVERHANG_COMPENSATION" />
+    <label style="margin:0;" for="p_STEEP_OVERHANG_COMPENSATION">STEEP_OVERHANG_COMPENSATION</label>
+  </div>
+
+  <button id="btn-iterate">Lancer 1 iteration</button>
+  <button id="btn-reset">Reset (repartir du modele initial)</button>
+
+  <div id="progress-wrap"><div id="progress-bar"></div></div>
+  <div id="progress-label"></div>
+
+  <div id="info">en attente...</div>
+  <div id="error"></div>
+  <div id="history"></div>
+</div>
+
+<div id="viewer">
+  <div id="hint">clic-glisser: tourner -- molette: zoom -- clic droit: deplacer</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const PARAM_KEYS = [
+  "NEIGHBOUR_LOSS_WEIGHT", "MAX_OVERHANG", "ROTATION_MULTIPLIER",
+  "INITIAL_ROTATION_FIELD_SMOOTHING", "MAX_POS_ROTATION_DEG", "MAX_NEG_ROTATION_DEG",
+  "ROTATE_ITERATIONS", "DEFORM_ITERATIONS",
+];
+const BOOL_KEYS = ["SET_INITIAL_ROTATION_TO_ZERO", "STEEP_OVERHANG_COMPENSATION"];
+
+let scene, camera, renderer, controls, currentMesh;
+let pollTimer = null;
+let paramsInitialized = false;
+
+function initViewer() {
+  const viewerEl = document.getElementById("viewer");
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a1a1a);
+
+  camera = new THREE.PerspectiveCamera(45, viewerEl.clientWidth / viewerEl.clientHeight, 0.1, 5000);
+  camera.position.set(80, 80, 80);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(viewerEl.clientWidth, viewerEl.clientHeight);
+  viewerEl.appendChild(renderer.domElement);
+
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const dl1 = new THREE.DirectionalLight(0xffffff, 0.8);
+  dl1.position.set(1, 1, 1);
+  scene.add(dl1);
+  const dl2 = new THREE.DirectionalLight(0xffffff, 0.4);
+  dl2.position.set(-1, -1, -1);
+  scene.add(dl2);
+
+  const grid = new THREE.GridHelper(200, 20, 0x444444, 0x2a2a2a);
+  scene.add(grid);
+
+  window.addEventListener("resize", () => {
+    camera.aspect = viewerEl.clientWidth / viewerEl.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(viewerEl.clientWidth, viewerEl.clientHeight);
+  });
+
+  animate();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+function loadModel() {
+  const loader = new THREE.STLLoader();
+  loader.load(`/model.stl?t=${Date.now()}`, (geometry) => {
+    if (currentMesh) {
+      scene.remove(currentMesh);
+      currentMesh.geometry.dispose();
+      currentMesh.material.dispose();
+    }
+    geometry.computeVertexNormals();
+    geometry.center();
+    const material = new THREE.MeshPhongMaterial({ color: 0x7fb3e8, specular: 0x222222, shininess: 40, flatShading: true, side: THREE.DoubleSide });
+    currentMesh = new THREE.Mesh(geometry, material);
+    scene.add(currentMesh);
+
+    // recentrer la camera sur la bbox
+    geometry.computeBoundingBox();
+    const size = new THREE.Vector3();
+    geometry.boundingBox.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z) || 50;
+    camera.position.set(maxDim * 1.2, maxDim * 1.2, maxDim * 1.2);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  }, undefined, (err) => {
+    console.warn("model.stl indisponible pour le moment", err);
+  });
+}
+
+function readParams() {
+  const params = {};
+  for (const key of PARAM_KEYS) {
+    params[key] = parseFloat(document.getElementById("p_" + key).value);
+  }
+  for (const key of BOOL_KEYS) {
+    params[key] = document.getElementById("p_" + key).checked;
+  }
+  return params;
+}
+
+function fillParams(defaults) {
+  if (paramsInitialized) return;
+  for (const key of PARAM_KEYS) {
+    document.getElementById("p_" + key).value = defaults[key];
+  }
+  for (const key of BOOL_KEYS) {
+    document.getElementById("p_" + key).checked = !!defaults[key];
+  }
+  paramsInitialized = true;
+}
+
+function setBusy(busy, stepLabel, pct) {
+  document.getElementById("btn-iterate").disabled = busy;
+  document.getElementById("btn-reset").disabled = busy;
+  document.getElementById("progress-wrap").style.display = busy ? "block" : "none";
+
+  const bar = document.getElementById("progress-bar");
+  const label = document.getElementById("progress-label");
+
+  if (!busy) {
+    label.textContent = "";
+    return;
+  }
+
+  if (pct === null || pct === undefined) {
+    // pas de % applicable pour cette etape (ingestion, export STL...)
+    bar.classList.add("indeterminate");
+    bar.style.width = "";
+    label.textContent = stepLabel || "calcul en cours...";
+  } else {
+    bar.classList.remove("indeterminate");
+    bar.style.width = pct + "%";
+    label.innerHTML = `${stepLabel || "calcul en cours"} -- <span id="progress-pct">${pct}%</span>`;
+  }
+}
+
+function renderInfo(state) {
+  document.getElementById("model-name").textContent = state.model_name || "-";
+  document.getElementById("counter").textContent = state.iteration;
+
+  if (state.error) {
+    document.getElementById("error").textContent = "Erreur: " + state.error;
+  } else {
+    document.getElementById("error").textContent = "";
+  }
+
+  const info = state.last_info;
+  const infoEl = document.getElementById("info");
+  if (info) {
+    infoEl.innerHTML =
+      `tetraedres: ${state.number_of_cells}<br>` +
+      `cout rotation (least_squares): ${info.rotate_cost.toExponential(3)}<br>` +
+      `cout deformation (least_squares): ${info.deform_cost.toExponential(3)}<br>` +
+      `fraction en surplomb: ${(info.overhang_fraction * 100).toFixed(2)}%<br>` +
+      `temps: ${info.elapsed_s}s`;
+  } else {
+    infoEl.textContent = state.number_of_cells ? `tetraedres: ${state.number_of_cells} (aucune iteration encore)` : "en attente...";
+  }
+
+  const histEl = document.getElementById("history");
+  histEl.innerHTML = state.history.map((h, i) =>
+    `<div>#${i + 1}: rot=${h.rotate_cost.toExponential(2)} deform=${h.deform_cost.toExponential(2)} surplomb=${(h.overhang_fraction * 100).toFixed(1)}%</div>`
+  ).reverse().join("");
+}
+
+async function pollProgress() {
+  try {
+    const res = await fetch("/progress");
+    const data = await res.json();
+    if (data.busy) {
+      setBusy(true, data.progress_step, data.progress_pct);
+    } else {
+      setBusy(false);
+      clearInterval(pollTimer);
+      pollTimer = null;
+      await refreshStateAndModel();
+    }
+  } catch (e) {
+    // silencieux : le poll retentera au prochain tick
+  }
+}
+
+async function refreshStateAndModel() {
+  const res = await fetch("/state");
+  const state = await res.json();
+  fillParams(state.default_params);
+  renderInfo(state);
+  loadModel();
+}
+
+async function onIterate() {
+  const params = readParams();
+  setBusy(true, "envoi de la requete...");
+  const res = await fetch("/iterate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const data = await res.json();
+    if (res.status === 409) {
+      // Un calcul tourne deja (clic pendant un Reset, page rechargee...) :
+      // le SUIVRE jusqu'a sa fin plutot que de se croire libre -- sinon le
+      // message reste affiche et la page ne voit jamais le calcul finir.
+      waitForRunningJob();
+      return;
+    }
+    setBusy(false);
+    document.getElementById("error").textContent = "Erreur: " + (data.error || res.statusText);
+    return;
+  }
+  if (!pollTimer) pollTimer = setInterval(pollProgress, 300);
+}
+
+async function onReset() {
+  setBusy(true, "reinitialisation (nouvelle tetraedrisation)...");
+  const res = await fetch("/reset", { method: "POST" });
+  if (!res.ok) {
+    const data = await res.json();
+    if (res.status === 409) {
+      // Un calcul tourne deja (clic pendant un Reset, page rechargee...) :
+      // le SUIVRE jusqu'a sa fin plutot que de se croire libre -- sinon le
+      // message reste affiche et la page ne voit jamais le calcul finir.
+      waitForRunningJob();
+      return;
+    }
+    setBusy(false);
+    document.getElementById("error").textContent = "Erreur: " + (data.error || res.statusText);
+    return;
+  }
+  if (!pollTimer) pollTimer = setInterval(pollProgress, 300);
+}
+
+function waitForRunningJob() {
+  document.getElementById("error").textContent = "";
+  setBusy(true, "un calcul est deja en cours -- attente de sa fin...");
+  if (!pollTimer) pollTimer = setInterval(pollProgress, 300);
+}
+
+async function resumeIfBusy() {
+  // Au chargement : si un calcul tourne deja cote serveur, le suivre.
+  try {
+    const data = await (await fetch("/progress")).json();
+    if (data.busy) waitForRunningJob();
+  } catch (e) { /* serveur injoignable : rien a suivre */ }
+}
+
+document.getElementById("btn-iterate").addEventListener("click", onIterate);
+document.getElementById("btn-reset").addEventListener("click", onReset);
+
+initViewer();
+refreshStateAndModel();
+resumeIfBusy();
+</script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Sorties de visualisation regenerables (scripts/export_slicing_preview.py,
+# main.py --output-glb) - ~30s a reproduire, pas un asset source
+*.glb
+!res/3d/toolheads/**/*.glb
+pipeline_run.log
+
+# Deches ecrits par TetGen lui-meme quand il refuse un maillage pour
+# auto-intersections (step1 les rencontre puis repare, cf. CLAUDE.md)
+tetgen-tmpfile_skipped.*
+
+# Artefacts de build du noyau natif (cpp/) - regenerables par
+# `python scripts/build_cpp.py`. Les SOURCES C++ sont versionnees, les
+# binaires non : ils sont specifiques a une plateforme et a une version de
+# Python (ex: apex_core.cp314-win_amd64.pyd).
+cpp/build/
+cpp/lib/
+
+# Espace de recherche externe : clones de projets tiers (S3-Slicer,
+# S4-Slicer) etudies pour le chantier "dependance sans surplomb" (voir
+# LAST_SESSION.md). Contient un .git imbrique (deviendrait un sous-module
+# implicite si suivi), un venv Python separe (pyvista/open3d-remplace-par-
+# trimesh/tetgen), et des donnees volumineuses (gifs, pickle_files) qui ne
+# font pas partie du code Apex. Reste local, jamais pousse.
+research/

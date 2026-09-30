@@ -1,0 +1,4362 @@
+# Apex Slicer — Contexte projet — FICHIER MODIFIABLE PAR L'IA
+
+Moteur de slicing géométrique (Python) pour une imprimante 3D **4 axes** (3 linéaires
++ 1 rotatif). L'interface utilisateur est en **TypeScript**, séparée de ce moteur.
+Ce fichier centralise tout le contexte nécessaire pour reprendre le développement
+sans redemander les spécifications déjà actées. L'IA peut et doit modifier ce fichier lorsqu'elle opère.
+
+> Note : les trajets à vide sans routage sont désormais corrigés par un
+> palliatif lift-and-traverse — voir limite #49 pour le mécanisme, ses
+> limites honnêtes (taux de résidu mesuré sur géométrie difficile), et
+> pourquoi ce n'est pas un vrai path-planning 3D.
+
+---
+
+## COMMENT LIRE CE FICHIER (à lire AVANT le reste)
+
+Ce document est long, dense et écrit avec assurance. **Cette assurance n'est
+pas une preuve, et sa structure n'est pas une contrainte.** Il décrit ce qui a
+été fait, pas les limites de ce qui peut l'être. Lu naïvement, il induit un
+biais mesuré en session réelle : optimiser *à l'intérieur* du découpage
+existant au lieu de se demander si ce découpage pose la bonne question.
+
+### Autorisation explicite de l'utilisateur
+
+**Tout est modifiable pour peu que ça marche et que ce soit mesuré** : le
+découpage en 10 étapes, les signatures `run(input, params)`, les dataclasses
+de `core/mesh_types.py`, l'ordre des étapes, l'existence même d'une étape.
+Ajouter une étape, en fusionner deux, faire remonter une donnée d'une étape
+tardive vers une étape précoce, remplacer un critère par un autre : rien de
+tout cela n'exige de demander la permission. Une fonctionnalité qui impose de
+restructurer la moitié du pipeline se restructure. Les seules obligations qui
+demeurent : **mesurer avant de conclure**, et **ne jamais activer par défaut
+un mécanisme non mesuré sur les quatre modèles** de `res/test_models/`.
+
+### La question à poser en premier quand un indicateur ne bouge pas
+
+Sept mécanismes ont été écrits et mesurés pour réduire la matière déposée sans
+appui. Six ont échoué. Tous les six modifiaient une **entrée** du circuit
+existant (choix de direction, ancrage, ordre des couches). Aucun n'avait
+interrogé le circuit lui-même. Le septième — celui qui a enfin fait bouger la
+métrique — est né d'une question de l'utilisateur, pas du raisonnement mené
+dans ce cadre : *« l'algorithme ne doit-il pas simplement vérifier, pour
+chaque tétraèdre, s'il est en l'air ? »*
+
+La réponse était que ce test existait déjà **deux fois**, et qu'il était
+branché au mauvais endroit : `step2` évalue le surplomb contre la verticale
+MACHINE, une seule fois, **avant que le champ scalaire n'existe** ; `step9b`
+le mesure correctement mais *après tout*, sans rien réinjecter. Le solveur
+n'était jamais pénalisé pour les surplombs qu'il créait lui-même.
+
+**Règle de méthode qui en découle, à appliquer avant d'écrire un mécanisme de
+plus :**
+
+1. **Après deux ou trois mécanismes mesurés sans effet, arrêter d'en ajouter
+   et auditer le circuit.** Un quatrième mécanisme sur une boucle ouverte ne
+   la fermera pas.
+2. **Pour chaque critère, demander : contre quelle RÉFÉRENCE est-il évalué, et
+   est-ce celle qui compte à cet endroit du pipeline ?** Le surplomb mesuré
+   contre la verticale machine et le surplomb mesuré contre `∇φ` portent le
+   même nom et ne sont pas la même quantité.
+3. **Suspecter tout ce qui est calculé UNE FOIS, en amont de ce qu'il
+   contraint.** Une valeur figée avant l'existence de l'objet qu'elle régit
+   est une boucle ouverte jusqu'à preuve du contraire.
+4. **Un indicateur intermédiaire ne prouve rien.** Voir le 4ᵉ enseignement de
+   la section « Prochaine étape » : direction, ancrage et ordre ont tous été
+   améliorés sans que la métrique de référence (step9b) suive.
+
+### Ce que ce fichier ne dit pas
+
+Une limite documentée n'est une preuve de rien tant que le code n'a pas été
+relu — la limite #50 a décrit pendant des sessions entières un mécanisme qui
+n'existait pas. Les « pistes écartées » l'ont été dans un contexte donné ; une
+piste écartée pour une raison qui ne tient plus se rouvre. Les sections
+« ce qui reste ouvert » formulent des questions **déjà cadrées** : ce cadrage
+est lui-même à remettre en cause en priorité, puisque c'est exactement là que
+le raisonnement s'est enlisé six fois.
+
+## Objectif du projet
+
+Calculer des trajectoires d'impression optimales évitant **tout support**, en
+inclinant/courbant les couches selon la géométrie locale, plutôt que d'imprimer
+des couches planes horizontales comme un slicer 3-axes classique (Orca, PrusaSlicer).
+
+Fonctionnalités visées, au-delà du slicing de base :
+- Couches **courbes** (pas seulement planes par sous-volume), via un champ scalaire
+  continu résolu sur un maillage tétraédrique.
+- Remplissage de l'intérieur vers l'extérieur, avec gestion dédiée des **ponts internes**
+  (plafonds de cavités non détectés par une simple analyse de normale).
+- **Points d'attache** manuels : l'utilisateur peut déformer les couches après le
+  slicing automatique (esthétique ou solidité), en ajoutant des contraintes ponctuelles
+  au champ scalaire plutôt qu'en éditant directement la géométrie des couches.
+- **Peinture de couleur** sur le modèle + impression groupée par couleur (repassage
+  buse 5 axes) pour limiter les purges : trous temporaires comblés au repassage,
+  avec bascule automatique vers une purge classique si le trou n'est pas réalisable
+  ou pas rentable (calcul de coût trou vs purge).
+- **Simulation de collision** avec un modèle 3D réel de la tête d'impression, avec
+  boucle d'ajustement automatique en cas de collision détectée.
+
+Architecture voulue par l'utilisateur : **plusieurs petits fichiers Python**, un par
+étape du pipeline + un fichier de paramètres + un orchestrateur — pas un monolithe.
+Chaque étape expose une fonction pure `run(input, params) -> output`, sans état caché.
+
+---
+
+## Fonctionnalités produit (ce que l'outil doit permettre à l'utilisateur)
+
+Liste de toutes les fonctionnalités discutées, au-delà du slicing plan classique :
+
+- **Tranchage en couches courbes non-planes**, épousant la géométrie locale plutôt que
+  des plans horizontaux — objectif central du projet, rendu possible par le 4ᵉ axe.
+- **Remplissage de l'intérieur vers l'extérieur** (contours concentriques, du centre
+  vers la paroi externe), pas l'inverse.
+- **Détection et traitement dédié des ponts internes** (plafonds de cavités non
+  supportés par en dessous), distincts des surplombs classiques : trajectoire
+  réorientée pour traverser le pont perpendiculairement à son axe de plus grande
+  portée, avec ancrage renforcé sur les bords.
+- **Choix automatique de l'inclinaison de couche** par zone du modèle, pour éliminer
+  tout besoin de support — le modèle est segmenté en sous-volumes, chacun avec sa
+  propre direction d'impression optimale.
+- **Édition manuelle de l'orientation/déformation des couches après le slicing
+  automatique**, via un système de **points d'attache** que l'utilisateur peut
+  déplacer et faire pivoter — pour des raisons esthétiques ou de solidité. Les points
+  d'attache déforment le champ scalaire sous-jacent (pas les couches directement),
+  ce qui garantit que les couches recalculées restent géométriquement cohérentes.
+  Un garde-fou signale (sans forcément bloquer) si une édition manuelle réintroduit
+  un surplomb au-delà du seuil critique.
+- **Peinture de couleur directement sur le modèle 3D**, zone par zone.
+- **Impression groupée par couleur avec repassage** (profite de la liberté du 4/5
+  axes pour repasser sur n'importe quel point déjà imprimé) plutôt que de purger à
+  chaque changement de couleur à chaque couche.
+- **Gestion de trous temporaires** : quand une zone d'une couleur a besoin qu'une
+  autre couleur soit posée avant elle mais que ce n'est pas encore le cas, un vide
+  temporaire est laissé puis comblé lors d'un repassage ultérieur.
+- **Bascule automatique trou vs purge classique** : si combler un trou n'est pas
+  géométriquement réalisable (buse ne peut pas atteindre le fond sans collision) ou
+  pas rentable (coût de repassage/risque d'adhérence à froid supérieur au coût d'une
+  purge), le système purge normalement à la place.
+- **Modularité/extensibilité de l'algorithme** : possibilité d'ajouter de nouvelles
+  fonctions et contraintes (esthétiques, structurelles, etc.) sans réécrire le cœur
+  du pipeline — chaque nouvelle contrainte est un terme de plus injecté dans le
+  champ scalaire ou un post-traitement optionnel.
+- **Modèle 3D réel de la tête d'impression** (buse + porte-buse + carriage proche)
+  utilisé pour la vérification de collision, plutôt qu'une simple pointe ponctuelle.
+- **Simulation de collision complète en fin de pipeline**, contre la pièce déjà
+  imprimée (état incrémental), le mandrin/mors, et le plateau à son angle courant.
+- **Ajustement automatique en cas de collision détectée** : réorientation locale de
+  l'angle du plateau en priorité, sinon ré-segmentation ciblée de la zone concernée,
+  et en dernier recours ajout d'un support classique avec log explicite pour
+  l'utilisateur.
+
+---
+
+## Arborescence du projet
+
+```
+slicer_engine/
+├── CLAUDE.md                        # ce fichier
+├── main.py                          # FAIT — orchestrateur CLI, enchaîne step1 à step10
+├── scripts/
+│   ├── generate_test_model.py       # FAIT — génère res/test_models/l_shape_overhang.stl (surplomb réel)
+│   ├── export_layer_order_gif.py    # FAIT — GIF animé des couches ajoutées UNE PAR UNE dans
+│   │                                 #   leur ordre d'impression réel (même dégradé que le GLB ;
+│   │                                 #   couches `support_unresolved` en ROUGE VIF). Rejoue
+│   │                                 #   run_slicing_only, ne recalcule rien lui-même. Rend via
+│   │                                 #   matplotlib 3D (+ Pillow) — seul usage de ces deux
+│   │                                 #   dépendances dans le projet, installées pour ce script.
+│   ├── export_slicing_preview.py    # FAIT — GLB du slicing SEUL (step1→step8), court-circuite
+│   │                                 #   step9/step10 le temps que la zone de garde buse soit faite
+│   └── build_cpp.py                 # FAIT — construit le noyau natif (localise vcvars64.bat via
+│                                     #   vswhere, puis cmake+ninja). Une seule commande.
+├── cpp/                             # NOYAU NATIF — portage en cours, voir limite #56
+│   ├── third_party/eigen/           # Eigen 3.4.0 (MPL-2.0), header-only, VERSIONNE.
+│   │                                 #   Introduit au pas 7 seulement, quand step4 en a eu besoin.
+│   ├── CMakeLists.txt               # FAIT — C++20, /O2, /fp:precise (JAMAIS /fp:fast : il
+│   │                                 #   casserait l'oracle d'équivalence)
+│   ├── include/apex/
+│   │   ├── types.hpp                # FAIT — Vec3, AABB, segment_aabb. Réduit au strict
+│   │   │                             #   nécessaire : on ne transcrit pas les 40 dataclasses
+│   │   │                             #   d'avance, sinon on fige un contrat avant d'avoir porté
+│   │   │                             #   le code qui le consomme.
+│   │   ├── printed_index.hpp        # FAIT — grille spatiale des capsules imprimées
+│   │   ├── kinematics.hpp           # FAIT — IK N axes, SEQUENTIELLE et REPRENABLE
+│   │   ├── support.hpp              # FAIT — test de support point/capsules, arrêt anticipé
+│   │   ├── tet_topology.hpp         # FAIT — tables topo tétra (faces frontière, arêtes)
+│   │   ├── kdtree.hpp               # FAIT — arbre k-d 3D statique (pas 5). Portage
+│   │   │                             #   ARCHITECTURAL (cKDTree déjà natif) : retire la
+│   │   │                             #   dernière primitive spatiale scipy du cœur.
+│   │   ├── bvh.hpp                  # FAIT — BVH de triangles + intersects_location (pas 6).
+│   │   │                             #   Remplace rtree comme INDEX, PAS la requête : la
+│   │   │                             #   boîte de rayon reste celle de trimesh (ray_bounds),
+│   │   │                             #   sans quoi l'auto-intersection réapparaît (limite #56)
+│   │   ├── field_solver.hpp         # FAIT — pas 7 : blend/gradients/CSR/solveur (step4)
+│   │   ├── mesh_repair.hpp          # FAIT — pas 8 : SAT triangle-triangle (step1_ingest),
+│   │   │                             #   BVH interne sur AABB exactes, broad-phase non
+│   │   │                             #   contraint (contrairement au pas 6 : narrow-phase
+│   │   │                             #   déterministe des deux côtés)
+│   │   ├── mesh_intersect.hpp       # FAIT — pas 9 : segments d'intersection + winding
+│   │   │                             #   number (_self_intersection_resolve). Tolérance
+│   │   │                             #   explicite (solve 3×3 par cofacteurs) ; ordre des
+│   │   │                             #   segments par face NON reproductible (rtree),
+│   │   │                             #   divergence topologique mineure assumée (×11,5)
+│   │   ├── interpolate.hpp          # FAIT — pas 10 : pondération inverse-distance de
+│   │   │                             #   l'offset hors-plan (step6), ×2,8 — DERNIER poste
+│   │   │                             #   Python isolé visible au profil hors TetGen
+│   │   └── internal/
+│   │       └── triangle_aabb_bvh.hpp  # FAIT — BVH interne partagé (pas 8+9), sans
+│   │                                    #   contrat d'équivalence (structure privée)
+│   ├── src/core/printed_index.cpp   # FAIT — portage de _PrintedGeometryIndex (2 modes de
+│   │                                 #   requête, pour mesurer séparément le gain du langage
+│   │                                 #   et celui de l'algorithme)
+│   ├── src/core/kinematics.cpp      # FAIT — chaîne analytique de geometry_utils + boucle
+│   │                                 #   step8. Repli grille NON porté : rend la main pour
+│   │                                 #   le point fautif puis REPREND (voir limite #56)
+│   ├── src/core/support.cpp         # FAIT — pas 3
+│   ├── src/core/tet_topology.cpp    # FAIT — pas 4
+│   ├── src/core/kdtree.cpp          # FAIT — pas 5 : median-split, query_nn (1-NN batch,
+│   │                                 #   distance euclidienne bit-exacte / scipy) + query_radius.
+│   │                                 #   Tie-break plus petit indice. 9 sites .query() câblés.
+│   ├── src/core/bvh.cpp             # FAIT — pas 6 : ×38 à ×221 selon la densité du maillage,
+│   │                                 #   impacts bit-identiques. narrow phase TRANSCRITE de
+│   │                                 #   trimesh (jamais un Möller-Trumbore : autres flottants)
+│   ├── src/core/field_solver.cpp    # FAIT — pas 7 : blend des directions (×3,2, gain
+│   │                                 #   ALGORITHMIQUE par élagage AABB), gradients de forme (×30),
+│   │                                 #   assemblage FEM direct en CSR (×2,04, motif partagé)
+│   ├── src/core/linear_solver.cpp   # FAIT mais NON CÂBLÉ — CG Eigen mesuré à ×1,01 : aucun
+│   │                                 #   gain, et coûterait la bit-exactitude (limite #56, pas 7)
+│   ├── src/core/mesh_repair.cpp     # FAIT — pas 8 : triangles_cross (SAT 11 axes) +
+│   │                                 #   find_self_intersecting_faces (broad+narrow phase),
+│   │                                 #   n'exerce jamais le chemin nominal death.stl —
+│   │                                 #   gain mesurable sur turkish.stl (cascade de réparation)
+│   ├── src/core/mesh_intersect.cpp  # FAIT — pas 9 : triangle_triangle_segment (cofacteurs,
+│   │                                 #   tolérance ~1e-14), generalized_winding_number
+│   │                                 #   (quasi bit-exact), find_intersection_segments
+│   │                                 #   (×11,5 sur turkish.stl, ordre non reproductible)
+│   ├── src/core/interpolate.cpp     # FAIT — pas 10 : une seule passe par requête, sans
+│   │                                 #   matérialiser la matrice de distances (K,M)
+│   ├── bindings/module.cpp          # FAIT — pybind11. ÉCHAFAUDAGE, retiré à la bascule finale.
+│   ├── build/                       # (ignoré par git) artefacts cmake/ninja
+│   └── lib/                         # (ignoré par git) apex_core.cp314-win_amd64.pyd
+├── config/                          # PAS ENCORE ÉCRIT — sera livré en C++ (params.hpp + JSON),
+│                                     #   voir limite #56 : c'est ce qui deviendra le contrat UI TS
+│   ├── params.py                    #   dataclasses de tous les paramètres globaux
+│   └── schema.py                    #   (de)sérialisation JSON <-> dataclasses, pont avec l'UI TS
+├── pipeline/
+│   ├── __init__.py
+│   ├── step1_ingest.py              # FAIT — ingestion mesh + tétraédrisation (+ détection
+│   │                                 #   automatique des cavités internes pour tetgen, voir limite #7 ;
+│   │                                 #   + raffinement local près du plateau via add_region, limite #36)
+│   ├── step2_overhang.py            # FAIT — détection surplombs + ponts internes
+│   ├── step3_segmentation.py        # FAIT — tests pytest formalisés (9 tests)
+│   ├── step4_field_solver.py        # FAIT — résolution FEM du champ scalaire (14 tests)
+│   ├── step5_layers.py              # FAIT — extraction des couches courbes (14 tests)
+│   ├── step6_toolpath2d.py          # FAIT — remplissage 2D par couche (11 tests)
+│   ├── step7_scheduling.py          # FAIT — couleur + ordonnancement trous/purges (19 tests)
+│   ├── step8_machine_toolpath.py    # FAIT — resolution IK generique N-axes (16 tests)
+│   ├── step9_collision_sim.py       # FAIT — collision incrementale (capsules), N-axes (18 tests)
+│   └── step10_adjustment.py         # FAIT — boucle d'ajustement 3 niveaux (15 tests)
+├── core/
+│   ├── __init__.py
+│   ├── mesh_types.py                # FAIT — toutes les dataclasses partagées (voir détail plus bas)
+│   ├── geometry_utils.py            # FAIT — build_face_adjacency, fibonacci_sphere_directions,
+│   │                                 #   rotation_axis_circle_directions, composed_rotation_directions
+│   │                                 #   (N axes composes, cinematique generique),
+│   │                                 #   composed_rotation_angles_and_directions,
+│   │                                 #   refine_axis_angles_local_search (IK generique, step8),
+│   │                                 #   point_in_polygon_2d
+│   ├── constraints.py               # FAIT — registre extensible d'assembleurs de contraintes
+│   │                                 #   utilisateur (ATTACH_POINT/AESTHETIC/STRUCTURAL), point
+│   │                                 #   d'extension pour tout nouveau type sans toucher step4
+│   ├── _cpp.py                      # FAIT — chargeur du noyau natif + interrupteur APEX_USE_CPP
+│   │                                 #   (Python par DÉFAUT ; absence du .pyd jamais une erreur).
+│   │                                 #   Échafaudage de migration, retiré à la bascule.
+│   └── spatial.py                   # FAIT — KDTree (pas 5) + RayIntersector (pas 6) :
+│                                     #   scipy/trimesh OU apex_core selon APEX_USE_CPP, choix
+│                                     #   figé à la construction. Sous-ensembles réellement
+│                                     #   utilisés : .query() k=1, .query_ball_point(), .data ;
+│                                     #   .intersects_location(). Construits par step1
+│                                     #   (mesh_data.kdtree/bvh), step3/4/5/7.
+├── file_io/                          # renommé depuis `io/` — collision avec le module
+│   │                                 #   standard Python `io` (voir limite #20)
+│   ├── mesh_loader.py                # FAIT — load_toolhead_mesh (GLB -> Trimesh mm, scene-space)
+│   ├── visualization_export.py       # FAIT — export_visualization_glb (scène GLB : mesh + couches ;
+│   │                                 #   trajectoire OMISE par défaut, `show_toolpath=True` la rétablit)
+│   └── gcode_export.py               # PAS ENCORE ÉCRIT
+├── res/
+│   └── test_models/
+│       └── l_shape_overhang.stl      # FAIT — modèle de test avec surplomb réel (même géométrie que
+│                                      #   tests/test_step3_segmentation.py::l_shape_data)
+└── tests/
+    ├── __init__.py
+    ├── test_step1_ingest.py         # FAIT — 11 tests (raffinement local pres du plateau,
+    │                                 #   seed garanti a l'interieur via _find_guaranteed_interior_point)
+    ├── test_step2_overhang.py       # FAIT — 6 tests, tous passants et stables
+    ├── test_step3_segmentation.py   # FAIT — 13 tests (dont 4 sur max_region_merge_angle_deg, modele en T)
+    ├── test_step4_field_solver.py   # FAIT — 14 tests (melange spatial de directions)
+    ├── test_step5_layers.py         # FAIT — 27 tests (clustering spatial + tri DFS de continuite,
+    │                                 #   modeles tripode/portique)
+    ├── test_step6_toolpath2d.py     # FAIT — 45 tests (offset hors-plan interpolé, limite #31 ;
+    │                                 #   motifs de remplissage, limite #57)
+    ├── test_step7_scheduling.py     # FAIT — 19 tests
+    ├── test_geometry_utils.py       # FAIT — 7 tests (composed_rotation_directions,
+    │                                 #   _rodrigues_rotate_single)
+    ├── test_step8_machine_toolpath.py  # FAIT — 20 tests (dont orientation physique de la tête, limite #58)
+    ├── test_step9_collision_sim.py  # FAIT — 18 tests
+    ├── test_step10_adjustment.py    # FAIT — 15 tests
+    └── test_cpp_equivalence.py      # FAIT — 26 tests, ORACLE du portage C++ : le natif doit
+                                      #   rendre exactement ce que rend le Python (pas 1-5,
+                                      #   dont k-d tree : indices ET distances bit-exactes vs
+                                      #   scipy). Se SAUTE proprement si cpp/lib/ est vide
+                                      #   (pas de compilateur requis pour lancer la suite).
+```
+
+**État global (2026-09-30) : 402 tests réussis dans les deux positions de `APEX_USE_CPP`.**
+Avec `=1`, 3 tests de plus (`MeshDistance`, T9) se sautent tant que le module C++ n'est pas
+reconstruit. Avant : 386/386 tests passants dans les deux positions de `APEX_USE_CPP` (step1 à step10, plus les étapes intermédiaires step1b/step8b/step9b, core/geometry_utils.py, et les 56 tests d'équivalence du portage C++). Ce compteur a longtemps affiché 166, puis 272, puis 318, puis 331, puis 340, puis 344, puis 351, puis 357, puis 362, puis 365, puis 370, puis 375, puis 385, alors que la suite en comptait déjà bien davantage : le remettre à jour à chaque session, ou ne pas s'y fier.
+
+**Un noyau natif C++ est en cours d'intégration** (`cpp/`, voir limite #56) :
+`_PrintedGeometryIndex` et la cinématique inverse N axes (step8) y sont déjà
+portés — pipeline complet **×3,07** sur `death.stl`, à métrique identique.
+Il est **désactivé par défaut** —
+il faut `APEX_USE_CPP=1` pour l'emprunter, et l'absence du module compilé
+n'est jamais une erreur. La suite de tests doit donc passer dans les DEUX
+positions de l'interrupteur, et c'est le critère de recette de chaque
+portage.
+**Les 10 étapes du cœur algorithmique sont écrites, stables et testées, et
+`main.py` les enchaîne bout en bout sur un fichier STL/3MF réel** (vérifié
+sur `res/test_models/l_shape_overhang.stl`, un modèle avec un vrai
+surplomb). Restent hors cœur : `config/` et `file_io/gcode_export.py`
+(export G-code final).
+
+**Environnement Python du projet** : venv local (`.venv/`, ignoré par git)
+sur **Python 3.14** — pas 3.12, qui a cessé de fonctionner sur cette
+machine (interpréteur plantant avec `STATUS_DLL_INIT_FAILED` dès `python -c
+"print(1+1)"`, indépendant du code du projet). Toutes les dépendances
+listées ci-dessous s'installent sans compilation sur 3.14 (wheels
+précompilées disponibles pour chacune, y compris `tetgen` dont la wheel est
+`cp312-abi3` mais compatible ABI3 avec 3.14). Recréer l'environnement :
+`python -m venv .venv` puis `.venv\Scripts\python.exe -m pip install
+trimesh scipy tetgen rtree manifold3d networkx shapely pytest`.
+
+**Dépendances Python requises** (installer via pip) :
+```
+trimesh scipy tetgen rtree manifold3d networkx shapely pytest
+```
+**Dépendance OPTIONNELLE** : `pymeshfix` (wheel `cp312-abi3`, compatible
+3.14 comme `tetgen`). Importée paresseusement par `step1_ingest`, uniquement
+quand TetGen refuse un maillage pour auto-intersections — un environnement
+sans elle fonctionne exactement comme avant sur tout maillage déjà valide.
+Sans elle, `res/test_models/death.stl` ne passe pas (voir limite #43).
+**`death.stl` est un Benchy imprimé à l'envers** (capot/coque en porte-à-faux
+au-dessus d'un pilier central et d'une base circulaire — voir capture
+d'écran fournie par l'utilisateur en session) : 31×62×50mm, watertight,
+2418 faces, ~22% de la surface en surplomb franc (>45°). Modèle de
+référence pour mesurer le taux de matière déposée sans support — la
+géométrie même du capot garantit de vrais surplombs à résoudre par
+inclinaison 4 axes, pas de simples défauts d'ordre de dépôt.
+`pip install <package> --break-system-packages` si environnement géré (Debian/Ubuntu récent).
+`shapely` ajouté à l'étape 6 pour l'offset polygonal (`buffer`) et le
+clipping d'infill — géométrie 2D robuste (trous, auto-intersections,
+polygones multi-parties après un offset qui sépare une forme en deux),
+hors de portée d'une implémentation maison contrairement au reste du
+pipeline géométrique (point-in-polygon, marching tetrahedra, etc.).
+
+---
+
+## Paramètres globaux (contrat UI TypeScript → moteur Python)
+
+```
+MachineProfile {
+  // Cinématique décrite comme une liste ORDONNÉE et PARAMÉTRABLE d'axes de
+  // rotation — PAS un modèle figé sur une seule machine. Chaque machine
+  // future (un seul DOF, deux DOF différemment agencés, plus de deux DOF)
+  // se décrit par sa propre liste rotation_axes, sans changer le contrat.
+  // Voir limite de conception #18 (composition de N rotations, la machine
+  // actuelle n'est qu'un cas d'usage parmi d'autres) et #19 (singularité au
+  // centre du premier axe de rotation, si applicable).
+  rotation_axes: RotationAxisSpec[] {
+    axis: Vec3                        // unitaire, dans le repère du DOF parent
+    angle_range_deg: {min: float, max: float}  // (0,360) tour complet, plage
+                                                 // restreinte, ou (v,v) fige
+  }
+  // Exemple d'usage — machine actuelle (commande firmware, gabarit
+  // symbolique) : G00 Y<C> X<R> Z<Z> B<B> F<feedrate>
+  //   R (firmware "X") = rayon du plateau, mm ; C (firmware "Y") = rotation
+  //   du plateau, degrés ; Z (firmware "Z") = hauteur ; B (firmware "B") =
+  //   rotation de la TÊTE, perpendiculaire à R (B=0° tête vers le bas,
+  //   B=90° horizontale, B=180° retournée vers le haut, jamais négatif).
+  //   **Plage réelle mesurée : B ∈ [0°, 185°]**, légèrement AU-DELÀ de la
+  //   verticale retournée (corrigé dans `main._default_machine_profile`, qui
+  //   figeait 180°). Conséquence : déposer vers le bas EST physiquement
+  //   possible sur cette machine — toute règle du moteur qui suppose
+  //   l'inverse est fausse par construction (voir limite #51,
+  //   `enforce_upward_growth`).
+  //   rotation_axes = [ {axis: (0,0,1), angle_range_deg: (0,360)},   // C
+  //                      {axis: perpendiculaire à R, angle_range_deg: (0,185)} ]  // B
+  platform_origin: Vec3             // centre de rotation du premier axe (si applicable) —
+                                     // aussi le point de singularité éventuel (limite #19)
+  nozzle_model: Mesh                                 // maillage 3D tête (buse + porte-buse + carriage proche)
+  nozzle_diameter: float
+  max_angular_velocity: float                        // rad/s
+  max_angular_acceleration: float
+  build_volume: AABB
+  z_clearance_min: float
+}
+
+SlicingParams {
+  layer_height_base: float
+  overhang_angle_threshold: float                    // ex 45°
+  bridge_detection_ray_density: float
+  nozzle_width: float
+  infill_density: float
+  infill_pattern: enum
+  wall_count: int
+}
+
+FieldSolverParams {
+  laplacian_smoothness_weight: float
+  gradient_overhang_weight: float
+  resolution: float                                   // taille de tétra pour la résolution FEM
+  max_solver_iterations: int
+  convergence_tolerance: float
+}
+
+Constraint[] {                                        // un par point d'attache / zone
+  type: "attach_point" | "aesthetic" | "structural"
+  position: Vec3
+  target_field_value: float | null
+  target_normal: Vec3 | null
+  influence_radius: float
+  falloff: enum (linear, gaussian, cubic)
+  weight: float
+}
+
+ColorMap {
+  per_face_color: Map<face_id, color_id>
+  merge_tolerance: float
+}
+
+SchedulingParams {
+  hole_cost_model: {reheat_penalty: float, adhesion_risk_weight: float}
+  purge_cost_model: {volume_per_purge: float, time_per_purge: float}
+  max_open_holes: int
+}
+
+CollisionSimParams {
+  path_sampling_step: float
+  safety_margin: float
+  max_adjustment_iterations: int
+}
+```
+
+---
+
+Voici la spécification complète, étape par étape, avec les données précises manipulées à chaque phase et tous les paramètres remontés depuis l'UI TypeScript. Je vais rester au niveau "structures de données + opérations", pas pseudo-code exécutable, mais suffisamment précis pour être directement implémentable.
+
+---
+
+## Paramètres globaux reçus de l'interface (contrat UI → moteur)
+
+```
+MachineProfile {
+  // Cinématique décrite par rotation_axes (liste paramétrable de N axes) —
+  // voir le premier bloc MachineProfile ci-dessus pour le détail complet
+  // (gabarit générique, exemple machine actuelle, limites #18/#19). Rappel synthétique :
+  rotation_axes: RotationAxisSpec[]   // N axes ordonnés, chacun {axis, angle_range_deg}
+  platform_origin: Vec3             // centre du premier axe (si applicable) — singularité éventuelle
+  nozzle_model: Mesh                                 // maillage 3D de la tête (buse + porte-buse + carriage proche)
+  nozzle_diameter: float
+  max_angular_velocity: float                        // rad/s, limite plateau
+  max_angular_acceleration: float
+  build_volume: AABB
+  z_clearance_min: float                             // garde mini buse/pièce
+}
+
+SlicingParams {
+  layer_height_base: float
+  overhang_angle_threshold: float                    // ex 45°
+  bridge_detection_ray_density: float                // résolution du ray-cast pour ponts internes
+  nozzle_width: float
+  infill_density: float
+  infill_pattern: enum
+  wall_count: int
+}
+
+FieldSolverParams {
+  laplacian_smoothness_weight: float                 // pondération lissage vs contrainte d'angle
+  gradient_overhang_weight: float                    // poids de la contrainte "gradient ~ normale locale"
+  resolution: float                                   // taille de voxel/tétra pour la résolution FEM
+  max_solver_iterations: int
+  convergence_tolerance: float
+}
+
+Constraint[] (envoyés dynamiquement, un par point d'attache ou zone) {
+  type: "attach_point" | "aesthetic" | "structural"
+  position: Vec3
+  target_field_value: float | null
+  target_normal: Vec3 | null
+  influence_radius: float
+  falloff: enum (linear, gaussian, cubic)
+  weight: float
+}
+
+ColorMap {
+  per_face_color: Map<face_id, color_id>              // peinture utilisateur
+  merge_tolerance: float                               // lissage/regroupement avant ordonnancement
+}
+
+SchedulingParams {
+  hole_cost_model: {reheat_penalty: float, adhesion_risk_weight: float}
+  purge_cost_model: {volume_per_purge: float, time_per_purge: float}
+  max_open_holes: int                                  // borne sur les trous simultanés en attente
+}
+
+CollisionSimParams {
+  path_sampling_step: float                            // pas d'échantillonnage trajectoire pour test collision
+  safety_margin: float
+  max_adjustment_iterations: int
+}
+```
+
+---
+
+Les 10 étapes du pipeline
+
+## Étape 1 — Ingestion et préparation du mesh
+
+**Ce que le code fait précisément :**
+- Charge le mesh (STL/3MF) via `trimesh`, vérifie la watertightness (`mesh.is_watertight`), répare si besoin (`trimesh.repair.fill_holes`, `fix_normals`).
+- Calcule les normales par face (`mesh.face_normals`) et par sommet (moyenne pondérée par aire).
+- Construit une structure d'accélération spatiale : BVH (`trimesh.ray.ray_pyembree` ou `rtree`) pour les ray-cast ultérieurs, et un KDTree (`scipy.spatial.cKDTree`) sur les centres de faces.
+- Voxelise ou tétraédrise le volume à la résolution `FieldSolverParams.resolution` (réutilisation directe de ton pipeline CuPy tétraédrique existant) — c'est le domaine sur lequel le champ scalaire sera résolu.
+
+**Sortie :** `Mesh` nettoyé + `TetMesh` (ou grille voxel) + structures d'accélération.
+
+
+## Étape 2 — Détection des surplombs et des ponts internes
+
+**Ce que le code fait précisément :**
+- Pour chaque face : angle entre sa normale et la verticale locale de référence (au départ, l'axe Z machine avant toute rotation) ; marque `is_overhang = angle > overhang_angle_threshold`.
+- Pour les ponts internes : pour chaque face quasi-horizontale non marquée surplomb, lance un ray-cast vertical vers le bas depuis un échantillonnage de points sur la face (densité = `bridge_detection_ray_density`) ; si le rayon ne touche aucune autre face du mesh avant une distance seuil, marque la zone `is_bridge = true`.
+- Construit une carte scalaire par face : `risk_score = f(is_overhang, is_bridge, angle)`, utilisée à l'étape suivante comme poids de contrainte.
+
+**Sortie :** `OverhangMap` (face_id → risk_score, is_bridge bool).
+
+
+## Étape 3 — Segmentation en sous-volumes candidats
+
+**Ce que le code fait précisément :**
+- Construit un graphe d'adjacence de faces (dual du mesh).
+- Applique un algorithme de croissance de région (region growing) ou un graph-cut multi-labels (`scikit-learn` / implémentation maison via `networkx` + coupe min) où :
+  - le coût d'assigner une face à une direction candidate `d` = pénalité si l'angle normale/d dépasse le seuil, pondérée par `risk_score`
+  - le coût de frontière entre deux régions voisines de directions différentes = pénalise la fragmentation excessive (paramètre de régularisation, à exposer côté UI si besoin)
+- Résultat : chaque face reçoit un `region_id` et chaque région une direction d'impression candidate (vecteur).
+- Construit le graphe de dépendances entre régions sous forme d'**arborescence de croissance depuis le plateau** : parcours en largeur multi-sources depuis les régions au contact du plateau à travers l'adjacence entre régions, puis orientation de chaque arête de la profondeur faible vers la profondeur forte (deux régions de même profondeur poussent en parallèle et ne portent aucune arête). L'ordre suit « par où la matière rejoint le plateau », jamais une comparaison de hauteur — une pièce pendante est plus basse que ce à quoi elle est suspendue mais doit être imprimée après. Acyclique par construction (la profondeur croît strictement le long de chaque arête), donc le tri topologique aval (`networkx.topological_sort`, step5) est toujours défini. `RegionDependencyGraph.region_print_depth` expose l'arborescence.
+
+**Sortie :** `region_id` par face + `RegionDependencyGraph`.
+
+
+## Étape 4 — Construction et résolution du champ scalaire continu
+
+**Ce que le code fait précisément :**
+- Sur le `TetMesh`, assemble l'opérateur Laplacien discret (matrice creuse, `scipy.sparse`).
+- Ajoute les contraintes dures/molles au système :
+  - Contrainte de surplomb (issue de l'étape 2/3) : le gradient du champ à chaque tétraèdre proche d'une face à risque doit s'aligner avec la direction candidate de sa région, pondéré par `gradient_overhang_weight`.
+  - Contraintes utilisateur (`Constraint[]` reçus de l'UI) : pour chaque point d'attache, ajoute une ligne au système forçant `field(position) ≈ target_field_value`, atténuée par `influence_radius` et `falloff`.
+  - Lissage global pondéré par `laplacian_smoothness_weight`.
+- Résout le système linéaire (`scipy.sparse.linalg.spsolve` ou solveur itératif `cg`/`gmres` si gros système, potentiellement accéléré CuPy comme sur ton pipeline mesh existant) jusqu'à `convergence_tolerance` ou `max_solver_iterations`.
+
+**Sortie :** `ScalarField` (valeur par nœud du TetMesh).
+
+
+## Étape 5 — Génération des couches courbes (isosurfaces)
+
+**Ce que le code fait précisément :**
+- Choisit une série de valeurs d'isosurface espacées selon `layer_height_base` (converti en espacement de champ via la norme moyenne du gradient local, pour que l'épaisseur physique de couche reste ~constante malgré la courbure).
+- Pour chaque valeur, extrait l'isosurface (marching tetrahedra sur le TetMesh — variante 3D du marching cubes, adaptée aux maillages tétraédriques).
+- Intersecte chaque isosurface avec le mesh original pour obtenir les contours fermés réels de la couche (`trimesh.intersections` ou opération booléenne locale).
+- Ordonne les couches selon le `RegionDependencyGraph` (une couche peut appartenir à plusieurs régions si elle les traverse — dans ce cas, elle hérite de la contrainte de dépendance la plus stricte).
+
+**Sortie :** liste ordonnée de `Layer { contour_3d: Polyline[], region_ids: [...] }`.
+
+
+## Étape 6 — Remplissage par couche (contours + infill + ponts)
+
+**Ce que le code fait précisément (`pipeline/step6_toolpath2d.py`, FAIT) :**
+- Pour chaque couche, projette chaque boucle de `contour_3d` dans son plan
+  local (`local_frame` de l'étape 5, déjà calculé — pas recalculé ici).
+- Classe les boucles projetées en contours "matière" / trous par
+  **imbrication géométrique** (`point_in_polygon_2d`, `core/geometry_utils.py`),
+  jamais par signe d'aire (limite #11) — parité généralisée à un nombre
+  arbitraire de boucles imbriquées, pas seulement 2.
+- Génère les périmètres par offset polygonal successif vers l'intérieur
+  (`shapely.buffer(-nozzle_width * n)`), pour `wall_count` parois ; s'arrête
+  proprement (sans erreur) si une zone plus fine que `nozzle_width *
+  wall_count` fait disparaître l'offset avant d'atteindre le nombre nominal
+  de parois — voir limite #13.
+- Génère l'infill (balayage de lignes parallèles, `infill_density`/`infill_pattern`)
+  à l'intérieur du dernier offset valide.
+- Ordonne la trajectoire du centre vers l'extérieur (infill, puis parois
+  n=wall_count...1, puis le contour original n=0 en dernier).
+- Pour les boucles touchant une zone `is_bridge` (étape 2, détection de
+  PRÉSENCE pas de majorité — voir limite #14) : ajoute
+  `bridge_anchor_extra_walls` parois supplémentaires resserrées sur le
+  périmètre (ancrage = renfort de matière sur les bords, pas densité
+  d'infill augmentée — lecture directe de CLAUDE.md), puis réoriente
+  l'infill pour balayer perpendiculairement à `bridge_span_direction`
+  (étape 2, projeté dans le plan local de la couche).
+
+**Sortie :** `Layer.toolpath_2d` (liste de polylignes ordonnées, repère
+local **2D** — pas 3D, l'étape 8 se chargera de relever au repère machine
+via `local_frame`).
+
+
+## Étape 7 — Application de la carte de couleur et planification d'ordonnancement
+
+**Ce que le code fait précisément (`pipeline/step7_scheduling.py`, FAIT) :**
+- Projette `ColorMap.per_face_color` sur chaque **arête** de trajectoire :
+  relève l'arête du repère local 2D vers la 3D (`step6._lift_to_3d`), puis
+  interroge `trimesh.proximity.ProximityQuery.on_surface()` — **pas**
+  `mesh_data.kdtree`, dont la distance n'est pas une distance à la surface
+  (limite #15). Une arête à plus de `surface_color_distance` de la surface
+  est de la matière **interne/invisible** et reçoit `color_id = None` :
+  imprimable avec n'importe quelle couleur déjà chargée, ce qui est le
+  principal levier de réduction des purges.
+- Scinde les polylignes aux transitions de couleur (invariant « une
+  polyligne = une couleur », dont dépend tout l'ordonnancement aval).
+- Lisse la carte de couleur selon `ColorMap.merge_tolerance` : filtre
+  morphologique **1D le long de la trajectoire** (paramétrée en longueur
+  d'arc), tout run plus court que la tolérance étant absorbé par son voisin
+  le plus long. Lissage le long du chemin et non sur le maillage, car le coût
+  réel à borner est le nombre de **changements de couleur** sur le trajet —
+  lecture directe : « ne jamais changer de couleur pour moins de X mm ».
+- Construit un graphe `(region, color) → dépendances physiques`, en croisant
+  `RegionDependencyGraph` (arêtes héritées) et le recouvrement entre couches
+  successives (arêtes de support), à la granularité (couche, couleur).
+- Calcule la **deadline d'accessibilité** de chaque trou candidat : rayons
+  d'échappement dans les directions atteignables en 4 axes
+  (`rotation_axis_circle_directions`), scellés par la première couche
+  **future** rencontrée (limite #16) ; la deadline est le max sur les
+  directions (la meilleure route survit le plus longtemps), moins 1.
+- Bascule en purge classique si le trou n'est pas **réalisable**
+  (`deadline < couche de comblement`) ou pas **rentable**
+  (`hole_cost > purge_cost`), ou si `max_open_holes` serait dépassé.
+- Ordonnance en earliest-deadline-first sur les trous en attente, entrelacé
+  avec l'ordre topologique géométrique de base.
+
+**Sortie :** `(list[Layer] recolorées/re-segmentées, PrintSchedule)`. Une
+`PrintPass` pointe vers des **segments** `(layer_id, index)` — pas seulement
+une plage de couches : une passe de couleur ne couvre qu'une partie de chaque
+couche traversée. L'ordre d'exécution est exactement l'ordre de
+`PrintSchedule.passes` ; l'étape 8 le consomme séquentiellement sans jamais
+re-dériver la logique d'ordonnancement.
+
+
+## Étape 8 — Génération de trajectoire machine 4 axes réelle
+
+**Ce que le code fait précisément :**
+- Pour chaque point de chaque `toolpath_2d`, transforme du repère local de la couche vers le repère machine global : calcule l'angle de rotation plateau nécessaire (à partir de l'orientation locale du champ à ce point) + position XYZ résultante après rotation.
+- Lisse la séquence d'angles de rotation dans le temps (filtre passe-bas ou spline sur la série temporelle d'angles) pour respecter `max_angular_velocity`/`max_angular_acceleration`.
+- Réordonne/interpole les points si nécessaire pour garantir une extrusion continue (pas de saut de position sans rétraction explicite programmée).
+
+**Sortie :** `ToolpathMachine[]` — liste de `{position: Vec3, rotation_angle: float, extrusion: float, feedrate: float, color: id}`.
+
+
+## Étape 9 — Simulation de collision avec le modèle 3D de la tête
+
+**Ce que le code fait précisément (`pipeline/step9_collision_sim.py`, FAIT) :**
+- `MachineProfile.nozzle_model` doit déjà être un `trimesh.Trimesh` chargé
+  (ex: `file_io.mesh_loader.load_toolhead_mesh`) — step9 ne charge rien
+  lui-même. Absent/invalide : `CollisionReport(nozzle_model_checked=False)`,
+  jamais d'exception.
+- Échantillonne `ToolpathMachine.points` selon `path_sampling_step`
+  (distance cumulée, pas un point sur N).
+- Pour chaque point échantillonné, positionne une copie des points de test
+  du modèle (sommets **et** points le long des arêtes, voir plus bas)
+  selon `position` + `axis_angles`, avec la MÊME convention de composition
+  N-axes que step3/step7/step8 (rotations en ordre inverse de la liste,
+  translation après) — jamais une nouvelle logique de rotation.
+- Fait grandir un index spatial de la matière déjà imprimée **au fur et à
+  mesure**, sous forme de capsules (segment + rayon `nozzle_diameter/2`),
+  jamais une union booléenne (coût prohibitif sur plusieurs milliers de
+  points). Une capsule n'est jamais ajoutée en avance sur le point testé,
+  et le cordon en cours de dépôt lui-même est exclu (la buse est par
+  définition confondue avec le cordon qu'elle vient de déposer — sans
+  cette exclusion, chaque point en extrusion se signalerait comme collision
+  contre sa propre matière, faux positif structurel mesuré concrètement).
+- Teste contre cet index (distance point-capsule, formule fermée) et contre
+  le plateau (`ProximityQuery`, jamais `mesh_data.kdtree` — limite #15),
+  avec un broad-phase AABB commun avant tout calcul de distance précis.
+- Le mandrin/mors n'a aucune géométrie disponible à ce stade : jamais testé
+  silencieusement — `CollisionReport.chuck_checked` reste `False`, signal
+  explicite et structuré plutôt qu'un skip invisible.
+
+**Sortie :** `CollisionReport` — `events: list[CollisionEvent]` (point
+concerné, type d'obstacle, profondeur de pénétration), plus
+`chuck_checked`/`nozzle_model_checked` (booléens explicites, jamais un
+silence sur ce qui n'a pas été vérifié).
+
+
+### Modèle 3D de tête d'impression reçu (`res/3d/toolheads/`)
+
+Un premier modèle réel a été reçu pour `MachineProfile.nozzle_model`,
+utilisé par l'étape 9 ci-dessus. Chargement via
+`file_io/mesh_loader.load_toolhead_mesh(path)` (FAIT) : `Scene` GLB ->
+`Trimesh` unique en espace scène (`scene.to_geometry()`), conversion m -> mm
+(×1000) — les deux pièges documentés ci-dessous sont gérés à l'intérieur de
+cette fonction, aucun appelant n'a besoin de les reproduire. step9 ne charge
+pas lui-même le fichier (ne connaît pas le système de fichiers) : c'est
+l'appelant de `pipeline/step9_collision_sim.run()` qui doit peupler
+`MachineProfile.nozzle_model` via ce loader avant l'appel.
+
+- **Emplacement** : `res/3d/toolheads/aetheris-4/aetheris-4.glb` — un
+  sous-dossier par modèle de tête (convention pour accueillir plusieurs
+  têtes interchangeables à l'avenir, cohérent avec la généricité déjà
+  actée pour `MachineProfile.rotation_axes`).
+- **Modèle physique** : BIQU H2 V2S Lite, buse longue (dimensions
+  constructeur : 72.1 × 37.9 × 80.6 mm, avec ventilateur).
+- **Format** : GLB (glTF binaire). `trimesh.load(path)` retourne une
+  `Scene`, **pas** un `Trimesh` direct — la géométrie est nommée
+  `"toolhead"` dans `scene.geometry`. Le mesh brut (`scene.geometry["toolhead"].vertices`)
+  est dans l'espace LOCAL du nœud, pas dans l'espace de la scène : ce
+  fichier porte une rotation + mise à l'échelle composées sur la
+  hiérarchie de nœuds (échelle nette ×0.01 entre le mesh et la racine de
+  la scène, vérifié directement sur ce fichier — extentes locales brutes
+  3.5×7.7×7.6 contre extentes de scène 0.076×0.077×0.035 m). **Ne jamais
+  lire les sommets bruts sans appliquer la transformation de nœud** :
+  utiliser `scene.dump(concatenate=True)` (ou `scene.to_geometry()`) pour
+  obtenir directement un seul `Trimesh` déjà exprimé dans l'espace de la
+  scène, plutôt que de reconstruire la transformation à la main
+  (`scene.dump(concatenate=True)` est dépréciée depuis avril 2025 — le
+  loader utilise `scene.to_geometry()`).
+- **Unité : mètres dans le fichier source** (la spec glTF impose le mètre
+  comme unité de base ; confirmé sur ce fichier, aucune extension
+  déclarant une unité alternative). **Conversion ×1000 obligatoire** vers
+  millimètres avant toute utilisation dans le pipeline, qui travaille
+  entièrement en mm (même piège que `platform_z`/`merge_tolerance` déjà
+  documenté ailleurs : une unité qui diverge silencieusement entre deux
+  parties du système). Extentes résultantes après transform de scène et
+  conversion : environ 76 × 77 × 35 mm.
+- **Non étanche (`is_watertight=False`), accepté tel quel — pas de
+  réparation nécessaire.** Confirmé par l'implémentation de l'étape 9 :
+  la détection ne teste jamais l'inclusion/le volume, seulement des
+  distances (point-capsule pour la pièce imprimée, `ProximityQuery` pour
+  le plateau), aucune des deux n'exige l'étanchéité.
+- **Convention de repère du modèle (à respecter par l'étape 9 lors du
+  positionnement/orientation de `nozzle_model` le long de la trajectoire)** :
+  - **Origine** = point de dépôt de matière (pointe de la buse) — vérifié
+    géométriquement sur ce fichier : le sommet le plus proche de l'origine
+    de la scène est à 0.1 mm, situé exactement à une extrémité du
+    maillage, cohérent avec la convention.
+  - **Axe X (rX)** = axe de rotation de la tête.
+  - **Axe Y** = axe de déplacement de la tête.
+  - **Axe Z** = sens de la tête ; le haut de Z pointe vers le haut
+    physique de la tête.
+  - Cette convention est celle du FICHIER (repère local du modèle de
+    tête), à distinguer du repère `(R, C, Z, B)` de la machine — l'étape 9
+    devra composer les deux (orientation de `nozzle_model` selon
+    `axis_angles` du point de trajectoire courant, puis translation à sa
+    position) au moment de son implémentation, non faite ici.
+
+
+## Étape 10 — Ajustement en cas de collision détectée
+
+**Ce que le code fait précisément (`pipeline/step10_adjustment.py`, FAIT — boucle jusqu'à `max_adjustment_iterations`) :**
+- Consomme `CollisionReport` (étape 9) **et** `list[Step8Diagnostic]` (étape 8).
+  Pour chaque problème, tente dans l'ordre :
+  1. **Réorientation locale** (`_try_local_reorientation`) : candidats issus de
+     `composed_rotation_angles_and_directions` (la MÊME grille que l'IK de
+     step8, jamais une nouvelle méthode), essayés par écart angulaire
+     **croissant** vis-à-vis de la direction de dépôt d'origine, et
+     **arrêtés** dès que l'écart dépasse `max_direction_deviation_deg` —
+     c'est exactement la condition « tout en respectant encore le seuil de
+     surplomb ». Un candidat qui violerait `max_angular_velocity` vis-à-vis
+     de ses voisins est rejeté (voir limite #24).
+  2. **Ré-segmentation ciblée** : émet une `ResegmentationRequest` (point,
+     plage d'angles à exclure par axe) vers un **hook injecté par
+     l'orchestrateur** — l'étape 10 ne re-joue PAS elle-même step3→step8
+     (voir limite #23).
+  3. **Support de secours** : `AdjustmentLogEntry(method="fallback_support")`,
+     log explicite.
+- Après une réorientation, ne re-vérifie QUE les points modifiés
+  (`_collisions_at_points`) : les capsules de l'étape 9 dépendent de
+  `position` seule, jamais de `axis_angles`, donc une réorientation laisse
+  la matière imprimée strictement identique et aucun point en aval ne peut
+  changer d'état. Après une ré-segmentation, au contraire, passe complète
+  (la trajectoire entière est invalidée).
+- **Critère d'arrêt** : convergence = zéro collision restante. À
+  l'épuisement des itérations avec des collisions ouvertes, celles-ci
+  basculent **de force** en support de secours et `converged=False` —
+  jamais d'exception (même discipline que `Step8Diagnostic` et
+  `CollisionReport.chuck_checked` : une donnée explicite, pas un blocage
+  qui priverait l'utilisateur de toute sortie).
+
+**Sortie finale :** `(ToolpathMachine ajustée, AdjustmentReport)` —
+`AdjustmentReport` porte `entries` (le journal), `converged`,
+`unresolved_collisions` et `iterations_used`, transmis à l'UI TypeScript
+pour affichage/validation avant export G-code.
+
+---
+
+## Décisions techniques actées et limites connues
+
+### Dépendances / corrections d'API
+- Tétraédrisation via `tetgen` (binding PyPI), accepté explicitement par l'utilisateur.
+- **trimesh 5.0** a changé son API par rapport à ce qui est documenté/connu :
+  - `remove_degenerate_faces()` / `remove_duplicate_faces()` n'existent plus
+    → utiliser `mesh.update_faces(mesh.nondegenerate_faces())` et `mesh.update_faces(mesh.unique_faces())`
+  - `trimesh.proximity.spatial.cKDTree` n'existe plus → `scipy.spatial.cKDTree` directement
+  - `tetgen.tetrahedralize()` retourne un nombre de valeurs variable selon version
+    → lire `tet.node` / `tet.elem` sur l'objet plutôt que la valeur de retour
+- Opérations booléennes trimesh (`union`, `difference`) nécessitent `manifold3d` installé
+  (`engine='manifold'`).
+- `tetgen.TetGen` ne détecte PAS automatiquement les cavités internes (ex: boîte creuse) :
+  sans appel explicite à `tet.add_hole(point_interieur)` avant `tetrahedralize()`, tetgen
+  peut générer des tétraèdres qui traversent le vide (mesuré : ~6% des tétraèdres sur une
+  boîte creuse simple). `step1_ingest._find_internal_cavities()` détecte automatiquement
+  ces cavités (coques connexes à volume signé négatif via `mesh.split()`) et fournit les
+  points de trou — voir limite #7.
+- `scipy.sparse.linalg.cg` (scipy ≥1.9, venv du projet en 1.18.0) attend `rtol=`, pas
+  `tol=` (renommé) — utilisé par `step4_field_solver._solve_linear_system`.
+
+### Limites de conception importantes (à garder en tête pour les étapes suivantes)
+1. **Le plateau d'impression n'est connu qu'à partir de l'étape 3.** `step2_overhang.py`
+   seul ne peut pas distinguer une face posée sur le plateau d'une face réellement en
+   surplomb dans le vide — il n'a aucune connaissance de la position du plateau.
+   `step3_segmentation.py` résout ça via `platform_z` + `platform_contact_tolerance` :
+   les faces au contact du plateau ont leur risque forcé à 0 et deviennent des racines
+   du graphe de dépendances.
+
+2. **`is_bridge` et `is_overhang` ne sont PAS mutuellement exclusifs.** Un plafond de
+   cavité quasi-horizontal (normale vers le bas, angle≈0°) peut légitimement être les
+   deux à la fois. Seule une face dont la normale pointe vers le **haut** (angle≈180°,
+   dessus d'un solide plein) est exclue de la détection de pont — elle n'a par
+   construction pas besoin d'être supportée par en dessous.
+
+3. **`bridge_max_gap_distance` doit être calibré relativement à l'échelle du modèle**
+   (idéalement en fonction de `layer_height_base`), jamais une valeur absolue universelle.
+   Un défaut mal calibré peut soit tout marquer comme pont, soit ne rien détecter.
+
+4. **La compatibilité face/direction (step3) se teste comme un surplomb, pas un
+   alignement.** Une face est compatible avec une direction candidate `d` si elle
+   n'est PAS en surplomb selon `-d` (même critère que step2, généralisé à une direction
+   quelconque) — PAS si sa normale est proche de `d` lui-même. Erreur initiale corrigée :
+   tester l'alignement direct bloquait à tort toutes les faces de murs verticaux
+   (perpendiculaires à `d`), empêchant toute fusion de région même sur un cube trivial.
+
+5. **Le graphe de dépendances entre régions doit se baser sur une référence globale
+   (`up_vector` machine), jamais sur une moyenne locale par paire de régions.**
+   Une référence locale par paire n'est pas transitive et produit des cycles
+   artificiels dès qu'un ensemble de régions forme un anneau (typiquement une sphère
+   segmentée en tranches autour d'un axe) — chaque paire semblait localement cohérente,
+   mais l'ensemble ne l'était pas.
+
+6. **Directions candidates 4 axes vs 5 axes** (`core/geometry_utils.py`) : une machine
+   à 1 seul DOF de rotation n'atteint qu'un **cercle** de directions autour de
+   son axe de rotation (`rotation_axis_circle_directions`), pas une sphère complète
+   (`fibonacci_sphere_directions`, réservée à une orientation libre type 5 axes).
+   `SegmentationParams.rotation_axes` (une liste de `RotationAxisSpec`, voir
+   limite #18) généralise ce choix à N axes composés, chacun avec sa propre
+   plage — le cas à 1 DOF ci-dessus reste un cas particulier valide (liste à
+   1 élément, plage complète), pas remplacé.
+
+8. **`TetMesh.tet_adjacency` (adjacence nœud-nœud) ne doit PAS servir de poids au
+   Laplacien discret**, malgré ce que suggérait son commentaire d'origine dans
+   `step1_ingest.py`. Un Laplacien de graphe (poids uniformes) ignore la géométrie
+   réelle des tétraèdres — l'étape 4 assemble la vraie matrice de rigidité FEM P1
+   (élément par élément, `step4_field_solver._assemble_stiffness_matrix`).
+   `tet_adjacency` reste utile comme outil topologique (propagation d'influence de
+   surplomb par sauts d'adjacence), pas comme poids de la forme bilinéaire.
+
+9. **Un système Laplacien pur est singulier** (le champ constant est toujours solution)
+   et **un terme de direction limité aux zones à risque laisse le reste du champ
+   indéterminé** (donc nul, une pièce sans surplomb n'aurait aucune couche). L'étape 4
+   résout les deux : ancrage automatique du plateau (pénalité molle de poids élevé sur
+   les nœuds au contact du plateau, `platform_anchor_weight`) + terme de direction de
+   gradient appliqué à **tous** les tétraèdres avec un poids de base
+   (`gradient_baseline_weight`), renforcé près des surplombs
+   (`gradient_overhang_weight`). Piège écarté : déduire les nœuds du plateau de la
+   topologie du graphe de dépendances ("régions sans arête entrante") est faux dès que
+   la segmentation ne produit qu'une seule région (tout objet simple) — cette région
+   unique serait alors à la fois racine et couvrirait tout le modèle. La bonne source
+   de vérité est `RegionDependencyGraph.platform_contact_faces` (booléen par face,
+   calculé par step3, qui seul connaît la position du plateau).
+
+10. **Marching tetrahedra (étape 5) doit orienter ses triangles à partir des valeurs de
+    champ, jamais de l'ordre local des sommets du tétraèdre** (`tetgen` ne garantit
+    aucune convention de handedness cohérente d'un tétraèdre à l'autre — même raison
+    que le `abs(volume)` de l'étape 4). Convention retenue : normale du triangle
+    pointant du côté "en-dessous de l'isovaleur" vers le côté "au-dessus", dérivée des
+    sommets de valeur min/max du tétraèdre — garantie correcte car le champ est
+    linéaire par tétraèdre (P1).
+
+11. **Le sens de parcours (winding) d'un contour extérieur et d'un trou intérieur
+    N'EST PAS opposé** via `trimesh.Trimesh.outline()`, contrairement à l'intuition
+    initiale (théorème de Stokes mal appliqué). Vérifié directement sur un anneau plat
+    synthétique à normales cohérentes : les deux boucles donnent le même signe d'aire
+    projetée. La distinction extérieur/trou doit passer par un test d'imbrication
+    géométrique (point-in-polygon), pas par le signe d'une aire signée.
+
+12. **L'espacement des isovaleurs (étape 5) ne peut être qu'approximativement
+    constant.** `‖∇φ‖` varie spatialement (le champ résout un compromis
+    lissage/direction/contraintes, pas une équation eikonale `‖∇φ‖=1`) ; une seule
+    valeur d'espacement est dérivée de la **médiane pondérée par volume** de
+    `‖∇φ‖` sur tout le `TetMesh` (pas la moyenne brute, faussée par le gradient
+    localement élevé près de l'ancrage plateau à poids élevé).
+
+13. **Une paroi plus fine que `nozzle_width * wall_count` ne peut pas recevoir
+    `wall_count` parois pleines** — géométriquement impossible, forcer le nombre
+    nominal produirait des offsets dégénérés/auto-intersectants. L'étape 6
+    (`_offset_walls`) s'arrête proprement dès qu'un offset devient vide ou
+    résiduel (aire `< degenerate_area_ratio * aire_initiale`), sans lever
+    d'erreur ni log — le nombre de parois réellement généré pour cette zone
+    est simplement `< wall_count`, cohérent avec la convention déjà en place
+    (pas d'objet placeholder, moins d'éléments dans la liste retournée).
+
+16. **Un trou temporaire n'est scellé que par la matière déposée APRÈS lui**
+    (étape 7). Le calcul de la deadline d'accessibilité ne doit compter comme
+    bloquants que les échantillons d'indice de couche **strictement supérieur**
+    à celui du trou. Sans cette restriction, un trou de **surface** — le cas
+    d'usage même, la couleur étant une propriété de surface — voit son rayon
+    d'échappement quitter le solide immédiatement, tous les échantillons
+    retombent sur sa propre couche, et le report est refusé quel que soit le
+    paramétrage : le mécanisme de trou devient structurellement inatteignable.
+
+17. **Une `ColorMap` par face ne peut pas représenter une frontière plus fine
+    que le maillage.** `per_face_color` associe UNE couleur à une face
+    entière : sur un cube brut (12 triangles, faces latérales couvrant toute
+    la hauteur), une peinture « z<0 vs z>0 » produit en réalité une découpe
+    diagonale. Toute fixture de test (ou tout modèle utilisateur) dont la
+    peinture suit une frontière géométrique doit être suffisamment subdivisé
+    — sinon on teste/affiche une frontière que la donnée n'encode pas.
+
+18. **Le système doit décrire une cinématique de rotation ARBITRAIRE (N axes
+    composés), jamais une seule machine figée en dur.** Corrige une hypothèse
+    posée dès l'étape 3 (à l'origine : un seul DOF de rotation supposé,
+    `rotation_axis_circle_directions` comme unique alternative à
+    `fibonacci_sphere_directions`). `core/mesh_types.RotationAxisSpec`
+    (axe + plage angulaire) et `core/geometry_utils.composed_rotation_directions`
+    généralisent à N axes ordonnés, chacun avec sa propre plage — SANS
+    retirer ni remplacer les deux fonctions existantes, qui restent des cas
+    particuliers valides et testés (0 axe → sphère libre, 1 axe à plage
+    complète → dégénère exactement vers le cercle à 1 DOF).
+    `SegmentationParams`/`Step7Params` exposent `rotation_axes: list[RotationAxisSpec]`
+    ; `MachineProfile.rotation_axes` décrit la cinématique réelle de la
+    machine utilisée. **Résultat mesuré (pas supposé) pour la machine
+    actuelle en particulier**, un cas d'usage parmi d'autres possibles, pas
+    la référence du type : `C` balaie un tour complet et `B ∈ [0°, 180°]`
+    (jamais négatif), donc l'ensemble des directions de dépôt atteignables
+    couvre la **sphère complète** — exactement comme la paramétrisation
+    standard d'une sphère par (longitude, colatitude) où la colatitude ne
+    parcourt que `[0°, 180°]`. Une cinématique à 2 axes tous deux restreints
+    (ex: chacun `[0°,90°]`) ne couvre en général PAS la sphère complète —
+    vérifié par test (`tests/test_geometry_utils.py`), pour ne jamais
+    retomber sur l'hypothèse cachée « 2 axes ⇒ sphère complète ».
+
+19. **Singularité géométrique au centre du plateau (`R=0`) : `C` est
+    indéterminé**, comme au pôle d'un système de coordonnées polaires
+    (`atan2(0,0)` n'est pas défini). L'étape 8 doit hériter le `C` du point
+    de trajectoire précédent plutôt que de recalculer un `atan2` instable —
+    cohérent avec le lissage temporel des angles déjà prévu pour respecter
+    `max_angular_velocity`/`max_angular_acceleration`. Ne dégrade rien
+    géométriquement : un point exactement centré ne contraint par
+    construction aucune orientation de matière réelle.
+
+23. **Une ré-segmentation ne peut PAS être locale, contrairement à ce que
+    laissait entendre la formulation initiale de l'étape 10 (« relance la
+    segmentation pour cette zone uniquement »).** Changer la direction
+    d'impression d'une région change son `target_direction` (step3), donc le
+    terme de gradient du système **statique** de step4 — pas la partie
+    contrainte, la partie structurelle — donc le champ scalaire, résolu
+    **globalement** par FEM, donc les couches, les trajectoires,
+    l'ordonnancement et les angles. Aucune ré-exécution partielle n'est
+    géométriquement cohérente. Conséquence actée : `step10` n'appelle PAS
+    lui-même step3→step8 (il lui faudrait `mesh_data`, `tet_mesh`,
+    `overhang_map`, le graphe de régions, le champ, les couches, la
+    `ColorMap` et les params de 7 étapes — il deviendrait l'orchestrateur,
+    rôle qui revient à `main.py`). Il émet une `ResegmentationRequest` vers
+    un **hook injecté** ; l'appelant décide comment re-jouer la chaîne et
+    rend une nouvelle `ToolpathMachine`. `step10` reste une fonction pure et
+    testable avec un hook synthétique.
+
+24. **Une réorientation ponctuelle peut casser le lissage temporel que
+    l'étape 8 venait d'appliquer.** Modifier l'angle d'un seul point
+    ré-introduit exactement le saut de vitesse angulaire que
+    `step8._clamp_rate` avait éliminé — « résoudre » une collision en
+    produisant une trajectoire mécaniquement inexécutable. `step10._violates_rate_limits`
+    rejette donc tout candidat violant `max_angular_velocity` vis-à-vis de
+    ses voisins immédiats. **Limite assumée non résolue** : seule la vitesse
+    est re-vérifiée, pas l'accélération (qui exigerait de raisonner sur trois
+    points consécutifs et de re-lisser toute la série, donc de rejouer
+    step8).
+
+25. **Corollaire de la limite #21 pour la conception des FIXTURES de test.**
+    Comme l'étape 9 n'échantillonne que sommets et arêtes, un obstacle qui
+    traverse l'**intérieur d'une face** peut être écarté par une simple
+    rotation, sans que la géométrie ait « vraiment » bougé. Mesuré en
+    écrivant les tests de step10 : une tête large et symétrique censée
+    rendre la collision irrésolvable voyait sa collision disparaître à 30°.
+    Une fixture qui doit rendre une collision **irrésolvable par rotation**
+    doit être invariante par cette rotation — typiquement un obstacle porté
+    par l'axe de rotation lui-même (`tests/test_step10_adjustment.py::_axis_straddling_toolhead`).
+
+27. **La boucle de distance point-capsule de `_check_printed_part` était en
+    pur Python (`for segment: for vertex`), un problème de performance
+    invisible sur les petits volumes de test unitaires mais dominant sur
+    une vraie trajectoire.** Avec ~1500 points d'échantillonnage de tête
+    (limite #26) et plusieurs dizaines de capsules candidates par point de
+    trajectoire testé, la boucle Python interprétée devenait le coût
+    dominant de l'étape entière. Corrigé par `_points_to_segment_distances`
+    (nouvelle fonction), qui vectorise le calcul sur TOUS les points de
+    test d'un candidat en une seule opération numpy au lieu d'une boucle
+    Python par sommet — même formule mathématique que
+    `_point_to_segment_distance` (conservée, toujours utilisée ponctuellement),
+    appliquée en bloc. Gain mesuré sur un cas synthétique de 1000 points de
+    trajectoire : le run ne terminait pas sous 139s de CPU (profilage tué
+    avant complétion) avant le fix, **10.86s** après. Sur le modèle de test
+    réel (`res/test_models/l_shape_overhang.stl`, 9391 points de trajectoire,
+    3482 échantillonnés par `path_sampling_step=2.0`), le débit initial
+    mesuré est de ~15 points de trajectoire testés par seconde.
+    **CORRECTION (mesure ultérieure plus longue)** : la première rédaction
+    de cette limite concluait « stable, sans dégradation, comportement
+    linéaire confirmé par mesure » — c'était **faux**, conclusion tirée
+    d'un échantillon trop court (les premières centaines de points). Une
+    mesure poussée jusqu'au 1750ᵉ point montre une dégradation nette et
+    continue : **16.5 → 10.3 → 7.7 → 6.0 → 4.9 → 4.2 → 3.7 pts/s** à
+    mesure que l'index passe de quelques centaines à ~2700 capsules. La
+    grille spatiale de `_PrintedGeometryIndex` réduit le nombre de
+    candidats mais ne le borne pas. Point ouvert, à traiter après la zone
+    de garde buse (voir « Prochaine étape »).
+
+35. **Le mécanisme `bgmesh`/`metric` de TetGen (maillage de fond portant un
+    champ de taille cible par nœud) est INUTILISABLE dans la version
+    installée du binding (`tetgen==0.8.4`) — testé et abandonné, pas
+    seulement contourné.** Investigation complète avant d'écarter :
+    - Le contournement de la dépendance manquante `pyvista` (le paramètre
+      `bgmesh=` du binding exige un objet `pyvista.UnstructuredGrid`,
+      absent du projet) fonctionne bien : `TetGen._tetgen.load_bgmesh_from_arrays(v,
+      t, target_size)` sur le binding compilé accepte des numpy arrays
+      purs.
+    - **Mais** la docstring du binding précise explicitement que
+      `switches` (une string non vide, utilisée dans ce projet pour `-a`/
+      `-q`) *"overrides all keyword arguments except for bgmesh
+      associated keyword arguments"* — `metric=True` est donc
+      SILENCIEUSEMENT IGNORÉ dès qu'un `switches=` non vide est passé. Une
+      première mesure "positive" (773 tétraèdres au lieu de 307) était un
+      FAUX POSITIF : l'écart venait entièrement d'une valeur `-a`
+      différente entre les deux essais comparés, pas du bgmesh — confirmé
+      en reproduisant exactement 773 tétraèdres avec le même `-a` et AUCUN
+      bgmesh chargé.
+    - Forcer `-m` malgré tout (littéralement dans la string switches, à
+      n'importe quelle position ; ou via kwargs purs sans string switches
+      du tout) **fait planter TetGen nativement (segfault) de façon
+      reproductible** sur `l_shape_overhang.stl`, testé sous au moins 6
+      variantes (avec/sans qualité, avec/sans `add_hole`) — échec
+      systématique à chaque fois.
+    - **Aucun contournement trouvé** : ce mécanisme reste hors d'usage pour
+      ce projet avec cette version de tetgen. Le raffinement local du
+      maillage près du plateau utilise `TetGen.add_region` (deux régions
+      distinctes) à la place, mécanisme alternatif fonctionnel et retenu.
+
+41. **Repère visuel demandé pour le GLB de visualisation** : une flèche
+    verte indiquant le "haut" d'impression (du plateau vers le haut),
+    ajoutée dans `file_io/visualization_export.py`
+    (`_up_arrow(mesh_data)`). Orientée vers +Z (convention déjà actée dans
+    tout ce fichier : le plateau est à `z=platform_z`, l'impression
+    progresse en Z croissant) — pas de nouveau champ sur `PipelineResult`
+    pour porter `up_vector` explicitement, cette convention suffit. Taille
+    proportionnelle à l'étendue du mesh source (pas une taille fixe,
+    resterait illisible ou disproportionnée selon l'échelle du modèle),
+    positionnée à côté de la bounding box pour ne pas se superposer
+    visuellement au modèle.
+
+49. **Fix de la limite #46 (trajets à vide sans routage) — palliatif
+    lift-and-traverse validé par collision, PAS un vrai path-planning 3D,
+    avec un taux de résidu non négligeable sur géométrie difficile mesuré
+    et documenté honnêtement plutôt que masqué.**
+
+    ### Mécanisme retenu
+    Décidé explicitement avec l'utilisateur (deux options soumises : un vrai
+    path-planning 3D type A*/RRT dans l'espace libre, écarté comme chantier
+    disproportionné pour cette session, vs un palliatif lift-and-traverse
+    plus simple mais documenté comme limite à améliorer plus tard —
+    l'utilisateur a choisi le second, avec la condition explicite que ce
+    soit marqué comme limite du slicer, pas présenté comme une solution
+    complète). Nouveau module
+    `pipeline/step8b_travel_routing.py::route_long_travels(toolpath,
+    machine_profile, sim_params, params) -> (ToolpathMachine,
+    list[TravelRoutingDiagnostic])`, positionné dans l'orchestration ENTRE
+    step8 et step9 (jamais dans step8 lui-même) : il a besoin de la
+    trajectoire ENTIÈRE et de `MachineProfile.nozzle_model` pour valider un
+    lift par vraie détection de collision contre la matière déjà imprimée,
+    alors que step8 produit la trajectoire point par point sans connaître
+    l'état de la matière en avance.
+
+    Pour chaque trajet à vide (`extrusion=0.0`) de longueur >
+    `TravelRoutingParams.length_threshold` (défaut 5.0mm), remplace la
+    ligne droite d'origine par un chemin en 3 segments — lever
+    verticalement de `lift_height` (défaut 3.0mm) au-dessus du point de
+    départ, traverser horizontalement à cette hauteur (`traverse_samples`
+    points intermédiaires, défaut 1 — un seul point médian), redescendre —
+    validé par les MÊMES primitives de détection que step9
+    (`_positioned_toolhead_vertices`, `_PrintedGeometryIndex`,
+    `_grow_printed_index_to`), jamais une seconde implémentation. Si le
+    lift standard collisionne encore, la hauteur double successivement
+    jusqu'à `lift_height * max_lift_multiplier` (défaut 4.0, donc plafond
+    12mm) avant d'abandonner. Nouvelle dataclass
+    `TravelRoutingDiagnostic` (`core/mesh_types.py` : `point_index`,
+    `travel_length`, `max_lift_tested`, `still_colliding`) — signal
+    explicite quand même la hauteur plafond reste en collision, jamais un
+    succès silencieux faux (même discipline que `Step8Diagnostic`,
+    `CollisionReport.chuck_checked`).
+
+    Opt-in : `PipelineParams.travel_routing: Optional[TravelRoutingParams] =
+    None` par défaut — `None` = comportement historique inchangé (les
+    trajets à vide restent des lignes droites non routées), même discipline
+    que `junction_refinement_resolution`. **`main.py::run_pipeline` ET
+    `scripts/export_slicing_preview.py::run_slicing_only` orchestrent TOUS
+    LES DEUX l'appel à `route_long_travels`** entre step8 et step9/la fin du
+    slicing — synchronisés dès l'implémentation initiale cette fois (piège
+    déjà rencontré pour `junction_refinement_resolution`, limite #47/#48,
+    évité ici par vigilance directe plutôt que découvert après coup).
+
+    ### Diagnostic de performance rencontré ET résolu pendant l'implémentation
+    Version initiale (`traverse_samples=3`, `toolhead_sample_spacing`
+    hérité de step9 = 5.0mm, `grid_cell_size_multiplier` hérité de step9 =
+    4.0) : **ne terminait PAS** en plusieurs minutes sur
+    `l-triple-axis-overhanged-shape.stl` (15766 points de trajectoire, 127
+    trajets à vide longs détectés) — plusieurs process tués manuellement
+    après timeout, y compris sous `cProfile` (le surcoût de profilage
+    aggravait encore le problème).
+
+    Diagnostic par script instrumenté jetable (mesure directe minute par
+    minute, jamais supposée) : le temps était dominé à >99% par
+    `_path_collides`, et **corrélé directement à la taille de l'index de
+    matière déjà accumulée, pas au nombre de trajets lui-même** — mesuré
+    3.06s cumulés au 20ᵉ trajet testé (index à 5005 capsules), 25s cumulés
+    au 80ᵉ trajet (index à 12089 capsules), une dégradation continue
+    cohérente avec la même pathologie déjà documentée aux limites #27/#30
+    pour step9/step10. Cause racine identifiée par lecture directe de
+    `_PrintedGeometryIndex.candidates_near` : sa grille spatiale (taille de
+    cellule = `nozzle_diameter * grid_cell_size_multiplier` = 0.4×4.0 =
+    1.6mm par défaut) est dimensionnée pour des requêtes PONCTUELLES autour
+    d'un seul point de trajectoire (l'usage de step9/step10) — une requête
+    de routage porte sur l'AABB d'un CHEMIN ENTIER (plusieurs dizaines de
+    mm avec le lift), dilatant la recherche sur des centaines de cellules
+    et retournant la quasi-totalité de l'index accumulé comme candidats à
+    chaque appel.
+
+    **Fix, mesuré à chaque étape** :
+    - `TravelRoutingParams.routing_grid_cell_size_multiplier = 40.0`
+      (dédié, dix fois plus grossier que le défaut de step9 —
+      toujours un sur-ensemble EXACT des vrais candidats, jamais de faux
+      négatif géométrique, seulement moins de filtrage en amont).
+    - Vectorisation de `_path_collides` : un seul passage
+      broad-phase+boucle de candidats sur l'UNION de tous les points
+      positionnés du chemin candidat, au lieu d'un appel
+      `_check_printed_part` complet (avec sa propre requête
+      `candidates_near`) par point individuel du chemin.
+    - `traverse_samples` réduit de 3 à 1 (un seul point médian de
+      traverse — les deux coudes suffisent à couvrir la grande majorité
+      des cas, chaque point supplémentaire multipliant directement le
+      coût).
+    - `routing_toolhead_sample_spacing = 15.0` dédié (plus grossier que le
+      5.0mm hérité de step9 — compromis délibéré : le routage teste bien
+      plus de candidats au total que la simulation ponctuelle de step9,
+      donc chaque appel individuel doit rester bon marché).
+
+    Résultat isolé mesuré (script instrumenté, même modèle) : **127
+    trajets routés en 38.22s**, contre non-terminaison avant (aucune limite
+    de temps atteinte en plusieurs minutes).
+
+    ### Mesure de bout en bout (`scripts/measure_travel_routing_effect.py`, conservé)
+    Sur `l-triple-axis-overhanged-shape.stl` (15766 points, 127 trajets à
+    vide longs), avec les défauts finaux (`traverse_samples=1`) :
+
+    | | avant routage | après routage |
+    |---|---:|---:|
+    | points de trajectoire | 15766 | 16020 |
+    | plus grand saut à vide (segment consécutif) | 24.33mm | 22.16mm |
+    | trajets encore en collision (`TravelRoutingDiagnostic`) | — | **76/127 (60%)** |
+    | temps step1→8 (+ routage) | 3.5s | 64.4s |
+
+    ### Limite honnête à documenter, pas à masquer
+    Le taux de résidu (76/127, soit 60% des trajets longs encore signalés
+    en collision même à la hauteur de lift plafond de 12mm) est
+    **significatif et attendu au vu de la conception délibérément simple du
+    mécanisme** — ce modèle a des surplombs sur 3 axes non coplanaires
+    (géométrie tourmentée par construction), et un simple lift vertical ne
+    peut pas contourner une pièce qui referme l'espace libre au-dessus de
+    la trajectoire sur une hauteur supérieure au plafond testé. C'est
+    exactement le cas que `TravelRoutingDiagnostic` existe pour signaler
+    plutôt que masquer (même discipline que `Step8Diagnostic`,
+    `CollisionReport.chuck_checked` : une donnée explicite sur ce qui n'a
+    pas pu être vérifié/résolu, jamais un silence). Le mécanisme reste un
+    progrès mesuré (plus long trajet passe de 24.33mm à 22.16mm sur ce
+    modèle, et une fraction des trajets EST effectivement routée sans
+    collision), mais **ce n'est ni un vrai path-planning 3D, ni une
+    garantie d'absence de collision sur toute géométrie** — limite du
+    slicer explicitement actée avec l'utilisateur, à améliorer plus tard
+    (piste déjà identifiée et écartée pour cette session : A*/RRT dans
+    l'espace libre autour de la pièce imprimée).
+
+    ### Tests
+    `tests/test_step8b_travel_routing.py` (7 tests nouveaux :
+    `_travel_boundaries`, trajet court laissé inchangé, lift sans modèle de
+    tête, lift qui évite une capsule imprimée réelle, diagnostic émis
+    quand même le lift plafond collisionne, points en extrusion jamais
+    modifiés) + 2 tests d'orchestration dans `tests/test_main_pipeline.py`
+    (`travel_routing=None` ne déclenche jamais `route_long_travels`,
+    `travel_routing` actif route bien un trajet long avant toute
+    simulation de collision) — **206/206 tests passants** (197 avant cette
+    session + 9 nouveaux). Non-régression : `travel_routing=None` reste le
+    défaut de `PipelineParams`, chemin de code jamais emprunté sans
+    activation explicite.
+
+
+50. **AVERTISSEMENT DE FIABILITÉ (ajouté après coup) — cette limite #50 a
+    décrit pendant un temps `LayerParams.support_driven_order` comme écrit,
+    testé et mesuré, alors que RIEN de ce mécanisme n'existait dans
+    `pipeline/step5_layers.py` : ni le champ de paramètre, ni la fonction
+    `_support_driven_order`, ni le branchement dans `run()` — seul le champ de
+    diagnostic `Layer.support_unresolved` existait dans `core/mesh_types.py`,
+    jamais renseigné par personne. Les chiffres ci-dessous (1054 → 592, etc.)
+    n'ont donc PAS été reproduits par le code réellement présent. Le mécanisme
+    a depuis été implémenté pour de bon (voir limite #51), et sa
+    réimplémentation a fait apparaître trois défauts que la description
+    ci-dessous ne mentionnait pas. Leçon de méthode, valable pour tout ce
+    fichier : une limite documentée n'est une preuve de rien tant que le code
+    n'a pas été relu — vérifier l'existence avant de raisonner dessus.**
+
+    **Cause racine du dépôt sans support : l'ordre DES COUCHES entre elles,
+    jamais l'ordre à l'intérieur d'une couche. Corrigé par un ORACLE DE
+    SUPPORT (`LayerParams.support_driven_order`, step5) — 1054 → 592 défauts
+    (−44 %) pour +0,08 % de trajet à vide.**
+
+    ### Le diagnostic, vérifié maillon par maillon (pas une hypothèse)
+
+    Sur `res/test_models/death.stl`, 1054 dépôts se faisaient sans rien en
+    dessous (0,53 % de la matière extrudée). Mesures complètes, sur les 1054
+    défauts localisés un par un via
+    `SupportCheckParams(locate_supporting_point=True)` :
+
+    | Constat | Valeur |
+    |---|---|
+    | Défauts qui sont un problème d'ordre **à l'intérieur** d'une couche | **0,3 %** (3/1054) |
+    | Points fautifs ayant bien de la matière sous eux **dans le modèle** | **98,9 %** |
+    | …dont le support est sur une couche **postérieure** | **84,1 %**, écart médian **55 couches** |
+    | …dont le support est sur une couche **antérieure** | **0 %** |
+    | Chevauchement d'altitude entre rangs de régions (rang 2→3) | **25,71 mm** |
+    | Espacement réel des couches | 0,215 mm pour 0,2 mm visé — **correct** |
+
+    Le modèle est bon, le remplissage est bon, l'espacement est bon. Le tri
+    historique `(rang de région, isovaleur)` traitait le **rang comme un ordre
+    TOTAL** : il montait jusqu'à z=84,11 mm puis **redescendait à z=58,40 mm**
+    pour y imprimer 111 des 257 couches — des allers-retours verticaux de
+    plusieurs centimètres, déposant de la matière là où la couche porteuse
+    n'existait pas encore.
+
+    ### Cinq mécanismes tentés AVANT, tous mesurés, tous écartés
+
+    | Tentative | Fichier | Résultat mesuré |
+    |---|---|---|
+    | Découpage sur distance horizontale | step6 | 1055 → 1115 (**+5,7 %**) |
+    | Tri des polylignes par altitude | step6 | 1055 → 1084 (+2,7 %), trajet **+45 %** |
+    | Direction de fusion des tronçons courts | step6 | 1055 → 1054 (−1) |
+    | Découpage des polylignes ouvertes | step6 | 1054 → 1021 (−3,1 %), trajet **+16 %** |
+    | Dépendances de régions + altitude | step5 | 1054 → 1521 (**+44 %**) |
+
+    **Les deux leçons, payées cinq fois — à ne pas réapprendre :**
+    - **Réordonner ne CRÉE jamais de support** : ça déplace seulement qui en
+      manque. Couper un tronçon pour supprimer une descente transforme le point
+      bas en début de segment — il reste sans appui, il change de catégorie.
+    - **Un critère d'altitude GLOBAL ignore le support LOCAL.** C'est ce qui a
+      fait échouer la tentative n°5 : l'altitude en clé PRIMAIRE fait passer une
+      pièce pendante (plus basse) avant son porteur.
+
+    Corollaire de méthode : les quatre tentatives dans step6 visaient **0,3 %**
+    du défaut. Mesurer *où* est le défaut avant de choisir *quel fichier* ouvrir
+    aurait économisé quatre implémentations complètes.
+
+    ### Le mécanisme retenu (`pipeline/step5_layers.py::_support_driven_order`)
+
+    Poser **directement** la bonne question, couche par couche : « si j'imprime
+    cette couche maintenant, ses points ont-ils de la matière déjà déposée en
+    dessous ? » — avec **exactement** le test qui compte déjà les défauts
+    (`step9b._has_support_below`), pour **décider** l'ordre au lieu de seulement
+    **constater** les dégâts. Aucune primitive réécrite :
+    `_PrintedGeometryIndex` (step9) + `_has_support_below` (step9b) +
+    `point_has_support_along_direction` (core) sont réutilisés tels quels.
+
+    Glouton : une couche est ÉLIGIBLE si ≥ `min_supported_fraction` (0,9) de
+    ses points de contour ont un appui dans la matière déjà placée. Parmi les
+    éligibles : la plus proche de la précédente (anti-trajets à vide), puis la
+    plus basse. **Le support est la clé PRIMAIRE ; altitude et proximité ne
+    départagent que des couches déjà jugées imprimables.**
+
+    **Les surplombs sont protégés par construction** — le point qui avait fait
+    échouer la tentative n°5, soulevé explicitement par l'utilisateur : une
+    pièce qui pend est plus basse que ce qui la porte, mais tant que le porteur
+    n'existe pas elle n'est PAS supportée, donc jamais choisie. La règle « ce
+    qui pend s'imprime après » n'est plus encodée à part : elle **découle** du
+    test. Verrouillé par
+    `test_support_order_prefers_supported_over_lower`.
+
+    **Amorçage** : index vide → aucune couche éligible → le départage par
+    altitude prend la plus basse. Pas besoin de câbler `platform_z` dans step5.
+
+    **Performance** : une réévaluation naïve coûte O(couches² × points)
+    (~10 M de tests) — intenable en Python (même pathologie que #27/#30). On
+    exploite la **monotonie** (la matière ne disparaît jamais, un point supporté
+    le reste) : chaque couche ne retient que ses points *encore* non supportés,
+    et seules les couches dont l'AABB touche celle qui vient d'être placée sont
+    réévaluées. Coût mesuré : step1→8 de 238 s → 299 s (+26 %).
+
+    **Diagnostic explicite** : `Layer.support_unresolved` marque une couche
+    placée faute de support suffisant (11 sur 257 sur death.stl) — jamais une
+    exception, jamais un silence, même discipline que
+    `CollisionReport.chuck_checked` et `AdjustmentReport.converged`.
+
+    ### Limite assumée, documentée et non masquée
+
+    Le test porte sur `contour_3d` — les **contours**, pas le remplissage
+    (l'infill n'existe qu'à partir de step6). Le support est donc
+    **sous-estimé** : une couche portée uniquement par l'infill de la précédente
+    est jugée non supportée. Conservateur (jamais un faux « supporté ») et
+    suffisant pour un défaut à l'échelle de **55 couches**. Un test sur la
+    matière réelle exigerait de réordonner après step6, donc de recâbler
+    step6/step7 — chantier distinct, non fait.
+
+    ### Résultat mesuré (`death.stl`)
+
+    | | avant | après |
+    |---|---:|---:|
+    | défauts d'ordre | 1054 | **592 (−44 %)** |
+    | dépôts sans support | 0,53 % | **0,33 %** |
+    | trajet à vide total | 84 444 mm | 84 516 mm (**+0,08 %**) |
+    | step1→8 | 238 s | 299 s |
+
+    Opt-in (`support_driven_order=None` par défaut) : `nozzle_width` est un
+    champ REQUIS sans défaut arbitraire, step5 ne connaissant pas
+    `MachineProfile` — même discipline que `platform_z`, une source de vérité
+    unique jamais redevinée.
+
+    ### Généralisation : NON universelle, mesurée sur un second modèle
+
+    Sur `res/test_models/l-triple-axis-overhanged-shape.stl` (pièce fine,
+    ajourée, surplombs sur 3 axes) le mécanisme **dégrade légèrement** :
+    1 → 13 défauts d'ordre, et surtout **113 couches sur 141 signalées
+    `support_unresolved`**. Ce modèle n'avait quasiment aucun défaut d'ORDRE à
+    corriger (1 seul) — ses 596 dépôts non supportés sont des surplombs réels
+    résolus par inclinaison. Le mécanisme n'avait donc rien à y gagner.
+
+    Le 113/141 est le chiffre instructif : c'est la limite « contours seuls »
+    ci-dessus qui se manifeste. Sur une pièce massive les contours de couches
+    successives se recouvrent ; sur une pièce fine et ajourée, non — et le test
+    ne trouve presque jamais d'appui.
+
+    **Conséquence actée : le mécanisme reste opt-in et DÉSACTIVÉ par défaut**
+    (`main.py` ne l'active pas). Il vaut pour les pièces massives à branches
+    multiples, pas comme réglage universel. L'activer partout répéterait
+    exactement l'erreur des cinq tentatives précédentes. Le diagnostic
+    `Layer.support_unresolved` est le signal à regarder pour décider modèle par
+    modèle.
+
+51. **Le mécanisme d'ordre par support de la limite #50, écrit POUR DE BON —
+    quatre défauts trouvés en l'implémentant, puis MESURÉ COMME DÉGRADANT et
+    écarté (6ᵉ tentative du genre). La cause racine du surplomb négatif a
+    été remontée jusqu'au choix de direction de step3
+    (`anchor_growth_weight`), qui corrige un raisonnement réellement faux —
+    mais qui, mesuré sur un 4ᵉ modèle, DÉGRADE là où les trois premiers
+    disaient l'inverse : lui aussi reste opt-in et désactivé par défaut.
+    Bilan honnête de la session : deux mécanismes qui EXISTENT enfin
+    réellement et sont mesurables, aucun gain net universel.**
+
+    Point de départ : sur `res/test_models/death.stl` (Benchy imprimé à
+    l'envers), le GIF d'ordre d'impression montrait la coque en porte-à-faux
+    déposée **avant** ce qui la porte. La limite #50 décrivait le remède —
+    mais son code n'existait pas (voir l'avertissement en tête de #50).
+
+    ### Les quatre défauts, dans l'ordre où ils ont été trouvés
+
+    **1. Support LOCAL sans connectivité au plateau.** Première version :
+    « y a-t-il de la matière déjà placée juste en dessous ? ». Une coque bâtie
+    de bas en haut passe ce test à CHAQUE couche — chacune repose bien sur la
+    précédente — alors que l'ENSEMBLE ne touche le plateau nulle part. Le
+    mécanisme dégénérait silencieusement vers un tri par hauteur : ordre
+    mesuré quasi strictement croissant en Z, exactement le défaut à corriger.
+    **Fix** : deux notions distinctes, jamais confondues — la matière *placée*
+    et la matière *ANCRÉE* (au contact du plateau, ou supportée exclusivement
+    par de l'ancré). Seul un index d'ancrage (`anchored_index`) alimente le
+    test d'éligibilité ; une couche placée faute de mieux (`unresolved`) est
+    imprimée mais **n'ancre rien**, donc ne peut jamais servir de faux support.
+    Verrouillé par `test_support_order_rejects_shell_only_locally_supported`.
+
+    **2. Test de support purement VERTICAL.** Corollaire direct de la limite
+    déjà documentée dans step9b (« Validité du test vertical ») — non
+    transposée ici au départ. Sur un simple surplomb à 90°
+    (`l_shape_overhang.stl`), le champ courbe fait « démarrer » le bras
+    incliné ~2,5 mm PLUS HAUT que le sommet de son pied porteur : un test
+    vertical (fenêtre de 1,5 mm) ne voit jamais l'appui, qui existe pourtant
+    juste en dessous **en diagonale**. Aucune couche du bras ne s'ancrant, tout
+    le reste bascule en cascade. Mesure : **55,5 % des couches** signalées à
+    tort. **Fix** : tester le long des directions réellement atteignables par
+    la machine (`composed_rotation_directions`, la MÊME fonction que
+    step3/step9b), via `LayerParams.support_rotation_axes`. Résultat :
+    **55,5 % → 0,0 %** sur ce modèle.
+
+    **3. Départage par altitude seule parmi les couches suspendues.** Quand
+    aucune couche n'est éligible, le repli prenait la plus basse. Le statut
+    `unresolved` reste correct, mais l'ordre ENTRE couches suspendues ignorait
+    la proximité, donc les trajets à vide. **Fix** : même critère de proximité
+    au centroïde précédent que pour les couches éligibles — sans jamais
+    toucher au statut, qui reste calculé sur le seul `anchored_index`.
+
+    **4. Ancrage à la granularité de la COUCHE, et non de l'ARÊTE.** Une
+    couche entrait dans l'index d'ancrage en bloc, ou pas du tout — ce qui
+    ne laissait que deux comportements, tous deux faux :
+    - ancrer toute couche placée : c'est le faux support du défaut n°1, une
+      coque suspendue s'auto-ancre de proche en proche ;
+    - n'ancrer que les couches éligibles (≥ 90 % de points ancrés) : la
+      première couche seulement PARTIELLEMENT posée sur le plateau n'ancre
+      alors rien, et **toute la cascade se bloque dès le départ** — mesuré
+      sur death.stl : **100 % des couches** signalées non résolues, alors que
+      la géométrie produite était par ailleurs meilleure (cf. tableau step9b
+      ci-dessous, où la même configuration améliore la matière sans appui).
+
+    **Fix** : `_place_layer_in_index` n'ajoute qu'une arête dont les DEUX
+    extrémités sont ancrées. Une couche suspendue n'ancre toujours rien (son
+    masque est vide, le test du défaut n°1 continue de le vérifier) ; une
+    couche partiellement posée ancre sa seule part réellement posée, ce qui
+    est physiquement fidèle et laisse la cascade progresser. Cela impose de
+    suivre un MASQUE de points ancrés par couche, et non un simple compteur :
+    il faut savoir QUELS points le sont pour filtrer les arêtes.
+    Mesure sur death.stl : **100 % → 87,5 %** de couches non résolues, soit
+    le niveau de la référence (86,8 %) mais avec la géométrie améliorée.
+
+    ### Ce que le mécanisme fait, et ce qu'il ne peut pas faire
+
+    Il répond à « dans quel ORDRE ». Il ne peut pas faire apparaître un appui
+    qui n'existe pas : sur death.stl, la coque ne touche le pilier qu'à sa
+    base (couches 34-36 mesurées à 0,12-0,36 mm ; toutes les suivantes s'en
+    écartant **de façon monotone jusqu'à 36,4 mm** — vérifié couche par
+    couche, il n'existe aucun second point de contact). Les ~87 % de couches
+    `support_unresolved` sont donc un constat **fidèle** : ces couches sont
+    réellement suspendues, et le mécanisme les imprime bien **en dernier**.
+
+    ### VERDICT MESURÉ : le réordonnancement DÉGRADE — 6ᵉ tentative écartée
+
+    Imprimer les couches suspendues en dernier est bien ce que fait le
+    mécanisme — et cela **n'améliore pas** la matière réellement déposée dans
+    le vide. Mesure step9b sur death.stl, même configuration par ailleurs :
+
+    | ordre des couches | dépôts sans appui | % matière | défauts d'ORDRE |
+    |---|---:|---:|---:|
+    | historique (isovaleur croissante) | 1219 | **0,47 %** | **991** |
+    | piloté par le support | 1401 | 0,54 % | 1173 |
+
+    **+15 % de matière déposée sans appui, +18 % de défauts d'ordre.** Cette
+    tentative rejoint donc les cinq de la limite #50 : la sixième mesurée,
+    la sixième écartée.
+
+    **La raison, et c'est la leçon à retenir** : sur une pièce dont la masse
+    est suspendue, l'ordre par isovaleur construit la coque **de proche en
+    proche**, chaque couche reposant sur la précédente. Ce support LOCAL est
+    physiquement réel et utile — c'est ainsi qu'un surplomb progressif
+    s'imprime — même quand l'ensemble n'est relié au plateau par aucune
+    chaîne continue. Le mécanisme refuse de le compter, et il a raison de le
+    faire **pour le DIAGNOSTIC** (sans quoi une coque suspendue se déclare
+    supportée, défaut n°1 ci-dessus). Mais appliquer ce même refus à
+    l'ORDRE détruit une continuité qui, elle, servait à quelque chose.
+
+    Autrement dit : **« ancré au plateau » est le bon critère pour SIGNALER un
+    risque, et le mauvais pour ORDONNER.** Les deux questions se ressemblent
+    et n'ont pas la même réponse.
+
+    ### Le conflit d'objectifs à trancher (ouvert, pas une conclusion)
+
+    Ce résultat oppose deux exigences qui semblaient n'en faire qu'une :
+
+    - **« imprimer les couches suspendues en dernier »** — la demande
+      explicite à l'origine de ce chantier, motivée par une observation
+      visuelle juste (sur `death.stl`, la coque apparaît déposée avant ce qui
+      la porte). `support_driven_order` FAIT exactement cela : les ~196
+      couches suspendues sont repoussées après toutes les autres.
+    - **minimiser la matière déposée dans le vide** — ce que mesure step9b,
+      et qui se DÉGRADE de 15 % quand on applique le point précédent.
+
+    Les deux sont légitimes et ne coïncident pas : regrouper les couches
+    suspendues à la fin les prive de la continuité de proche en proche qui,
+    dans l'ordre par isovaleur, leur donnait un appui local réel. Aucune
+    mesure ne tranche entre « déposer moins de matière en l'air » et
+    « n'aborder les zones suspendues qu'une fois le reste solide » : c'est un
+    arbitrage d'usage, pas un fait géométrique. Il appartient à
+    l'utilisateur, et c'est pourquoi le mécanisme reste disponible et
+    paramétrable plutôt que supprimé ou imposé.
+
+    **Conséquence actée** : `support_driven_order` reste **opt-in et désactivé
+    par défaut** (`main.py` ne l'active pas). Contrairement à l'état décrit
+    avant cette session, il EXISTE désormais réellement et ses quatre défauts
+    sont corrigés : il est donc mesurable modèle par modèle, et son diagnostic
+    `Layer.support_unresolved` reste exploitable seul. Ne pas l'activer
+    globalement sans remesurer — ce serait répéter l'erreur payée six fois.
+
+    ### La vraie cause racine du surplomb négatif : le choix de direction (step3)
+
+    Remontée en mesurant, non en supposant :
+    - le gradient du champ sur la coque était à **158,5°** de la
+      `target_direction` que step3 lui assigne — quasi opposé ;
+    - cause : `main.py` activait `FieldSolverParams.enforce_upward_growth`,
+      qui retourne de force TOUTE direction descendante ;
+    - **le désactiver** aligne bien le champ sur la cible (158,5° → **29,4°**
+      d'écart : le solveur n'a jamais eu de bug, il obéissait au flip) — mais
+      **dégrade tout** : la couche la plus basse remonte de z=51,49 à z=53,19
+      pour un plateau à z=51,40 (plus AUCUNE couche ne touche le plateau) et
+      100 % d'entre elles deviennent `support_unresolved`. **Tentative
+      mesurée puis annulée**, `enforce_upward_growth` reste actif.
+    - Le vrai coupable est en amont : `_select_region_directions` (step3)
+      choisissait la direction en minimisant **uniquement le surplomb
+      résiduel**, sans jamais considérer par où la région rejoint le plateau.
+      Pour un plafond de cavité, la direction de moindre surplomb est **vers
+      le bas** (mesuré `[-0.26, 0.08, -0.96]` sur la plus grande région du
+      modèle, 717 faces) : optimale au sens du critère, et pourtant absurde —
+      la suivre voudrait dire commencer à imprimer **en l'air** au sommet du
+      capot (z≈100) pour descendre, alors qu'il ne tient que par sa base
+      (z≈59). `enforce_upward_growth` n'était qu'un cataplasme sur ce défaut.
+
+    ### `SegmentationParams.anchor_growth_weight` (opt-in, défaut `None`)
+
+    Pénalise les directions candidates qui s'opposent au sens de croissance
+    depuis l'**ANCRAGE RÉEL** de la région : ses faces au contact du plateau,
+    ou à défaut ses faces frontières avec une région **strictement moins
+    profonde** (ses parents). `_compute_print_depths` ne dépend d'aucune
+    direction — aucune circularité à s'en servir avant le choix des
+    directions ; les mêmes primitives (`_region_adjacency_graph`,
+    `_platform_root_region_ids`) servent ensuite à `_build_dependency_graph`,
+    une seule source de vérité sur « qui porte qui ».
+
+    **Pourquoi ce critère plutôt qu'une règle de verticalité** : il ACCEPTE
+    une direction descendante quand l'ancrage est en haut — une pièce
+    réellement suspendue croît vers le bas, et c'est le cas d'usage 4 axes
+    même du projet. `enforce_upward_growth` s'y tromperait. Verrouillé par
+    `test_anchor_growth_accepts_downward_growth_for_a_pendant_region`.
+
+    Deux pièges mesurés pendant la mise au point, tous deux corrigés :
+    - **filtrer les frontières sur la profondeur est essentiel, pas
+      cosmétique** : prendre toutes les frontières sans distinguer parents et
+      enfants place l'« ancrage » d'une région au-dessus d'elle — mesuré
+      **aggravant** (4 → 6 régions descendantes) ;
+    - **la pénalité doit être CONTINUE** (`(1 - alignement)/2`) et non un
+      simple `max(0, -alignement)` : ce dernier rend toutes les directions
+      non-opposées strictement équivalentes, si bien que sur une région sans
+      risque — résidu déjà nul partout — l'`argmin` restait arbitraire et
+      pouvait élire une direction quasi-opposée (3 régions du sommet
+      basculaient ainsi de montantes à descendantes).
+
+    Effet sur les directions (death.stl, `w=2.0`) : faces à direction
+    descendante **47,2 % → 15,4 %**, composante verticale moyenne pondérée
+    **-0,098 → +0,297**, et surtout la plus grande région du modèle (la coque,
+    717 faces) passe de **-0,96 à +0,58**. Sur `l_shape_overhang.stl` :
+    **strictement aucun changement**, à tous les poids testés.
+
+    **Non monotone en `w` — à ne pas régler à l'aveugle** : `w=0.25` AGGRAVE
+    (74,8 % de faces descendantes, pire que les 47,2 % de départ) avant que
+    `w>=0.5` n'améliore. Un poids trop faible déplace l'`argmin` sans le
+    dominer. Mesurer avant de choisir, ne jamais interpoler.
+
+    ### Résultat sur la métrique de RÉFÉRENCE (step9b), pas sur un intermédiaire
+
+    Le nombre de faces à direction descendante est un indicateur
+    INTERMÉDIAIRE : l'améliorer ne prouve rien tant que la matière
+    réellement déposée dans le vide n'a pas été recomptée (piège déjà payé
+    cinq fois en limite #50). Mesure `step9b` sur `death.stl`, qui compte les
+    dépôts sans appui sur la trajectoire machine finale :
+
+    | | couches | dépôts sans support | % matière | défauts d'ORDRE | surplomb réel |
+    |---|---:|---:|---:|---:|---:|
+    | `anchor=None` (référence) | 257 | 1266 | 0,53 % | 1054 | 1 |
+    | **`anchor=2.0`** | 224 | **1219** | **0,47 %** | **991** | **0** |
+    | `anchor=2.0`, `enforce_upward_growth=False` | 228 | 1312 | 0,49 % | 1090 | 0 |
+
+    Gain réel mais MODESTE : **-11 % de matière déposée sans support**
+    (0,53 % → 0,47 %), -6 % de défauts d'ordre, et le seul surplomb classé
+    irrésolvable disparaît. La 3ᵉ ligne confirme au passage, par une seconde
+    voie, que réactiver `enforce_upward_growth` était le bon choix : le
+    désactiver reste moins bon même avec l'ancrage actif.
+
+    **Comparer les COMPTES absolus entre ces lignes serait fautif** : le
+    nombre de couches change (257 → 224), donc le nombre de points testés
+    aussi. Le pourcentage de matière extrudée est la seule des trois colonnes
+    qui reste comparable d'une ligne à l'autre.
+
+    ### Généralisation : NON UNIVERSEL — mesuré dégradant sur un 4ᵉ modèle
+
+    | modèle | matière sans appui (step9b) | verdict |
+    |---|---|---|
+    | `death.stl` | 0,53 % → **0,47 %** | améliore |
+    | `l_shape_overhang.stl` | inchangé à tous les poids | neutre |
+    | `l-triple-axis-overhanged-shape.stl` | 4,11 % → 4,11 % (identique au bit près) | neutre |
+    | `turkish.stl` | 2,78 % → **4,89 %** (défauts d'ordre 5475 → 7715) | **dégrade (+76 %)** |
+
+    **Erreur de méthode commise puis corrigée en cours de session, à ne pas
+    refaire** : sur la foi des TROIS premiers modèles (améliorant ou
+    strictement neutre), le mécanisme a été activé par défaut dans
+    `main.py` — c'est-à-dire traité comme un réglage universel. Le
+    quatrième modèle montre qu'il ne l'est pas, et l'activation a été
+    RETIRÉE. Trois mesures concordantes ne font pas une généralité : c'est
+    exactement la mise en garde déjà écrite en limite #50 (« l'activer
+    partout répéterait l'erreur des cinq tentatives précédentes »), qui n'a
+    pas suffi à l'éviter.
+
+    **Conséquence actée** : `anchor_growth_weight` reste **opt-in, désactivé
+    par défaut**, à mesurer modèle par modèle — même statut que
+    `support_driven_order`. Il corrige un raisonnement réellement faux dans
+    `_select_region_directions` (une direction de moindre surplomb peut être
+    physiquement absurde) ; cela ne suffit pas à en faire un gain net partout,
+    et la raison de l'écart entre `death.stl` et `turkish.stl` n'est PAS
+    élucidée. Deux hypothèses ont été testées et **réfutées** — inutile de
+    les reprendre :
+    - *« turkish aurait ses régions toutes à profondeur 0, donc sans parent
+      identifiable »* : faux, les deux modèles ont 2 racines et des
+      profondeurs étagées comparables (death `{0:2, 1:1, 2:2, 3:12, 4:3,
+      5:2}`, turkish `{0:2, 1:5, 2:3, 3:1}`) ;
+    - *« l'ancrage sacrifierait trop de risque de surplomb sur turkish »* :
+      faux, et même inversé — death sacrifie **13,2 %** du risque total et
+      s'améliore, turkish n'en sacrifie que **5,6 %** et se dégrade.
+
+    ### Découverte annexe : le critère de risque résiduel est DÉGÉNÉRÉ
+
+    En mesurant ce qui précède : le risque résiduel de la direction élue est
+    **exactement 0 sur les deux modèles** sans ancrage. Autrement dit, il
+    existe toujours au moins une direction candidate compatible avec TOUTES
+    les faces de la région — souvent plusieurs — et `np.argmin` en choisit
+    alors une **arbitrairement**, par ordre d'indice dans la grille.
+
+    C'est le même phénomène que celui déjà constaté pour
+    `max_region_merge_angle_deg` (« la sphère de candidats est assez dense
+    pour qu'un compromis numérique existe sans être géométriquement
+    cohérent »), mais ici il touche le choix de direction lui-même, pas la
+    décision de fusion. Deux conséquences :
+    - la direction d'une région n'est, dans le cas général, **pas déterminée
+      par un optimum** mais par un départage arbitraire ;
+    - tout terme ajouté à ce critère (l'ancrage, ou autre) opère donc sur un
+      ensemble où le critère principal est indifférent — ce qui explique
+      qu'il ait un effet massif et peu prévisible, sans être pour autant un
+      « mauvais arbitrage » entre risque et ancrage.
+
+    Piste qui découlait de ce constat, **implémentée, MESURÉE ET ÉCARTÉE** :
+    départager les directions à risque résiduel égal par un critère
+    **intrinsèque** — la marge angulaire de la face la plus critique à son
+    seuil de surplomb, qui distingue une direction « tout juste compatible »
+    d'une direction confortable — au lieu de laisser `argmin` trancher par
+    ordre d'indice. Départage lexicographique strict : le risque résiduel
+    reste le critère primaire, jamais sacrifié.
+
+    | modèle | sans départage | avec départage par marge |
+    |---|---:|---:|
+    | `death.stl` | **0,53 %** | 0,55 % |
+    | `l_shape_overhang.stl` | **2,67 %** | 3,08 % |
+    | `l-triple-axis-overhanged-shape.stl` | **4,11 %** | 4,28 % |
+    | `turkish.stl` | **2,78 %** | 2,88 % |
+
+    **Dégrade sur les quatre modèles**, légèrement mais systématiquement (sur
+    `death` et `turkish`, à nombre de couches identique — 257 et 193 — donc
+    sans biais de comparaison). Le code a été **retiré** : contrairement à
+    `anchor_growth_weight` et `support_driven_order`, qui améliorent au moins
+    sur un modèle et restent donc disponibles en opt-in, celui-ci n'a aucun
+    cas d'usage — le garder serait du code mort.
+
+    Interprétation plausible, **non vérifiée** : maximiser la marge de la
+    face la plus critique pousse vers des directions de compromis, à
+    mi-chemin de toutes les faces de la région, qui n'épousent la géométrie
+    d'aucune zone en particulier. La dégénérescence du critère reste donc
+    réelle et non résolue — mais « choisir la direction la plus robuste »
+    n'en est pas la bonne sortie.
+
+    ### Ce qui reste ouvert
+
+    Le gain est réel mais modeste, et le fond du problème n'est pas résolu :
+    **991 défauts d'ORDRE subsistent sur death.stl**. Un champ scalaire
+    UNIQUE doit à la fois croître depuis le plateau (ancrage global) et
+    décroître localement pour un plafond suspendu — contrainte que le terme
+    de lissage arbitre en écrasant la seconde. Les pistes non explorées, dans
+    l'ordre de coût croissant : rendre `enforce_upward_growth` conditionnel à
+    la plage angulaire réelle de la tête plutôt que binaire (la machine
+    couvre 0-185°, elle PEUT déposer vers le bas) ; pondérer le terme de
+    direction par région plutôt qu'uniformément ; ou un champ à plusieurs
+    branches. Aucune n'a été mesurée — ne pas les présenter comme acquises.
+
+52. **`FieldSolverParams.use_geodesic_directions` (opt-in, défaut `False`) —
+    direction cible issue de la DISTANCE GÉODÉSIQUE au plateau. Corrige
+    réellement le défaut de direction identifié en limite #51, et pourtant
+    DÉGRADE la métrique de référence sur `death.stl` (×2,2). Idée de
+    l'utilisateur, implémentée et mesurée ; conservée en opt-in, jamais
+    activée par défaut.**
+
+    ### Le mécanisme
+    `_geodesic_distance_to_platform` : Dijkstra **multi-source** sur le
+    graphe des arêtes du `TetMesh`, pondéré par les longueurs euclidiennes
+    réelles, depuis TOUS les nœuds au contact du plateau (`min_only=True`).
+    Suivre les arêtes du maillage garantit que le chemin reste **dans la
+    matière** — c'est exactement ce qui distingue cette distance de la
+    hauteur : une pièce suspendue est proche du plateau à vol d'oiseau mais
+    géodésiquement lointaine, sa matière ne le rejoignant qu'en faisant le
+    tour par ce qui la porte.
+
+    `_geodesic_tet_directions` : la direction cible d'un tétraèdre devient le
+    gradient **normalisé** de cette distance. Répond à la question physique
+    directe « par où la matière rejoint-elle le plateau, et dans quel sens
+    s'en éloigne-t-elle ICI » — une réponse **par tétraèdre**, là où step3
+    donne une direction unique pour toute une région, choisie par un critère
+    dégénéré (limite #51).
+
+    **Seule la DIRECTION est retenue, jamais le champ lui-même.** La distance
+    de Dijkstra est trop irrégulière pour servir d'isosurfaces : elle suit les
+    arêtes en zigzag, `‖∇φ‖` médian mesuré à **4,81** sur death.stl au lieu
+    de 1,0 attendu pour une distance (dispersion 0,87 contre 0,29 pour le
+    champ FEM). Le lissage FEM et l'ancrage plateau, inchangés, apportent la
+    régularité. Repli explicite sur les directions par région là où le
+    gradient géodésique est inexploitable (nœud inatteignable, gradient de
+    norme quasi nulle).
+
+    **Pourquoi Dijkstra et pas A\*** (question posée explicitement) : le
+    problème est *tous-les-nœuds → ensemble-plateau*, pas point-à-point. Un
+    seul Dijkstra multi-source résout les 76 220 nœuds de death.stl en
+    **217 ms** (302 sources) et 80 851 nœuds de turkish.stl en **223 ms**
+    (4 291 sources) — négligeable devant les ~74 s du pipeline. A\* exigerait
+    ~76 000 exécutions séparées, et **partagerait exactement le même artefact
+    de métrique de graphe** (le zigzag ci-dessus), qui est la vraie limite de
+    précision. Le remède à cet artefact serait un solveur eikonal volumique
+    (Fast Marching, ou méthode de la chaleur de Crane) — **non implémenté, non
+    mesuré**.
+
+    ### Mesure (step9b, matière déposée sans appui)
+    Comparaison **à épaisseur de couche réelle égale** : les couches
+    géodésiques sortent ~40 % plus épaisses à `layer_height_base` identique,
+    et comparer tel quel surestimerait le gain (moins de couches = moins de
+    transitions = moins de défauts). `layer_height_base` est donc réduit du
+    même facteur côté géodésique, et l'épaisseur réelle **vérifiée** avant
+    toute comparaison.
+
+    | modèle | actuel | géodésique (épaisseur égalisée) | verdict |
+    |---|---:|---:|---|
+    | `l_shape_overhang.stl` | 2,67 % | **1,18 %** | améliore (−56 %) |
+    | `l-triple-axis-overhanged-shape.stl` | 4,11 % | **2,37 %** | améliore (−42 %) |
+    | `death.stl` | **0,53 %** | 1,18 % | **dégrade (×2,2)** |
+    | `turkish.stl` | — | — | **NON MESURÉ** |
+
+    Détail death.stl (257 couches / 0,213 mm contre 278 / 0,217 mm — épaisseur
+    bien égalisée, donc aucun biais de nombre de couches) : 1266 → 2791 dépôts
+    sans appui, défauts d'ordre **1054 → 2547**. La ligne « actuel » reproduit
+    exactement les chiffres de référence des limites #50/#51, ce qui valide la
+    chaîne de mesure.
+
+    ### Ce que ça apprend
+    Le mécanisme corrige bien le défaut de direction diagnostiqué en limite
+    #51 — sur les tétraèdres du dôme de death.stl, le champ FEM actuel ne fait
+    **jamais** pointer le dépôt vers le bas (0 %, composante verticale médiane
+    +0,955) là où le capot redescend pourtant, tandis que la géodésique y
+    pointe vers le bas sur **28 %** d'entre eux (médiane +0,299). C'est
+    géométriquement plus juste.
+
+    Et cela **n'améliore pas** la matière réellement déposée dans le vide sur
+    ce modèle. C'est le quatrième mécanisme de suite à améliorer un indicateur
+    INTERMÉDIAIRE sans améliorer la métrique de référence (après
+    `support_driven_order`, `anchor_growth_weight` et le départage par marge).
+    Le schéma est désormais assez répété pour être une règle du projet :
+    **aucun indicateur intermédiaire — direction, ancrage, ordre — ne prédit
+    la métrique step9b. Mesurer step9b, ou ne rien conclure.**
+
+    Hypothèse **non vérifiée** sur l'écart entre les modèles : death.stl est
+    massif avec une coque suspendue reliée au plateau par un seul pilier
+    étroit, de sorte que la géodésique de toute la coque passe par ce goulot
+    et y devient très irrégulière ; les deux modèles où le mécanisme améliore
+    sont fins et bien connectés. Ne pas présenter cette lecture comme établie.
+
+    **Conséquence actée** : `use_geodesic_directions=False` par défaut, comme
+    `support_driven_order` et `anchor_growth_weight`. Ne pas l'activer sans
+    avoir mesuré `turkish.stl` — le 4ᵉ modèle est précisément celui qui a
+    invalidé `anchor_growth_weight` après trois mesures favorables (limite
+    #51).
+
+53. **`FieldSolverParams.support_feedback_iterations` — LA BOUCLE DE
+    RÉTROACTION DE SURPLOMB. Premier mécanisme du chantier à améliorer
+    réellement la métrique de référence : matière déposée sans appui
+    DIVISÉE PAR DEUX sur `death.stl` (0,53 % → 0,25 %), contre −11 % pour le
+    meilleur des six précédents. Idée de l'utilisateur.**
+
+    ### Le circuit ouvert que personne n'avait vu
+
+    Tout le pipeline évaluait le surplomb en **boucle ouverte** :
+    - `step2` mesure l'angle des normales contre la **verticale MACHINE**,
+      une seule fois, **avant que le champ scalaire n'existe** ;
+    - ce `risk_score` figé pondère ensuite le terme de gradient de `step4` ;
+    - `step9b` mesure correctement le résultat, mais **après tout**, en pur
+      diagnostic, sans rien réinjecter.
+
+    **Le solveur n'était donc jamais pénalisé pour les surplombs que ses
+    PROPRES couches créaient.** Le test manquant existait déjà deux fois dans
+    le code — il était simplement branché au mauvais endroit.
+
+    Six mécanismes (limites #50/#51) ont échoué à corriger ce défaut parce
+    qu'ils modifiaient tous une **entrée** de ce circuit (choix de direction,
+    ancrage, ordre) sans jamais interroger le circuit lui-même. Voir la
+    section « COMMENT LIRE CE FICHIER » en tête : c'est de ce constat qu'est
+    née la règle « après deux ou trois mécanismes sans effet, auditer le
+    circuit au lieu d'en ajouter un quatrième ».
+
+    ### Le mécanisme
+
+    Point fixe : résoudre φ → ré-évaluer le surplomb **contre `-∇φ`** (la
+    verticale locale réellement produite, `_self_overhang_angles`) → faire
+    pivoter les directions cibles fautives → re-résoudre.
+
+    Le critère est **exactement** celui de `step2`
+    (`angle(normale, -direction) < seuil`), appliqué à une référence
+    différente. C'est toute l'idée : les deux quantités portent le même nom
+    et ne sont pas la même chose.
+
+    - `_rotate_directions_out_of_overhang` corrige du **minimum** nécessaire
+      (rotation autour de `n × u` d'exactement le déficit angulaire) : au-delà,
+      la cible s'éloignerait de ce que la géométrie de la région demande sans
+      rien résoudre de plus. Cas dégénéré `n ∥ u` (plafond parfaitement plat,
+      le pire cas) : axe perpendiculaire stable construit explicitement.
+    - Les tétraèdres corrigés sont **sur-pondérés** (`support_feedback_weight`),
+      sans quoi la correction est absorbée par le lissage. Poids **posé, jamais
+      cumulé** — sinon il exploserait au fil des itérations.
+    - La boucle ignore les `Constraint[]` utilisateur : elle convergerait sinon
+      vers un problème que `solve_with_constraints` ne résout pas ensuite.
+    - Le résidu est mesuré sur le champ **réellement résolu**, jamais sur les
+      cibles corrigées — rien ne garantit que le lissage FEM les respecte
+      (même discipline qu'`UpwardGrowthDiagnostic`).
+
+    ### Arrêt dynamique + plafond dur
+
+    `support_feedback_iterations` est un **plafond**, pas un nombre fixe. La
+    boucle s'arrête dès que le gain **relatif** passe sous
+    `support_feedback_min_improvement` (2 %), et `SUPPORT_FEEDBACK_ITERATION_CAP
+    = 50` borne toute valeur demandée (10 000 → 50, verrouillé par test).
+
+    Gain **relatif** et non absolu : le résidu part de ~26 % du volume et
+    descend d'un ordre de grandeur ; un seuil absolu serait soit inatteignable
+    au début, soit franchi immédiatement à la fin. Un résidu qui **remonte**
+    arrête aussi la boucle. `stalled` et `converged` sont deux champs
+    **distincts** : s'arrêter faute de progrès n'est pas avoir résorbé le
+    surplomb, et les confondre masquerait un plateau derrière un succès.
+
+    ### Mesures (`death.stl`)
+
+    Courbe du surplomb auto-infligé (fraction de VOLUME), 13 itérations avant
+    stagnation, +17 s de calcul :
+
+    ```
+    26,52 → 19,84 → 12,48 → 8,49 → 6,76 → 5,84 → 5,13
+          → 4,59 → 4,25 → 3,86 → 3,73 → 3,49 → 3,47 %
+    ```
+
+    Métrique de référence (step9b), **à épaisseur de couche réelle égalisée** :
+
+    | | couches | épaisseur | dépôts sans appui | ordre |
+    |---|---:|---:|---:|---:|
+    | référence | 257 | 0,213 mm | 1266 (**0,53 %**) | 1054 |
+    | ×3 itérations | 254 | 0,214 mm | 668 (**0,25 %**) | 476 |
+    | dynamique (×13) | 251 | 0,213 mm | 716 (**0,27 %**) | 512 |
+
+    Le `true_overhang_count` tombe aussi de **1 à 0**.
+
+    ### Le résultat NÉGATIF à retenir : l'indicateur interne ne pilote pas
+
+    **13 itérations font 3,6× mieux que 3 en interne (3,47 % contre 12,48 %) et
+    LÉGÈREMENT MOINS BIEN sur step9b** (0,27 % contre 0,25 %). Cinquième
+    occurrence du même schéma dans ce projet.
+
+    Conséquence directe et non résolue : **le critère d'arrêt ne peut pas
+    trouver le nombre optimal d'itérations, puisqu'il observe une quantité non
+    corrélée à l'objectif.** Il aurait fallu exiger >32 % de gain par itération
+    pour s'arrêter à 3 — un seuil injustifiable autrement qu'en le calquant sur
+    death.stl, c'est-à-dire l'erreur de sur-ajustement déjà payée avec
+    `anchor_growth_weight`. **Ne pas régler ce seuil sur un seul modèle.**
+
+    ### Statut
+
+    Opt-in, `0` par défaut. **Mesuré sur `death.stl` UNIQUEMENT** — les trois
+    autres modèles de `res/test_models/` restent à faire avant toute activation
+    par défaut. 11 tests (`tests/test_step4_field_solver.py`), dont celui qui
+    verrouille l'essentiel : le critère est bien évalué contre `∇φ` et non
+    contre la verticale machine.
+
+54. **`LayerParams.geodesic_order` — ordre d'impression par distance
+    géodésique. Atteint VISUELLEMENT l'objectif « imprimer les couches
+    suspendues en dernier », et DÉGRADE la métrique d'un facteur 3,5 à 4.
+    Opt-in, désactivé. Démontre que les deux objectifs du projet sont
+    incompatibles en l'état.**
+
+    ### L'idée (utilisateur) et ce qu'elle corrige
+
+    Le pipeline confond deux questions parce qu'un seul champ y répond : la
+    **forme** d'une couche (il faut un champ lisse et régulièrement espacé —
+    le FEM) et leur **ordre** (il faut savoir par où la matière rejoint le
+    plateau — un plus court chemin). L'ordre d'impression était une fonction
+    croissante de l'isovaleur, point : si le champ croît de l'extrémité d'une
+    coque vers son attache, **aucun réglage ne pouvait l'inverser**.
+
+    `geodesic_order` re-dérive la seule **séquence** de la distance géodésique
+    au plateau (Dijkstra multi-source, ~220 ms), la forme des couches restant
+    strictement celle des isosurfaces de φ.
+
+    ### Deux versions mesurées, et un diagnostic FAUX corrigé en route
+
+    **v1 — tri global par distance médiane** : 0,53 % → **2,25 %**. Le
+    contrôle posé sur l'écart entre couches consécutives a sauté (0,213 →
+    0,376 mm), désignant des sauts spatiaux. Diagnostic posé : l'isosurface
+    d'une distance géodésique est une **coquille entière**, donc un tri global
+    entrelace des couches spatialement éloignées n'ayant en commun que leur
+    distance au plateau.
+
+    **v2 — progression géodésique + continuité spatiale** : la géodésique
+    n'**oriente** les arêtes du graphe de continuité et n'**amorce** le DFS
+    que dans la limite de la connexité spatiale (adjacence toujours fondée sur
+    l'isovaleur : « quelles couches se touchent » est de la géométrie, « laquelle
+    vient avant » est de la progression). Une arête peut désormais être
+    **inversée** par rapport à l'isovaleur — capacité nouvelle, pas un réglage.
+
+    Résultat : les sauts spatiaux sont **éliminés** (0,376 → 0,219 mm, niveau
+    de la référence) et la métrique ne bouge quasiment pas — **1,98 %**,
+    toujours ×3,7. **Le diagnostic v1 était donc faux : les sauts spatiaux
+    étaient un symptôme, pas la cause.**
+
+    ### La vraie cause (hypothèse géométrique, cohérente avec #50/#51)
+
+    Dans une coque mince, la distance géodésique varie surtout **le long** de
+    la coque ; ses isosurfaces la coupent donc **en travers**. Ordonner les
+    couches de φ par cette distance les empile transversalement — chaque couche
+    est une nervure posée sur sa tranche — au lieu de les empiler **dans
+    l'épaisseur**, où chacune repose à plat sur la précédente. C'est
+    exactement l'appui local de proche en proche déjà identifié en limite #51
+    comme réel et utile, et que `support_driven_order` détruisait aussi. **Même
+    échec, mécanisme différent.**
+
+    Piste qui en découle, **non implémentée** : la géodésique est le bon
+    critère pour décider **quelle branche** avant quelle autre, et le mauvais
+    **à l'intérieur** d'une branche, où l'empilement doit rester celui de φ.
+
+    ### Mesures (`death.stl`)
+
+    | configuration | dépôts sans appui | ordre |
+    |---|---:|---:|
+    | référence | 1266 (0,53 %) | 1054 |
+    | ordre géodésique seul | 4758 (1,98 %) | 4546 |
+    | **rétroaction seule** | **819 (0,34 %)** | **602** |
+    | géodésique + rétroaction | 4545 (1,86 %) | 4328 |
+
+    **Les deux mécanismes ne se combinent pas** : l'ordre géodésique domine et
+    dégrade quelle que soit la qualité du champ sous-jacent.
+
+    ### LE RÉSULTAT LE PLUS IMPORTANT : les deux objectifs sont incompatibles
+
+    Vérifié **image par image** sur le GIF d'ordre d'impression, aux mêmes
+    fractions d'avancement :
+    - référence, couche 116/257 : un contour de coque **isolé, flottant en
+      l'air**, sans rien dessous — le défaut d'origine ;
+    - géodésique, couche 106/234 : **aucune pièce détachée**, la coque n'a pas
+      commencé, et elle est déposée **en dernier** (jaune franc à 85 %).
+
+    L'objectif énoncé par l'utilisateur — « imprimer les couches suspendues en
+    dernier » — est donc **visuellement atteint**, et il coûte **4× plus de
+    matière déposée dans le vide**. Ce n'est plus une conjecture (limite #51) :
+    c'est démontré par une image ET un chiffre. Aucune mesure ne dit lequel
+    prime — **c'est un arbitrage d'usage qui revient à l'utilisateur**, et
+    c'est pourquoi le mécanisme reste disponible plutôt que supprimé.
+
+---
+
+59. **Cinématique : sur la machine ACTUELLE, C est IMPOSÉ par la position du
+    point (constaté le 2026-09-28, en préparant P5 du lissage non-planaire).**
+    La machine n'a que R, C, Z et B, sans axe Y (confirmé par l'utilisateur).
+    La tête ne balaie donc qu'un demi-plan vertical : pour atteindre un point,
+    le plateau doit tourner de C = angle polaire du point. B reste le SEUL
+    degré d'orientation. Il penche dans le plan radial, d'un seul côté
+    (B ∈ [0°, 185°], normale de couche vers +R).
+
+    Jusqu'ici, l'étape 8 calculait C pour l'ORIENTATION, sans tenir compte
+    de la position, ce que la machine ne peut pas exécuter. La limite #18
+    (« sphère complète couverte ») n'est vraie que si C est libre. Cela
+    suppose un axe linéaire de plus, prévu à l'upgrade après Maker Faire.
+
+    Mesuré sur les couches de lissage non-planaire (recherche), avec C
+    imposé, part des surfaces lissées où la tête reste à moins de 5° de la
+    normale :
+    - Benchy : 7 % ;
+    - dino : 11 %.
+
+    **La méthode Bird n'est PAS entièrement compatible (corrigé le
+    2026-09-29, l'affirmation contraire était fausse).** Elle fait bien
+    tourner chaque cellule autour de l'axe TANGENTIEL, donc ses couches
+    penchent dans le plan radial. Mais elle penche dans les DEUX sens, et B ne
+    penche que vers +R. Mesuré sur les normales du corps du Benchy : 16 %
+    penchent vers le centre, 2,3 % au-delà de 45°. Avec un axe D sans limite,
+    ou un axe Y, on tombe à 0 %.
+    - **Contrainte d'inclinaison** : option sélectionnable, jamais imposée
+      (recherche : `bird_loop.py --reachable-tilt` et
+      `--reachable-normal=<w>`).
+    - **Constat mesuré** : « orientation atteignable » ≠ « sans collision ».
+      Sur le Benchy centré, avec w = 0,5, le nombre de contacts passe de 83
+      à 903 (plateau).
+    - **Correctif retenu** (recherche, `full_step89.py`) : borner B selon la
+      hauteur au-dessus du plateau (point le plus bas de la vraie tête),
+      puis réorienter les points en contact par paliers de tolérance
+      (45 / 90 / 181°).
+      - Benchy : de 83 à 9 contacts (pénétration ≤ 0,22 mm, dans la marge).
+      - dino : de 217 à 0.
+      - En échange, environ 100 points par modèle sont déposés à plus de
+        45° de leur normale.
+
+    **Correction** :
+    - `MachineProfile.position_coupled_axes` : `[0]` pour la machine
+      actuelle, `[]` quand un axe linéaire libère C ;
+    - `MachineProfile.radial_direction` : direction +R à angles nuls,
+      `(0, −1, 0)` pour la machine actuelle, puisque B > 0 autour de X
+      penche la normale vers −Y.
+    - L'étape 8 (`_resolve_all_axis_angles_coupled`) :
+      - tire l'angle couplé de la position (`coupled_axis_angle`) ;
+      - résout les axes restants sur la direction ramenée dans le repère de
+        cet axe ;
+      - émet un `Step8Diagnostic` quand la cible sort de ce qu'ils
+        atteignent ;
+      - ne lisse jamais l'angle couplé, car le lisser déplacerait le point
+        atteint.
+    - Ce chemin est en Python dans les deux positions de `APEX_USE_CPP`.
+    - `main._default_machine_profile` décrit désormais la machine actuelle.
+
+    **Reste non traité, à reprendre** : les directions candidates de step3
+    et step7, ainsi que la réorientation de step10, parcourent encore toute
+    la sphère sans tenir compte de la position.
+
+    **Limites de la tête et troncature des angles (même jour).**
+    L'utilisateur a donné les limites de B : 750 °/s et 300 °/s². Elles sont
+    dans `main._default_machine_profile`. Il a aussi confirmé que son
+    firmware COORDONNE les axes : quand un axe atteint sa limite, tout le
+    mouvement ralentit et l'angle reste exact.
+
+    Le `_clamp_rate` de l'étape 8 modélisait l'inverse : il tronquait
+    l'angle, donc la tête prenait du retard. Mesuré en recherche : jusqu'à
+    62° d'écart à la normale sur la coque du Benchy.
+
+    La troncature est donc désactivée par défaut
+    (`Step8Params.clamp_angle_rates = False` ; `True` rend l'ancien
+    comportement). Le bon modèle est un **ralentissement de l'avance**. Il
+    est déjà écrit en recherche (`skin_print.feed_plan` : vitesse angulaire
+    plafonnée par passes avant et arrière, remise à zéro à chaque changement
+    de sens ; ×1,45 sur le temps des passes de lissage du Benchy à 25 mm/s).
+    Il est à porter dans l'export G-code.
+
+60. **Étape 5 : couche entière perdue quand un nœud frôle le plan (corrigé le
+    2026-09-29).** Mesuré sur le Benchy Bird de référence
+    (`research/S4_Slicer/check_step5_sections.py` : contour de step5 contre
+    union des sections réelles des tétraèdres) : la couche 6 perdait 100 % de
+    sa matière (192 mm²) et la couche 174 en perdait 23 %.
+    - **Cause** : un nœud de la SURFACE à 2,6e-5 et 9,2e-5 mm du plan, sous la
+      tolérance de soudure (`weld_tolerance_factor` × diagonale ≈ 8e-5 mm).
+      Les points de coupe de ses arêtes fusionnent ; on obtient des triangles
+      dégénérés, dont les arêtes répétées (multiplicité 6 à 22) cassent
+      `outline()`. La boucle sort ouverte et elle est jetée.
+    - **Un nœud intérieur ne casse rien** : seul le bord se rompt.
+      L'hypothèse initiale, « plan passant exactement par un sommet », était
+      fausse (aucun nœud à moins de 1e-6 mm).
+    - **Correctif** : `_extract_closed_contours` retire les triangles
+      dégénérés avant le tracé de bord. Sans aire, ils ne portent aucun bord.
+    - **Test** : `test_node_within_weld_tolerance_of_plane_keeps_whole_contour`,
+      contrôlé comme ÉCHOUANT sans le correctif.
+    - Benchy : 0 couche en écart sur 313 après correction. Les sorties de
+      recherche produites avant (P3, P5) sont à refaire.
+
+61. **Export G-code (`file_io/gcode_export.py`, écrit le 2026-09-30).** Écrit
+    de zéro, sans reprendre les générateurs de formes fixes `scripts/gen_*`.
+    Seuls les faits machine qu'ils portaient sont repris, vérifiés avec
+    l'utilisateur.
+    - **Axes** :
+      - firmware Y = `atan2(y, x)` = `C − 90` avec la convention d'Apex,
+        recalculé depuis la position ; l'accord avec `axis_angles[0]` est
+        mesuré (`GcodeReport.c_mismatch_deg`) ;
+      - B firmware = B d'Apex ;
+      - Y est déroulé, et hérité au centre.
+    - **Pivot** : le firmware commande le pivot de B, à 45 mm de la pointe.
+      On a X = R + L sin B et Z = z + L (cos B − 1), avec comme référence la
+      pointe à B = 0. **À confirmer par l'utilisateur** : si le zéro Z du
+      firmware est le pivot, il faut ajouter 45 mm. Le signe est vérifié par
+      un test contre `step9._positioned_toolhead_vertices`.
+    - **F** est recalculé par segment pour garder la vitesse de la pointe (le
+      firmware traite Y et B comme linéaires), puis ralenti par `feed_plan`
+      aux limites de vitesse et d'accélération de B.
+    - **Trajets à vide** :
+      - rétraction de 0,8 mm à 35 mm/s (décision de l'utilisateur) ;
+      - dégagement sur UN seul axe, choisi selon l'orientation de la tête :
+        Z (+ pour une tête vers le bas, − pour une tête retournée) ou R dans
+        le sens du corps ;
+      - un dégagement qui descendrait la tête sous la marge du plateau
+        bascule sur l'autre axe ;
+      - un contrôle optionnel (`travel_check`) compte les dégagements en
+        contact.
+    - `parse_gcode` et `firmware_to_machine` servent à l'aperçu
+      (`scripts/preview_gcode_file.py`) et au contrôle aller-retour.
+    - Tests : `tests/test_gcode_export.py`.
+
+62. **step9 : contrôle rapide par arbre k-d (`CollisionSimParams.fast_kdtree`,
+    opt-in, 2026-09-30).** Il est porté de la recherche (`full_step89.py
+    --fast`, où il ramenait 30 min à environ 1 min sur le Benchy).
+    - **Principe** : la matière est densifiée le long des cordons
+      (`fast_densify_step` = 0,25 mm) dans UN arbre construit une fois.
+      Chaque point porte l'indice du point de trajectoire qui le dépose, et un
+      point testé ne voit que la matière antérieure (même invariant que
+      `_grow_printed_index_to`).
+    - **Requête** : les K plus proches voisins, plus une requête exacte par
+      boule quand la liste est saturée de matière future (la tête survole
+      souvent ce qui sera imprimé plus tard).
+    - **Écart assumé** : la distance est surestimée d'au plus un demi-pas
+      (0,125 mm), à couvrir par la marge de 1 mm.
+    - Désactivé par défaut tant qu'il n'est pas mesuré sur les quatre modèles
+      de `res/test_models/`.
+    - **Pas encore portés** : la borne de B selon la hauteur et la
+      réorientation par paliers de la recherche. Leur place est l'étape 10,
+      puisqu'elles modifient la trajectoire.
+
+63. **Étape 8 : filtre médian des axes d'orientation libres
+    (`Step8Params.free_axis_median_window`, opt-in, 2026-09-30).** La normale
+    de couche est constante par tétraèdre. Près de l'axe du plateau, C étant
+    imposé, B oscille d'un point à l'autre entre 0° (butée) et environ 14°.
+    Mesuré sur la trajectoire Squirtle de recherche :
+    - 5,9 % des segments du corps font sauter B de plus de 10° ;
+    - le firmware, qui coordonne les axes, ralentit tout le mouvement à
+      chaque inversion : le temps du corps passe de 1,27 h à 4,67 h ;
+    - une hystérésis n'y change presque rien (−8 % à 0,5°) ;
+    - **un filtre médian de 9 points par polyligne gagne 41 %**.
+
+    Deux règles :
+    - **Appliquer AVANT tout contrôle de collision.** Appliqué après, il défait
+      les réorientations anti-collision (écart mesuré jusqu'à 115°).
+    - L'écart résiduel à la direction visée est recalculé, donc les
+      `Step8Diagnostic` restent justes.
+
+    **Limite connue** : une alternance PARFAITE (0/14/0/14) résiste à un
+    médian. Les données réelles montrent surtout des pics isolés.
+
+## Détail de `core/mesh_types.py` (dataclasses partagées)
+
+Aucune logique de calcul dans ce fichier — uniquement des contrats de données.
+
+- `Vec3` (alias `np.ndarray`), `AABB`
+- `MeshData` (vertices, faces, normales, watertight, bvh, kdtree) — sortie étape 1
+- `TetMesh` (tet_vertices, tetrahedra, tet_adjacency) — sortie étape 1
+- `OverhangMap` (risk_score, is_overhang, is_bridge, bridge_span_direction) — sortie étape 2
+- `Region`, `RegionDependencyGraph` (regions, dependencies,
+  **`platform_contact_faces`** — booléen par face, ajouté pour l'étape 4, seule
+  source de vérité sur le contact plateau) — sortie étape 3
+- `ScalarField` (values par nœud, **`gradient` shape (T,3)** — un par tétraèdre,
+  pas par nœud : champ P1 = gradient constant par élément) — sortie étape 4
+- `ConstraintType` (enum), `ConstraintFalloff` (enum), `Constraint` — contraintes utilisateur
+- `Layer` (contour_3d, region_ids, local_frame, **`toolpath_2d`** — liste de
+  polylignes `(K,2)` dans le repère local 2D de la couche, pas 3D, remplies
+  par l'étape 6 ; **`isovalue`** — l'isovaleur dont la couche EST
+  l'isosurface, renseignée par l'étape 5, requise par l'étape 7 pour
+  convertir `φ` en indice de couche ; **`segment_colors`** — une couleur par
+  polyligne de `toolpath_2d`, `None` = matière interne/couleur libre,
+  remplie par l'étape 7 ; color_id = couleur dominante, affichage UI)
+  — étapes 5/6/7
+- `ColorMap`, `PrintPass` (**`segments: list[(layer_id, index)]`** — pointeur
+  vers la géométrie, jamais une copie ; `layer_range` seul ne suffit pas car
+  une passe ne couvre qu'une partie de chaque couche), `PrintSchedule`
+  (l'ordre de `passes` EST l'ordre d'exécution) — étape 7
+- `RotationAxisSpec` (axe + plage angulaire, un DOF de rotation dans le
+  repère de son parent) ; `MachineProfile` (**`rotation_axes: list[RotationAxisSpec]`**
+  — cinématique décrite génériquement, N axes ordonnés et paramétrables,
+  jamais figée sur une seule machine, voir limite #18)
+- `ToolpathPoint` (**`axis_angles: list[float]`** — un angle par élément de
+  `MachineProfile.rotation_axes`, même ordre ; remplace les anciens
+  `radius`/`platform_angle`/`head_angle`, qui figeaient la structure sur
+  exactement 2 DOF nommés "plateau"/"tête" — hypothèse invalidée par la
+  généralisation à N axes composés, limite #18. La traduction vers une
+  commande firmware précise (X/Y/Z/B) est délibérément hors de ce type,
+  reportée à un futur `file_io/gcode_export.py`), `Step8Diagnostic`
+  (**donnée pure** — position, layer_id, segment_index, erreur angulaire
+  résiduelle en degrés — signalant une orientation désirée inatteignable
+  dans les plages d'axes disponibles ; l'étape 8 ne lève JAMAIS d'exception
+  pour ce cas, elle accumule ces diagnostics pour l'étape 10),
+  `ToolpathMachine` — étape 8
+- `CollisionEvent`, `CollisionReport` — étape 9
+- `AdjustmentLogEntry` (point, méthode, détail) ; `ResegmentationRequest`
+  (**contrat du hook de l'étape 10** — point, position, plage d'angles
+  exclue par axe, raison ; l'étape 10 décide QUOI, l'appelant décide
+  COMMENT re-jouer step3→step8, voir limite #23) ; `AdjustmentReport`
+  (**`converged` explicite**, jamais un silence — plus `entries`,
+  `unresolved_collisions`, `iterations_used`) — étape 10
+
+## Détail de `core/geometry_utils.py`
+
+- `build_face_adjacency(faces, face_count) -> csr_matrix` — graphe dual du mesh,
+  utilisé par step2 (composantes connexes de ponts) et step3 (region growing).
+- `fibonacci_sphere_directions(count) -> ndarray` — répartition uniforme sur sphère.
+- `rotation_axis_circle_directions(rotation_axis_direction, count) -> ndarray` —
+  répartition sur le cercle atteignable par un seul DOF de rotation. Reste un
+  cas particulier valide et testé, PAS remplacé par la fonction générique
+  ci-dessous (voir limite #18).
+- `composed_rotation_directions(axes, reference_direction, samples_per_axis) -> ndarray` —
+  généralise à N axes de rotation composés (`RotationAxisSpec`), chacun
+  échantillonné sur sa propre plage angulaire (grille produit, rotations de
+  Rodrigues successives). Dégénère exactement vers `rotation_axis_circle_directions`
+  pour un seul axe à plage complète (vérifié par test), et vers la direction
+  de référence seule pour une liste vide. Utilisé par step3
+  (`_generate_candidate_directions`) et step7 (`_escape_directions`) — même
+  dispatch générique dans les deux, aucun des deux ne connaît le nombre ni
+  la nature des axes de la machine réellement utilisée.
+- `point_in_polygon_2d(point, polygon) -> bool` — ray-casting standard, utilisé
+  par step5 (test de cohérence) et step6 (classification contour/trou) pour
+  l'imbrication géométrique — voir limite #11.
+- `composed_rotation_angles_and_directions(axes, reference_direction, samples_per_axis) -> (ndarray, ndarray)` —
+  même grille produit que `composed_rotation_directions`, mais retourne
+  aussi les angles par axe (degrés) associés à chaque direction. Requis par
+  step8 : une résolution cinématique inverse doit repartir d'angles
+  concrets une fois le plus proche voisin trouvé, pas seulement de la
+  direction résultante. `composed_rotation_directions` est désormais un
+  wrapper mince autour de cette fonction (comportement inchangé, vérifié
+  par la suite de tests existante).
+- `refine_axis_angles_local_search(axes, reference_direction, initial_angles_deg, target_direction, iterations, initial_step_deg) -> (ndarray, float)` —
+  affinement générique par coordinate-descent d'un jeu d'angles vers une
+  direction cible, utilisé par step8 après la recherche de plus proche
+  voisin. Seule primitive par-axe : `_rodrigues_rotate_single` (voir
+  ci-dessous) — généralise à N axes sans jacobien analytique par-N. Le pas
+  initial DOIT être dérivé de l'écart de la grille NN
+  (`360/samples_per_axis`), pas une constante fixe, sous peine de rester
+  piégé près du candidat NN (mesuré : résidu ~15-20° avec un pas fixe de 2°
+  contre <0.1° avec un pas dérivé). Axes unitaires précalculés une seule
+  fois par recherche (pas à chaque nudge) ; `_angular_error` en scalaire
+  Python pur (`math.acos`), pas `np.clip`/`np.dot` — dispatch numpy
+  générique mesuré comme dominant le coût de step8 sur des vecteurs 3D
+  triviaux.
+- `_rodrigues_rotate_single(vector, axis, angle_rad) -> ndarray` — même
+  formule que `_rodrigues_rotate` (Rodrigues), mais pour UN SEUL vecteur
+  `(3,)`, en scalaire pur (pas de `np.cross`/`broadcast_to`) — réservée aux
+  appelants qui tournent un vecteur à la fois
+  (`refine_axis_angles_local_search`, `step10_adjustment._direction_for_angles`).
+  `_rodrigues_rotate` (chemin batch, `(N,3)`) reste strictement inchangée
+  pour ses appelants batch légitimes (`composed_rotation_angles_and_directions`,
+  step9). ~15× plus rapide sur ce chemin scalaire, correction du principal
+  goulot de performance mesuré sur step8.
+
+## Détail de `core/constraints.py`
+
+Point d'extension pour tout nouveau type de contrainte utilisateur — ajouter un
+type ne nécessite jamais de modifier `step4_field_solver.py` :
+
+- `ConstraintAssemblyContext` — données partagées (TetMesh, MeshData, kdtree,
+  gradients de forme précalculés), sans logique.
+- `CONSTRAINT_ASSEMBLERS: dict[ConstraintType, ConstraintAssembler]` — registre ;
+  ajouter un type = une fonction d'assemblage + une entrée ici.
+- `assemble_all_constraints(constraints, ctx) -> (csr_matrix, ndarray)` — point
+  d'entrée unique appelé par step4.
+
+## Détail de `core/spatial.py`
+
+Enveloppe `KDTree` autour du sous-ensemble de `scipy.spatial.cKDTree` que le
+pipeline utilise vraiment — rien de plus (contrat verrouillé par lecture des
+9 sites d'appel, voir limite #56, pas 5) :
+
+- construction depuis un `(N,3)` ;
+- `.query(points)` — plus proche voisin unique (`k=1`, la seule variante
+  appelée) ; entrée `(3,)` → `(distance, index)` scalaires comme scipy ;
+- `.query_ball_point(point, radius)` — indices dans un rayon, un seul
+  appelant (`core/constraints.py`), re-filtré derrière donc ordre libre ;
+- l'attribut `.data`.
+
+Dispatch scipy ↔ `apex_core.KDTree` selon `core._cpp.enabled()`, **figé à la
+construction** (même discipline que `_PrintedGeometryIndex._native`). Portage
+architectural, pas une optimisation : `cKDTree` est déjà natif, gain de
+vitesse nul attendu — le but est de retirer la dernière primitive spatiale
+scipy du cœur. Construite par step1 (`mesh_data.kdtree`, partagée avec
+step4/5/6), step3, step4, step5, step7.
+
+## Détail de `pipeline/step4_field_solver.py`
+
+- Système `A·φ = b` symétrique défini positif, assemblé en trois fonctions
+  pures pour permettre une re-résolution rapide après édition d'un point
+  d'attache (jamais besoin de relancer step1/2/3, ni de réassembler la partie
+  structurelle) :
+  - `build_static_system(...) -> FieldSolverStaticSystem` — tout ce qui NE
+    dépend PAS des `Constraint[]` (rigidité, direction de gradient, ancrage
+    plateau). À appeler une seule fois après step3, résultat à mettre en cache.
+  - `solve_with_constraints(static_system, constraints, params) -> ScalarField`
+    — chemin rapide, appelé à chaque édition de contrainte.
+  - `run(...)` — enveloppe des deux, pour un slicing complet en une passe.
+- Solveur : direct (`spsolve`) sous `direct_solve_node_threshold` (défaut 30000
+  nœuds), sinon itératif (`cg`, préconditionné) — jamais `gmres` (système
+  toujours symétrique par construction).
+- `_blend_tet_directions` : mélange spatial des directions de gradient
+  (plateau + régions comme sources d'influence, pondération inverse-
+  distance, fenêtrage lisse) — remplace le plus-proche-voisin strict
+  historique, opt-in via `FieldSolverParams.direction_blend_radius`
+  (défaut `0.0` = désactivé). Voir limites #32/#33/#34.
+
+## Détail de `pipeline/step1_ingest.py`
+
+- `_tetrahedralize` : `resolution` fixe le plafond global (`-a` de tetgen).
+  `near_platform_resolution` (opt-in, défaut `None`) active un raffinement
+  LOCAL près du plateau via `TetGen.add_region` (deux régions : une tranche
+  fine près du plateau, le reste à `resolution`) — voir limites #35/#36
+  pour le mécanisme retenu et celui explicitement écarté (`bgmesh`/`metric`,
+  cassé dans cette version de tetgen).
+- `_split_for_platform_refinement` : découpe le mesh en deux coques
+  ouvertes (`trimesh.slice_plane(..., cap=False)`) de part et d'autre de
+  `platform_z + near_platform_margin`, calcule un point-seed par coque,
+  garanti à l'intérieur via `_find_guaranteed_interior_point` (limite #42 —
+  un seed hors-coque casse silencieusement `TetGen.add_region`). Utilisée
+  uniquement quand `near_platform_resolution is not None`. Le contour de
+  coupe est triangulé UNE SEULE FOIS (`_shared_cut_cap`) et n'apparaît
+  qu'une fois dans le PLC combiné final, comme facette interne partagée —
+  PAS deux fois via deux appels indépendants à `slice_plane(cap=True)`
+  (limite #44 : deux triangulations indépendantes du même contour peuvent
+  diverger sur un polygone non convexe riche, ce que TetGen refuse comme
+  auto-intersection).
+- `_shared_cut_cap` : triangule le contour de bord créé par une coupe
+  `cap=False` (dédup des sommets, extraction des arêtes de bord sur le
+  plan, `triangulate_polygon`) — reproduit la logique interne du paramètre
+  `cap=True` de `trimesh.intersections.slice_mesh_plane`, appliquée une
+  seule fois plutôt que deux (limite #44).
+- `_find_guaranteed_interior_point` : rejection sampling déterministe
+  (`trimesh.sample.volume_mesh`, seed fixe) en repli quand le centroïde
+  d'une coque tombe hors d'elle-même (forme non convexe) — partagée entre
+  `_split_for_platform_refinement` et `_find_internal_cavities` (limite #42).
+
+## Détail de `pipeline/step6_toolpath2d.py`
+
+- `_classify_contours` : classification trou/matière par parité du nombre de
+  boucles englobantes (imbrication `point_in_polygon_2d`), généralisée
+  au-delà de 2 boucles (ex: anneau dans anneau) ; chaque trou est rattaché à
+  son parent immédiat (le plus petit contour matière qui le contient), pas
+  au plus grand contour de la couche.
+- `_offset_walls` : offset `shapely.buffer` progressif, arrêt propre sur zone
+  dégénérée (limite #13) ; retourne aussi le polygone du dernier offset
+  valide (frontière de départ de l'infill).
+- `_bridge_direction_for_loop` : pont surface/volume par kdtree
+  (`mesh_data.kdtree`, même technique que step4/step5), seuil de PRÉSENCE
+  pas de majorité (limite #14).
+- `_interpolate_out_of_plane` : pondération inverse-distance (`1/d**power`)
+  des offsets hors-plan réels du contour, pour donner une position 3D
+  fidèle aux points générés par `shapely` (limite #31, suite). Sources =
+  contour extérieur **et** trous du même groupe. `LinearNDInterpolator`
+  écarté (enveloppe convexe seulement → `NaN` sur contour non convexe).
+- `_reorient_bridge_toolpath` : parois normales + `bridge_anchor_extra_walls`
+  parois supplémentaires resserrées sur le périmètre (ancrage = matière sur
+  les bords, jamais densité d'infill augmentée — ne pas réutiliser
+  `infill_density` pour ça, ça casserait le contrat UI où ce paramètre
+  représente la densité réelle) + infill balayé perpendiculairement à la
+  portée du pont.
+- Limite connue non résolue (hors périmètre de l'étape 6, cohérent avec les
+  autres limites documentées) : un pont qui s'étend sur plusieurs couches
+  consécutives est reclassé indépendamment couche par couche, sans lissage
+  temporel de la direction de traversée entre couches voisines.
+- `_out_of_plane_offset` / `_to_toolpath_3col` : `Layer.toolpath_2d` porte
+  `(u, v, offset)` depuis le fix du débordement (limite #31) — `offset`
+  EXACT (mesuré, jamais interpolé) pour le contour n=0 (paroi extérieure,
+  identique au contour d'origine), et INTERPOLÉ pour les parois n≥1 et
+  l'infill via `_interpolate_out_of_plane` quand
+  `Step6Params.out_of_plane_interpolation_power` est renseigné (défaut
+  `None` = nul, comportement historique ; `main.py` l'active à `2.0`).
+  `_project_to_local_2d` reste strictement 2D (u,v),
+  utilisée par toute la géométrie interne (`_classify_contours`,
+  `_offset_walls`, `_generate_infill`) qui ne doit jamais voir la 3e
+  colonne. `_lift_to_3d` accepte (K,2) OU (K,3) — reconstruit exactement le
+  point d'origine avec offset, retombe sur le plan moyen sans (limite #31).
+
+## Détail de `pipeline/step7_scheduling.py`
+
+- `run(layers, mesh_data, tet_mesh, color_map, region_dependency_graph,
+  scalar_field, params) -> (list[Layer], PrintSchedule)`. `tet_mesh` est
+  requis **en plus** de `scalar_field` : `ScalarField.values` est indexé par
+  nœud du TetMesh, donc illisible en un point 3D sans la géométrie des nœuds.
+- `_edge_colors_for_polyline` : couleur par **arête** (pas par point —
+  l'arête est l'unité extrudée, et raisonner par arête évite les
+  sous-polylignes dégénérées à 1 point au découpage). Utilise
+  `ProximityQuery.on_surface`, jamais `mesh_data.kdtree` (limite #15).
+- `_smooth_edge_colors` : filtre 1D en longueur d'arc (`merge_tolerance`).
+  Ce paramètre vit sur `ColorMap` (contrat UI) et n'est **pas** dupliqué dans
+  `Step7Params` — deux sources de vérité qui divergent en silence est le
+  piège déjà rencontré avec `platform_z` à l'étape 4.
+- `compute_hole_deadline` / `_blocking_layer_along_ray` : seule la matière
+  **future** scelle un trou (limite #16). Deux approximations assumées et
+  documentées : `φ` lu au nœud TetMesh le plus proche (pas d'interpolation
+  barycentrique), et test d'accessibilité géométrique — le test rigoureux
+  avec le vrai modèle 3D de la tête et l'état incrémental de la pièce est
+  explicitement le travail de l'étape 9, sur laquelle l'étape 10 boucle.
+- Cas `color_map is None` / vide : une passe par couche, `color_id=None`,
+  aucun trou. Le pipeline sans peinture est le cas d'usage par défaut et doit
+  rester pleinement fonctionnel.
+- Limite connue non résolue : l'ordonnancement est un glouton (maintien de la
+  couleur active aussi longtemps que possible) + EDF sur les trous, pas un
+  optimum global du nombre de purges.
+
+## Détail de `pipeline/step8_machine_toolpath.py`
+
+- `run(layers, schedule, machine_profile, params) -> (ToolpathMachine,
+  list[Step8Diagnostic])`. `layers` doit être les couches **retournées par
+  step7** (`colored_layers`), pas celles d'entrée de step7 : `PrintPass.segments`
+  pointe vers `toolpath_2d` re-découpé par couleur.
+- `_resolve_axis_angles` : pas de cinématique inverse analytique (impossible
+  à écrire génériquement pour N axes arbitraires). Recherche du plus proche
+  voisin sur `composed_rotation_angles_and_directions`, puis affinement par
+  `refine_axis_angles_local_search` — le pas initial de l'affinement est
+  dérivé de l'écart de la grille NN (`Step8Params.ik_refine_step_multiplier
+  * 360/ik_samples_per_axis`), pas une constante fixe (voir détail
+  `core/geometry_utils.py` ci-dessus).
+- `_detect_singular_axes` / `_inherit_angle_at_singularity` : généralise
+  « R≈0 ⇒ C indéterminé » (limite #19) à **n'importe quel axe** de la
+  chaîne, pas seulement le premier — pour chaque axe, distance
+  perpendiculaire de la position courante à sa droite de rotation propre
+  (`_axis_chain_world_lines`, toutes ancrées à `MachineProfile.platform_origin`).
+  Un axe signalé singulier hérite l'angle du point précédent, **avant** le
+  lissage temporel, pour que le filtre de lissage ne voie jamais un saut
+  artificiel à corriger.
+- Aucune exception pour une orientation inatteignable : `Step8Diagnostic`
+  (position, layer_id, segment_index, erreur résiduelle en degrés) est une
+  donnée pure accumulée par `run`, consommée par l'étape 10 sans connaître
+  la résolution IK interne. `ToolpathResolutionError` reste réservée aux
+  entrées structurellement invalides (`toolpath_2d` manquant, segment hors
+  limites) — même distinction que `SchedulingError` à l'étape 7.
+- `_clamp_rate` : limiteur de taux causal (vitesse puis accélération),
+  préféré à une spline car les limites machine sont des contraintes dures
+  qu'un clamp respecte par construction. `_unwrap_angle_sequence`/
+  `_rewrap_angle_sequence` gèrent le wraparound uniquement pour un axe à
+  tour complet (`angle_range_deg` couvrant ≥360°) — une plage bornée
+  strictement ne peut par construction pas boucler, le dépliage y serait
+  une discontinuité inventée.
+- `_iter_schedule_points` : détecte les frontières de trajet à vide par
+  changement de clé `(layer_id, index)` entre segments consécutifs de
+  `PrintPass.segments`, y compris entre deux passes non contiguës —
+  `toolpath_2d` ne porte aucun marqueur de trajet à vide par construction
+  (décision actée à l'étape 6), c'est entièrement la responsabilité de
+  l'étape 8.
+- `ToolpathPoint.axis_angles` est la seule sortie de step8 — délibérément
+  agnostique de tout firmware. La traduction vers une commande machine
+  précise (ordre X/Y/Z/B, noms d'axes) est repoussée à un futur
+  `file_io/gcode_export.py`, pas codée ici.
+
+## Détail de `pipeline/step9_collision_sim.py`
+
+- `run(toolpath, machine_profile, params) -> CollisionReport`. Ne charge
+  jamais `nozzle_model` lui-même (pas de dépendance au système de
+  fichiers) — l'appelant doit le peupler au préalable, typiquement via
+  `file_io.mesh_loader.load_toolhead_mesh`.
+- `_positioned_toolhead_vertices` : même convention de composition N-axes
+  que `composed_rotation_angles_and_directions`/`step8._axis_chain_world_lines`
+  (rotations en ordre inverse de la liste, translation après) — appliquée
+  ici à un tableau de sommets complet plutôt qu'à un seul vecteur
+  direction, mais sans inventer de nouvelle convention.
+- `_surface_sample_points` : sommets **+** points échantillonnés le long
+  des arêtes (limite #21) — jamais les sommets seuls, sous peine de
+  manquer une collision avec un obstacle fin traversant une face.
+- `_PrintedGeometryIndex`/`_grow_printed_index_to` : capsules (segment +
+  rayon), jamais une union booléenne (coût prohibitif sur plusieurs
+  milliers de points). Grille spatiale maison (dict cellule -> indices),
+  insertion O(1), pas de reconstruction périodique. Croissance strictement
+  incrémentale, jamais en avance sur le point testé, et le cordon en cours
+  de dépôt est explicitement exclu (limite #22).
+- `_check_printed_part` (distance point-segment fermée, sans bibliothèque)
+  vs `_check_static_obstacle` (`ProximityQuery`, jamais `mesh_data.kdtree`
+  — limite #15) : deux méthodes de distance pour deux natures d'obstacle
+  (primitif capsule vs mesh réel), un même seuil `safety_margin`. Broad-phase
+  AABB commun aux deux avant tout calcul précis.
+- `_platform_mesh_at_angle` : approxime le plateau par un disque (aucune
+  géométrie réelle fournie à ce stade, contrairement à `nozzle_model`) ;
+  retourne `None` si `platform_origin`/`rotation_axes` sont absents — le
+  test est alors simplement sauté, pas de faux positif ni d'exception.
+- Le mandrin/mors n'a délibérément **pas** de nouveau champ dans
+  `MachineProfile` (aucune géométrie reçue, contrairement au modèle de
+  tête) — `CollisionReport.chuck_checked` reste `False` en toutes
+  circonstances, signal explicite plutôt qu'un champ spéculatif ou un skip
+  silencieux.
+- Aucune nouvelle dépendance (`python-fcl`/`CollisionManager` écartés) :
+  AABB (numpy) + distance point-segment (formule fermée) + `ProximityQuery`
+  (déjà utilisé par step7) couvrent le besoin.
+
+---
+
+## Détail de `pipeline/step10_adjustment.py`
+
+- `run(toolpath, collision_report, machine_profile, sim_params, params,
+  step8_diagnostics=None, resegmentation_hook=None) -> (ToolpathMachine, AdjustmentReport)`.
+  Fonction pure : l'entrée n'est jamais mutée (vérifié par test).
+- `_try_local_reorientation` réutilise `composed_rotation_angles_and_directions`
+  (grille de recherche de step8), candidats triés par écart angulaire
+  croissant et **coupés** au-delà de `max_direction_deviation_deg` — le
+  seuil de surplomb est donc une condition d'admissibilité, pas un
+  post-contrôle.
+- `_collisions_at_points` réutilise les primitives de step9
+  (`_PrintedGeometryIndex`, `_grow_printed_index_to`, `_evaluate_point`,
+  `_surface_sample_points`), jamais une seconde implémentation de la
+  détection. La re-vérification est réduite aux seuls points réorientés :
+  les capsules ne dépendent que de `position`, jamais de `axis_angles`.
+- `_violates_rate_limits` : garde-fou contre une réorientation
+  mécaniquement inexécutable (limite #24).
+- Les `Step8Diagnostic` **sautent le niveau 1** : l'étape 8 a déjà épuisé
+  la recherche IK locale pour ces points, la relancer à l'identique ne peut
+  rien produire de nouveau.
+- Aucune exception pour une collision non résolue — bascule forcée en
+  support de secours + `converged=False`.
+- Limite connue non résolue : quand le hook rend une nouvelle trajectoire,
+  la re-vérification est **complète** (une ré-segmentation invalide tout le
+  champ scalaire, limite #23) — seule la voie « réorientation » bénéficie
+  de la re-vérification partielle.
+
+## Détail de `main.py` et `file_io/visualization_export.py`
+
+- `main.run_pipeline(mesh_path, params) -> PipelineResult` : relais pur
+  entre les 10 étapes, aucune logique métier propre. `PipelineParams` un
+  champ par étape (mêmes défauts que chaque `Params` déjà acté) ;
+  `PipelineResult` conserve TOUTES les sorties intermédiaires (pas
+  seulement la trajectoire finale), pour qu'un export ou un futur
+  appelant UI n'ait pas besoin de rejouer le pipeline pour retrouver une
+  sortie d'étape.
+- Dépendances multi-étapes respectées explicitement (pas seulement
+  chaînées séquentiellement) : step4/5/7 reçoivent `mesh_data`/`tet_mesh`
+  de step1 directement ; step8 consomme `colored_layers` (sortie de
+  step7), jamais les `layers` d'entrée de step7 ; step9/step10 partagent
+  la même instance de `MachineProfile` et de `CollisionSimParams`.
+- `resegmentation_hook` de l'étape 10 est laissé à `None` dans `main.py` —
+  l'implémenter réellement (re-jouer step3→step8 avec exclusion d'angles,
+  limite #23) reste un travail à part, pas fait ici. Sans hook, toute
+  collision non résolue par réorientation locale bascule directement en
+  `fallback_support`, un comportement déjà explicite et testé, pas un trou.
+- `_default_machine_profile()` charge `aetheris-4.glb` si présent (repli
+  sur `nozzle_model=None`, log, jamais un crash) — cinématique par défaut
+  = la machine actuelle documentée plus haut, un exemple d'usage parmi
+  d'autres (limite #18), pas la référence figée.
+- `file_io.visualization_export.export_visualization_glb(result, output_path)` :
+  assemble une scène GLB (mesh source semi-transparent + couches en
+  dégradé par ordre d'impression + trajectoire finale colorée par
+  extrusion + marqueurs rouges aux collisions non résolues), ne fait
+  AUCUN calcul de pipeline — relit uniquement ce que `PipelineResult`
+  contient déjà. Choisi en GLB pour cohérence avec le modèle de tête déjà
+  au même format, ouvrable dans n'importe quel visualiseur 3D classique.
+- Deux bugs de performance réels trouvés en exécutant `main.py` de bout
+  en bout pour la première fois sur le modèle de test (jamais visibles
+  sur les mesh synthétiques ~10mm des tests unitaires) — voir limites
+  #26 et #27 : le pas d'échantillonnage du modèle de tête confondu avec
+  `nozzle_diameter`, et une boucle de distance point-capsule non
+  vectorisée. Les deux corrigés dans `pipeline/step9_collision_sim.py`.
+
+## Conventions de code à respecter
+
+- Chaque `pipeline/stepN_*.py` expose `run(input, params) -> output`, fonction pure,
+  sans état caché — permet à l'orchestrateur de ré-exécuter une portion du pipeline
+  sans tout recalculer (utile pour l'étape 10, qui relance sélectivement 3 et 9).
+- Un fichier de paramètres dataclass par étape (`OverhangParams`, `SegmentationParams`, etc.),
+  actuellement définis dans chaque fichier `stepN_*.py` lui-même — à terme, `config/params.py`
+  devra les centraliser sans casser les imports existants.
+- Tests pytest par étape dans `tests/test_stepN_*.py`, mesh synthétiques générés à la
+  volée (jamais de fichiers externes committés) via `trimesh.creation.*` et opérations
+  booléennes (`union`/`difference`, moteur `manifold3d`).
+- Toujours passer par un fichier temporaire + `step1_ingest.run()` dans les fixtures de
+  test pour obtenir un `MeshData` réaliste (avec bvh/kdtree construits), plutôt que de
+  mocker `MeshData` à la main.
+
+## IDÉE RÉSERVÉE POUR LA TOUTE FIN — NE PAS IMPLÉMENTER MAINTENANT
+
+**Sélection manuelle des parties, avec paramètres et ordre d'impression par
+partie.** Idée de l'utilisateur, actée explicitement comme **le tout dernier
+chantier**, à n'ouvrir **que lorsque l'algorithme automatique sera au point**.
+Ce n'est pas une piste à explorer quand un mécanisme automatique résiste : la
+tentation sera précisément d'y recourir comme échappatoire à un défaut non
+résolu, et ce serait déplacer le problème sur l'utilisateur au lieu de le
+résoudre. **Tant que le pipeline automatique n'est pas satisfaisant, ne pas
+commencer ce travail, même partiellement.**
+
+Contenu visé, tel qu'énoncé :
+- un **algorithme de sélection** permettant à l'utilisateur de désigner
+  lui-même les différentes parties du modèle (pilier, bras, zone suspendue…),
+  plutôt que de subir la segmentation automatique ;
+- des **paramètres propres à chaque partie** (direction, hauteur de couche,
+  et tout autre réglage aujourd'hui global) ;
+- un **ordre d'impression choisi par l'utilisateur** entre ces parties.
+
+**Ce qu'il faut préserver dès maintenant pour que ce soit implémentable plus
+tard, sans rien coder de la fonctionnalité elle-même** — ces points ne coûtent
+rien s'ils sont respectés au fil de l'eau, et coûteraient une refonte s'ils
+étaient perdus :
+
+1. **Toute pondération spatiale doit rester définie PAR TÉTRAÈDRE, jamais
+   comme un scalaire global.** Un champ `(T,)` calculé automatiquement
+   aujourd'hui est exactement la même structure qu'un champ peint à la main
+   demain — la sélection utilisateur devient une simple **source alternative**
+   du même tableau. Un scalaire global, lui, n'a aucun chemin de migration.
+   Vaut pour la modulation de lissage, les pondérations de direction, et tout
+   terme ajouté au système de step4.
+2. **Ne jamais supposer qu'une partition du modèle provient de step3.**
+   Partout où du code consomme un découpage (régions, branches, clusters),
+   il doit le recevoir en argument, jamais aller le chercher lui-même dans
+   `RegionDependencyGraph`. Une partition fournie par l'utilisateur doit
+   pouvoir se substituer à celle de step3 sans modifier l'appelé.
+3. **L'ordre d'impression doit rester une donnée, pas une conséquence
+   implicite d'un tri.** `_frontier_order` est déjà sur ce modèle : il produit
+   une **permutation explicite** des couches. Conserver cette forme — un ordre
+   imposé de l'extérieur remplace alors la permutation calculée, sans toucher
+   à la géométrie des couches.
+4. **`core/constraints.py` est le point d'extension prévu** pour tout apport
+   utilisateur au champ scalaire (registre `CONSTRAINT_ASSEMBLERS`). Une
+   sélection de partie assortie de paramètres est, formellement, une
+   contrainte de plus — ne pas court-circuiter ce registre en câblant des
+   termes utilisateur directement dans step4.
+
+Aucune de ces quatre disciplines ne demande d'écrire du code aujourd'hui :
+ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon.
+
+55. **Bug de performance réel corrigé dans la segmentation par branche
+    (`step3_segmentation.py`) : sur un mesh dense (`death.stl`), la fusion
+    des micro-composantes ne terminait JAMAIS — corrigé, blocage infini →
+    11,5s. Et : `FieldSolverParams.geodesic_smoothing_iterations`, un
+    lissage VECTORIEL ITÉRATIF du champ géodésique, mesuré cohérent sur 3
+    modèles (jamais pire que la référence), mais PAS encore activé par
+    défaut — le 4ᵉ modèle (`turkish.stl`) reste à mesurer avant toute
+    décision, exactement la discipline qui avait invalidé
+    `anchor_growth_weight` après 3 mesures favorables (limite #51).**
+
+    ### Le bug de performance (`_merge_tiny_branch_components`)
+
+    La segmentation par branche (`branch_cut_threshold`, limite #51/#52)
+    avait été mise au point sur `real_overhang.stl`, un modèle synthétique
+    où la coupure ne produit que 3-4 composantes significatives (le reste,
+    des artefacts de bord filtrés par une taille minimale). Sur
+    `death.stl` (mesh dense, 2418 faces de surface réelles), le même
+    seuil (0.05) fragmente le modèle en **318 239 micro-composantes**.
+    L'ancienne implémentation traitait chaque micro-composante dans une
+    boucle Python, reconstruisant un `scipy.spatial.cKDTree` par candidat
+    voisin À L'INTÉRIEUR de cette boucle — avec 318k composantes, ce
+    n'était tout simplement jamais fini (processus tué après plusieurs
+    minutes sans terminer, même à résolution grossière 1.0).
+
+    **Fix** : `_merge_tiny_branch_components`, entièrement vectorisée. Un
+    seul passage par ITÉRATION (pas par composante) sur toutes les arêtes
+    du graphe tétraèdre-tétraèdre reliant un tétraèdre "petit" à un
+    tétraèdre "grand" : distance euclidienne calculée en un seul appel
+    numpy sur toutes les arêtes candidates à la fois, chaque petite
+    composante adoptant le label du grand voisin connecté par l'arête de
+    distance minimale. Répété jusqu'à stabilisation (borné par le nombre
+    de petites composantes, converge en pratique en très peu de passes).
+    Résultat mesuré : **blocage infini → 11,5s** sur `death.stl`
+    (résolution 1.0). 305/305 tests passants, comportement identique sur
+    tous les modèles déjà testés (aucune régression, seule la performance
+    change).
+
+    Coût réel restant, résolution comprise : **145s (résolution 0.8) à
+    734s/12min (résolution 0.4)** pour step1→8 complet sur `death.stl`.
+    Ce n'est pas la finesse du mesh de surface qui coûte cher (2418 faces,
+    léger) — c'est la densité de tétraédrisation à la résolution demandée,
+    un coût structurel du solveur FEM, pas un bug isolé.
+
+    ### Lissage vectoriel itératif du champ géodésique (`geodesic_smoothing_iterations`)
+
+    Idée apportée par l'utilisateur (méthode externe : maillage
+    tétraédrique → Dijkstra depuis le plateau → gradient par tétraèdre →
+    **lissage non-linéaire itératif des vecteurs**, avec renormalisation à
+    chaque passe). Ressemble à `use_geodesic_directions` (limite #52,
+    mesuré ×2,2 pire sur `death.stl`), mais avec une différence de méthode
+    clé : `_diffuse_tet_directions` (le lissage déjà existant pour
+    `transition_distance_mm`) résout un système linéaire **en une seule
+    passe, composante par composante** — à un point de selle (deux voisins
+    à ~180°), ça moyenne deux vecteurs quasi opposés en un vecteur proche
+    de zéro, renormalisé ensuite n'importe comment. C'est exactement ce qui
+    laissait le lissage à 8 sauts topologiques (limite #52) bloqué à
+    ~170° de max quel que soit le rayon.
+
+    `_iterative_vector_smoothing` (nouvelle fonction, step4) : à CHAQUE
+    itération, chaque tétraèdre se déplace d'une fraction `step` vers la
+    moyenne de ses voisins PUIS renormalise — jamais un seul calcul suivi
+    d'une renormalisation finale. Le champ se débloque progressivement
+    parce qu'à chaque passe, la moyenne locale est déjà légèrement
+    influencée par les voisins plus loin du point de selle. Mesuré sur
+    `death.stl` (fraction de paires de voisins à plus de 100° d'écart) :
+    brut 3,79% → 10 itérations 0,03% → 50 itérations 0,00%, max ramené de
+    179,8° à 88,0°.
+
+    `FieldSolverParams.geodesic_smoothing_iterations` (défaut 0, opt-in) et
+    `geodesic_smoothing_step` (défaut 0.5) — s'applique uniquement quand
+    `use_geodesic_directions=True`, lisse le champ géodésique juste avant
+    qu'il ne remplace les directions cibles.
+
+    ### Mesures step9b, épaisseur de couche RÉELLEMENT égalisée
+
+    Piège rencontré et corrigé en cours de mesure : comparer à
+    `layer_height_base` nominal identique ne suffit PAS ici — à valeur
+    nominale égale, le champ géodésique brut produit des couches
+    2,4-2,6× PLUS ÉPAISSES que la référence (mesuré sur `death.stl` :
+    0,439mm réf contre 1,154mm géodésique brut, à `layer_height_base=0.2`
+    identique pour les deux). Sans correction, ceci aurait fait paraître le
+    géodésique artificiellement meilleur (moins de couches = moins de
+    transitions = moins de défauts mécaniquement). Facteur d'égalisation
+    recalculé par modèle à partir de l'épaisseur réelle mesurée, jamais
+    supposé transférable d'un modèle à l'autre.
+
+    | modèle (résolution) | référence | geodesic brut (égalisé) | geodesic + lissage(50, 0.5) (égalisé) |
+    |---|---:|---:|---:|
+    | `death.stl` (0.8) | 11,02% | 1,63% | **1,61%** |
+    | `real_overhang.stl` (0.4) | 2,74% | 3,46% (dégrade) | **2,80%** (récupère) |
+    | `l_shape_overhang.stl` (0.4) | 3,59% | 4,76% (dégrade) | **3,66%** (récupère) |
+    | `turkish.stl` | — | — | **NON MESURÉ** |
+
+    Motif cohérent sur les 3 modèles mesurés : le géodésique brut seul est
+    tantôt bien meilleur (`death.stl`), tantôt légèrement pire
+    (`real_overhang.stl`, `l_shape_overhang.stl`) que la référence — mais
+    le lissage vectoriel n'est JAMAIS pire que la référence, et corrige
+    systématiquement la dégradation du géodésique brut quand elle existe.
+    Sur les défauts d'ordre, le lissage améliore aussi
+    systématiquement : `death.stl` 6803→3667 (-46%), `real_overhang.stl`
+    84→77, `l_shape_overhang.stl` 5→2.
+
+    Ce résultat CONTREDIT en partie la limite #52 (`use_geodesic_directions`
+    seul mesuré ×2,2 pire sur `death.stl`) — la mesure de la limite #52
+    avait été faite à résolution 0.4 sans le fix de performance ci-dessus
+    ni `transition_distance_mm`/segmentation par branche dans le même état ;
+    les deux mesures ne sont donc pas strictement comparables. Ne pas
+    effacer la limite #52 pour autant : elle reste la mesure de référence
+    pour le géodésique BRUT seul, que ce nouveau mécanisme ne remplace pas
+    mais complète.
+
+    ### NON ENCORE ACTIVÉ PAR DÉFAUT — turkish.stl manquant
+
+    `turkish.stl` (10180 faces, 100×100×60mm — nettement plus gros que les
+    3 autres modèles de `res/test_models/`) n'a pas pu être mesuré cette
+    session : à résolution 0.8, le calcul n'a montré aucun signe
+    d'achèvement après 16 minutes (même le premier des 5 runs de mesure).
+    Interrompu sans conclusion.
+
+    **Trois mesures concordantes ne font pas une généralité** — c'est
+    exactement ce qui avait fait activer puis retirer
+    `anchor_growth_weight` (limite #51, invalidé par son 4ᵉ modèle après 3
+    succès). `geodesic_smoothing_iterations` reste **opt-in, désactivé par
+    défaut**, tant que `turkish.stl` n'a pas été mesuré — à refaire à une
+    résolution plus grossière pour ce modèle spécifiquement (10180 faces
+    justifient un coût de calcul plus long que les autres, indépendamment
+    de tout bug).
+
+    ### Segmentation par branche jugée trop fragile sur death.stl (décision non exécutée)
+
+    Sur `death.stl`, `branch_cut_threshold=0.05` (calibré sur
+    `real_overhang.stl`) produit 108-131 régions selon la résolution
+    (contre 3-4 significatives attendues), avec une longue traîne de
+    dizaines de micro-régions à 1-3 faces — et 37% des couches déposées à
+    contre-sens. Jugé "un bazar total" en session. **Le retrait de
+    `branch_cut_threshold` et de sa mécanique associée
+    (`_branch_labels_from_tet_mesh`, `_merge_tiny_branch_components`,
+    `_majority_branch_label_per_face`, le câblage dans `_region_growing` et
+    `_anchor_growth_directions`) a été discuté mais N'A PAS ÉTÉ EXÉCUTÉ** —
+    la session a bifurqué vers le chantier de lissage géodésique
+    ci-dessus avant que ce retrait soit fait. Point ouvert pour la
+    prochaine session : soit retirer ce mécanisme comme prévu, soit
+    recalibrer `branch_cut_threshold` par modèle avant de le juger
+    définitivement inutilisable.
+
+56. **PORTAGE C++ — pas 0 (socle de build) et pas 1 (index spatial) FAITS,
+    MESURÉS et validés à métrique strictement identique. step9b divisé par
+    5,3. Premier chantier du projet où le gain est net, reproductible et
+    sans arbitrage : le portage ne change aucun résultat géométrique, il ne
+    change que le temps.**
+
+    Décision de l'utilisateur : passer la base de code en C++, cible **100 %
+    C++** (Python supprimé à la bascule finale, UI TypeScript dialoguant
+    directement avec la bibliothèque), migration **pilotée par le profil**,
+    **pytest conservé comme oracle d'équivalence** pendant toute la
+    migration, et **aucune bibliothèque dont l'usage commercial ne soit pas
+    libre et gratuit**. Le plan complet est dans
+    `~/.claude/plans/dapper-watching-balloon.md`.
+
+    ### Le profilage qui a tout réorienté (et deux erreurs de lecture corrigées)
+
+    `death.stl` @ résolution 0.8, cProfile — 467,1 s profilés pour 212,9 s
+    réels (surcoût ×2,19) :
+
+    | étape | cumtime | part |
+    |---|---:|---:|
+    | **step9b** | **323,3 s** | **69 %** |
+    | **step8** | **92,8 s** | **20 %** |
+    | step1 (dont 16,4 s de TetGen en sous-processus) | 29,7 s | 6 % |
+    | step4 | 14,0 s | 3 % |
+    | step6 / step5 / step2 / step3 / step7 | 7,1 s | 1,5 % |
+
+    Une seule fonction domine tout : `step9_collision_sim.py:275
+    candidates_near`, **119,0 s de temps propre**, plus les **1,41 milliard
+    d'appels à `set.add`** (93 s) et 46,7 M d'appels à `dict.get` (8,3 s)
+    qu'elle déclenche — **~46 % du temps total du pipeline à elle seule**.
+
+    **Erreur de lecture n°1, corrigée** : une première catégorisation
+    concluait « 42 % du temps est du natif déjà compilé, donc hors de portée
+    d'un portage ». C'est faux. Les 94 s de `set.add`, 44 s de `numpy.array`
+    et 8 s de `dict.get` sont de la manipulation de structures de données
+    **provoquée par des boucles Python**, que le C++ supprime avec la
+    boucle. Le vrai incompressible est TetGen (16,4 s) plus l'algèbre creuse
+    (~7 s), soit **≈ 5 %**. Ne pas classer un appel natif comme
+    incompressible sans regarder QUI l'appelle.
+
+    **Erreur de lecture n°2, corrigée** : `step9b` est un diagnostic
+    **désactivé par défaut** (`main.py`, `support_check: Optional[...] =
+    None`). Les « 12 min » et les 172,7 s des sessions précédentes
+    l'incluent parce que les scripts de mesure l'activent. Le pipeline de
+    production step1→step8 coûte **89,7 s** (mesuré, pas déduit).
+
+    ### Le socle (pas 0)
+
+    - **MSVC 14.44 était déjà présent** (`D:\Prazlook\Programmes\vs` +
+      Build Tools 2019/2022), mais ni CMake, ni Ninja, ni `cl.exe` au PATH.
+      `pip install cmake ninja` dans le venv suffit (BSD-3 / Apache-2.0,
+      sans droits administrateur).
+    - `cpp/CMakeLists.txt` — C++20, `/O2`, **`/fp:precise`**. Ce dernier
+      n'est pas un détail de confort : `/fp:fast` réordonnerait les
+      opérations flottantes et rendrait l'oracle d'équivalence inutilisable.
+    - `scripts/build_cpp.py` — localise l'installation via `vswhere`, capture
+      l'environnement de `vcvars64.bat`, lance cmake/ninja dedans. Une seule
+      commande, sans terminal développeur préalable.
+    - `core/_cpp.py` — interrupteur `APEX_USE_CPP` (**Python par défaut**) et
+      `APEX_CPP_GRID_MODE`. **L'absence du module natif n'est jamais une
+      erreur** : sans `.pyd` compilé, tout retombe silencieusement sur
+      Python. Lancer les tests ne doit jamais exiger un compilateur C++.
+    - Le module se construit et se charge sur **Python 3.14 / MSVC
+      19.44**, versions récentes où rien ne garantissait que pybind11 3.1
+      passerait — vérifié, pas supposé.
+
+    ### Le pas 1 : `_PrintedGeometryIndex`
+
+    Deux défauts **distincts**, qu'il fallait surtout ne pas confondre :
+
+    1. **coût d'interprétation** — une liste de tuples matérialisée par
+       requête, un `dict.get` par cellule, un `set.add` par (cellule ×
+       capsule) ;
+    2. **défaut ALGORITHMIQUE** — une capsule est insérée dans *toutes* les
+       cellules que son AABB touche, donc **revisitée une fois par cellule**
+       à chaque requête.
+
+    D'où deux modes de requête coexistant dans la classe C++
+    (`QueryMode::Faithful`, transcription fidèle du `set` ; `Stamped`,
+    dédoublonnage par estampilles) : c'est ce qui permet de mesurer les deux
+    gains **séparément**, avec un seul build.
+
+    **Découverte faite en relisant les cinq sites d'appel, absente du plan
+    initial** : trois d'entre eux (`step9b._has_support_below`,
+    `step9b._has_support_in_any_direction`, `step5._layer_support_mask`)
+    reconstruisaient **immédiatement** deux tableaux `(C,3)` par
+    compréhension Python sur les objets rendus — 432 candidats en médiane,
+    817 653 fois. C'est la source des 41 s de `numpy.array`. Une méthode
+    dédiée `candidates_endpoints` leur rend directement les tableaux, ce qui
+    supprime d'un coup l'ensemble de dédoublonnage, la liste d'objets et les
+    deux compréhensions. Les deux autres consommateurs (`step9`, `step8b`)
+    bouclent capsule par capsule et gardent `candidates_near` : ils ne
+    changent pas d'une ligne.
+
+    **Les cinq consommateurs ont été relus un par un et vérifiés
+    insensibles à l'ordre** (ils cherchent un minimum de distance ou
+    l'existence d'un support) — indispensable, puisque l'ordre du Python est
+    celui d'itération d'un `set`, donc déjà non significatif. Les tests
+    d'équivalence comparent des ensembles triés, jamais des listes.
+
+    ### Résultats mesurés (`death.stl` @ 0.8)
+
+    | configuration | total | step9b seul | métrique step9b |
+    |---|---:|---:|---|
+    | Python (référence) | 212,9 s | **123,2 s** | 0,466578 % / 1085 défauts d'ordre |
+    | C++, **même algorithme** | 126,2 s | **36,5 s** (**×3,38**) | **identique** |
+    | C++, **algorithme corrigé** | 112,9 s | **23,2 s** (**×5,31**) | **identique** |
+
+    Part fixe step1→8, mesurée séparément : **89,7 s** — sans elle, les
+    totaux auraient laissé croire à un gain de ×1,89 seulement, en diluant
+    step9b dans du temps qui n'a pas bougé.
+
+    Décomposition honnête : **le langage seul apporte ×3,38**, la correction
+    algorithmique **×1,57 de plus**. Deux chiffres, pas un.
+
+    **Validation croisée la plus solide obtenue sur ce projet** : le
+    compteur C++ relève **1 406 655 778 visites** (cellule × capsule) — soit
+    *exactement* le nombre d'appels à `set.add` mesuré indépendamment par
+    cProfile côté Python. Les deux implémentations parcourent rigoureusement
+    la même chose ; l'équivalence n'est pas seulement testée, elle est
+    comptée.
+
+    ### Pas 2 : la cinématique inverse (step8) — et le piège du repli « tout ou rien »
+
+    Après le pas 1, le re-profilage place **step8 en tête avec 86,1 s sur
+    168,0 s profilées (51 %)**, `step9b` retombant à 21 % et `candidates_near`
+    passant de 212 s de temps propre à **3,28 s**. La priorité a donc basculé,
+    et suivre le plan plutôt que la mesure aurait été une erreur.
+
+    Portage : toute la chaîne analytique de `core/geometry_utils.py`
+    (`_rodrigues_rotate_single`, `_angle_between`, `_perpendicular_basis`,
+    `_signed_angle_in_plane`, `_clamp_into_range`, `_forward_direction`,
+    `_resolve_single_axis_analytic`, `_resolve_axis_pair_analytic`,
+    `resolve_axis_angles_analytic`) plus la boucle de step8 avec
+    `_axis_chain_world_lines`, `_detect_singular_axes` et l'héritage d'angle
+    à la singularité → `cpp/src/core/kinematics.cpp`.
+
+    **La boucle N'EST PAS parallélisable**, contrairement à ce que supposait
+    le plan de portage. `previous_angles` porte une dépendance séquentielle
+    réelle : repliement des axes internes (`axes[2:]`), repli en cas de
+    singularité locale, héritage d'angle. Le gain vient donc du seul
+    changement de langage. Paralléliser exigerait de casser cette chaîne,
+    c'est-à-dire de changer le COMPORTEMENT, pas le langage.
+
+    #### Le défaut qui annulait 100 % du gain
+
+    Première version : au premier point que la résolution analytique ne sait
+    pas traiter, le C++ rendait la main et **Python rejouait toute la boucle**.
+    Mesure : step1→8 à 89,5 s contre 89,7 s avant portage — **rien**.
+
+    Cause, trouvée en instrumentant plutôt qu'en supposant : le repli se
+    déclenche **au point 0**. `_resolve_axis_pair_analytic` échoue quand la
+    direction visée est **colinéaire à l'axe externe** — le résidu du
+    bracketing y est une **tangence** à zéro, jamais un changement de signe,
+    donc aucun encadrement possible. Mesuré sur la cinématique réelle
+    (C tour complet + B ∈ [0,185]) : **0 échec sur 2000 directions
+    aléatoires**, mais échec systématique sur `+Z`. Or une pièce à fond plat
+    commence par déposer verticalement.
+
+    **Un point sur 297 994 (0,0003 %) annulait donc l'intégralité du gain.**
+
+    #### Le mécanisme retenu : reprise, pas abandon
+
+    Le C++ remplit tout jusqu'au point fautif, rend son index ; Python résout
+    **ce seul point** avec la recherche par grille déjà écrite et testée ;
+    le C++ reprend au suivant en recevant les angles via
+    `initial_previous_angles`. La chaîne est passée explicitement, donc
+    l'équivalence est préservée. Mesure sur `death.stl` : **412 replis sur
+    297 994 points (0,14 %)**, le natif traitant tout le reste en 1,43 s
+    cumulées — et step1→8 tombant de 89,5 s à **42,8 s**.
+
+    La grille de repli n'est **délibérément pas portée** : elle sert 0,14 %
+    des points ; la porter serait du code à maintenir et une occasion de
+    diverger pour rien.
+
+    > **Leçon de méthode, valable au-delà de ce cas** : sur un chemin
+    > SÉQUENTIEL, une stratégie de repli « tout ou rien » est fragile de façon
+    > disproportionnée — la granularité du repli compte plus que la qualité du
+    > portage. Vérifier le TAUX de repli réel avant de choisir cette
+    > granularité, jamais se fier à un « ce cas n'arrive jamais » écrit dans
+    > une docstring (celle de `_resolve_axis_angles` affirmait exactement
+    > cela).
+
+    #### Un test qui ne testait rien
+
+    Les quatre premiers tests d'équivalence de l'IK passaient au **vert sans
+    jamais exécuter le C++** : le repli silencieux les faisait comparer Python
+    à lui-même. Corrigé par `_LAST_NATIVE_FALLBACK_COUNT`, que les tests
+    vérifient désormais, plus un test dédié qui **force** le repli sur trois
+    points (dont le premier) et exige qu'il ait eu lieu avant de comparer.
+
+    C'est la deuxième fois dans la même session qu'un mécanisme donne
+    l'apparence de fonctionner : voir aussi la « erreur de lecture n°1 »
+    ci-dessus. Un indicateur vert n'est pas une preuve qu'on mesure ce qu'on
+    croit.
+
+    #### Tolérances : ce qui est exact et ce qui ne peut pas l'être
+
+    Les **angles** concordent à **1e-9 degré**. Les **résiduelles** non : elles
+    valent `acos(dot(achieved, target))` avec un produit scalaire à ~1−1e-15,
+    or `acos` est mal conditionnée en 1 (dérivée ~1e7 ici), si bien qu'un écart
+    d'**un ULP** produit ~1e-8 rad. L'écart est du bruit de conditionnement,
+    pas une divergence de calcul. La tolérance est donc **déclarée**
+    (1e-6 rad) et complétée par l'assertion qui compte réellement : les deux
+    implémentations émettent **exactement les mêmes `Step8Diagnostic`**
+    (seuil à 5°, quatre ordres de grandeur au-dessus du bruit).
+
+    ### Pas 3 : le test de support — quand l'ALGORITHME compte plus que le langage
+
+    Après le pas 2, le re-profilage remet `step9b` en tête (40,3 s sur 98,2 s
+    profilées) et désigne `core/geometry_utils.point_has_support_along_direction`
+    comme premier poste PORTABLE : **11,97 s de temps propre pour 273 146
+    appels**, plus ~10 s de dispatch numpy qu'elle déclenche (`cross`,
+    `normalize_axis_tuple`, `moveaxis`). Seul TetGen la dépasse (16,6 s), et il
+    est déjà natif.
+
+    **Or cette fonction était DÉJÀ entièrement vectorisée.** La transcrire ligne
+    à ligne n'aurait gagné que le dispatch. Le vrai défaut était ailleurs, et
+    c'est le premier des trois portages où il a fallu changer autre chose que
+    le langage :
+
+    1. **Aucun arrêt anticipé.** Elle ne rend qu'un BOOLÉEN et exécutait
+       pourtant ~15 opérations numpy sur les ~690 candidats à chaque appel.
+       `np.any(...)` est vrai dès qu'UN candidat convient : s'arrêter au
+       premier donne exactement la même réponse pour un coût proportionnel au
+       rang du premier appui, et non à 690.
+    2. **Aller-retour inutile.** Le C++ rendait deux tableaux `(C,3)` (3,95 s
+       d'allocation mesurées dans `candidates_endpoints`) que Python
+       reconsommait aussitôt.
+
+    **Fix : fusionner la requête spatiale et le test géométrique**
+    (`_PrintedGeometryIndex.has_support`, `cpp/src/core/support.cpp`). Le natif
+    lit les extrémités **directement dans la grille**, ne matérialise jamais
+    les candidats côté Python, et court-circuite au premier appui. Un seul
+    portage sert les trois sites d'appel (`step9b._has_support_below`,
+    `step9b._has_support_in_any_direction`, `step5._layer_support_mask`).
+
+    Résultat : **step9b passe de 29,2 s à 9,6 s**, soit **×14,4 depuis le
+    Python d'origine** (138,6 s).
+
+    > **Leçon** : les pas 1 et 2 étaient de la transcription, et le langage y
+    > suffisait. Ici non. Avant de porter une fonction DÉJÀ vectorisée,
+    > demander ce qu'elle calcule *en trop* — ici, 689 candidats sur 690 dans
+    > le cas favorable.
+
+    Deux gardes ajoutées aux tests, toutes deux nécessaires : une qui vérifie
+    que le jeu d'essai produit assez de cas **positifs** (sinon un bug rendant
+    tout `False` des deux côtés serait vert), et un test du cas limite
+    « strictement en dessous » — une capsule exactement à la hauteur du point
+    ne le supporte pas (`delta_up > 1e-9`), condition facile à perdre en
+    transcrivant et invisible sur des positions aléatoires.
+
+    ### Pas 4 : tables topologiques + granularité d'appel
+
+    Le re-profilage après le pas 3 (66,5 s profilées) désigne trois grappes
+    portables, dont **deux sont la même opération** — construire une table de
+    sous-simplexes avec un dictionnaire à clés tuple :
+
+    | cible | coût mesuré |
+    |---|---|
+    | `step4._tet_face_table` | 1,79 s + 1,78 s de générateur sur **12,5 M appels**, plus une part des 2,37 s de `sorted` et 1,43 s de `setdefault` → **~6-7 s** |
+    | `step1._build_tet_adjacency` | 2,91 s + 1,35 s de `set.add` → **~4,3 s** |
+    | construction de l'index | `_segment_aabb` 1,79 s + `append_segment` 1,01 s + `apex_core.append` 1,19 s → **~4 s** |
+
+    `cpp/src/core/tet_topology.cpp` sert les deux premières : les faces sont
+    empaquetées en enregistrements triés une fois, les arêtes en `uint64`
+    (`min << 32 | max`) pour que le dédoublonnage soit un `std::unique` plutôt
+    qu'un hachage de tuples.
+
+    **La troisième n'était pas un problème de langage mais de GRANULARITÉ
+    D'APPEL** : Python franchissait la frontière **744 324 fois** pour insérer
+    les capsules une par une. Deux corrections :
+    - `append_segments` insère tout le lot en un appel ;
+    - en mode natif, **aucun objet `_PrintedSegment` n'est plus créé à
+      l'insertion**. Ils sont construits à la demande dans `candidates_near`,
+      pour les ~690 candidats réellement rendus et non pour les 744 324
+      capsules insérées — dont la quasi-totalité n'est jamais lue.
+
+    > Erreur commise puis corrigée en cours d'écriture : la première version de
+    > l'insertion en lot reconstruisait quand même les 744 324 objets avec leur
+    > AABB, c'est-à-dire exactement le coût qu'elle prétendait supprimer.
+    > Batcher un appel ne sert à rien si l'on garde le travail qu'il portait.
+
+    Un test verrouille le point le plus fragile : **l'ordre d'INSERTION des
+    faces frontière**. `_map_boundary_faces_to_surface` interroge ensuite le
+    kdtree avec ces faces dans cet ordre, et l'ordre du résultat s'y propage —
+    une permutation décalerait des tableaux en aval **sans lever aucune
+    exception**.
+
+    ### PARALLÉLISATION : il n'y en a AUCUNE, et c'est délibéré
+
+    Vérifié, pas supposé : aucun `#pragma omp`, aucun `std::thread`, aucun
+    `threading`/`multiprocessing`, et `/openmp` n'est même pas activé au build.
+    Mesure directe du **rapport CPU/réel = 0,66** :
+
+    | | temps |
+    |---|---:|
+    | notre code (CPU du processus) | **28,4 s** — mono-thread |
+    | attente du sous-processus TetGen | **~15 s** — mono-thread, immuable |
+    | total réel | **43,3 s** |
+
+    Jamais au-dessus de 1,0 : aucune bibliothèque tierce ne parallélise dans
+    notre dos. En dessous de 1,0 : le déficit EST l'attente de TetGen, dont le
+    CPU est compté dans un autre processus. Recoupe exactement les 15,7 s
+    relevées au profilage.
+
+    **Ce qui est parallélisable, et ce qui ne l'est pas** :
+    - `step1`/TetGen — **non**, mono-thread et conservé : **plancher série dur** ;
+    - `step8`/IK — **non en l'état**, chaîne séquentielle via `previous_angles` ;
+    - `step9b` — **partiellement** : le contrôle contre l'index complet est
+      indépendant par point, la marche incrémentale ne l'est pas ;
+    - `step4` (assemblage FEM, matvec CG), `step5`, `step6` — **oui**.
+
+    **Plafond calculé** : en parallélisant parfaitement les 28,4 s sur 8 cœurs,
+    ~3,5 s + 15 s de TetGen ≈ **18,5 s**. Ni le portage seul, ni la
+    parallélisation seule n'atteindront 10 s.
+
+    **Pourquoi ne pas paralléliser maintenant**, et ce n'est pas un oubli :
+    1. les réductions flottantes parallèles **cassent l'équivalence bit-à-bit**,
+       c'est-à-dire l'oracle sur lequel repose tout le portage ;
+    2. paralléliser un fragment C++ appelé depuis une boucle Python ne rapporte
+       presque rien, l'extérieur restant sérialisé par le GIL.
+
+    Séquence retenue : **porter d'abord, paralléliser ensuite** — quand tout
+    sera en C++ et que l'oracle Python aura joué son rôle. Le GIL est déjà
+    libéré dans les points d'entrée natifs, donc rien ne sera à réécrire.
+
+    ### POINT D'INFLEXION : la phase « point chaud » est TERMINÉE
+
+    Profil après le pas 4 (43,2 s profilées) : **plus aucun poste Python isolé
+    ne dépasse ~2,5 s**. Les quatre pas visaient chacun une grappe de 20 à
+    200 s ; il n'en reste aucune.
+
+    | poste | temps | nature |
+    |---|---:|---|
+    | TetGen | 12,49 s | **immuable**, mono-thread |
+    | `apex_core.has_support` | 2,49 s | déjà C++ (coût d'appel × 272 868) |
+    | `csr_matvec` (CG) | 2,28 s | scipy natif |
+    | `_blend_tet_directions` | 2,04 s | Python — exige un KD-tree, et scipy y est déjà en C |
+    | `_interpolate_out_of_plane` | 1,50 s | Python, step6 |
+    | `apex_core.resolve_axis_angles_batch` | 1,43 s | déjà C++ |
+
+    `step1` seul mesuré à **18,8 s dont 12,4 s d'attente de TetGen** : il ne
+    reste que ~6,4 s de code propre, et elles sont éparpillées (2,44 s de pur
+    dispatch numpy sur des vecteurs 3D, ~0,6 s d'auto-intersections, le reste
+    sous 0,25 s par poste).
+
+    **PIÈGE À NE PAS REFAIRE** : `step2` (318 lignes, 0,1 s) semblait le banc
+    d'essai idéal pour porter les structures de données — jusqu'à ce que sa
+    lecture montre que sa détection de ponts repose sur
+    `mesh_data.bvh.intersects_location`. Le porter imposerait d'écrire un BVH
+    complet **pour 0,1 s de gain**. **Choisir un module par sa TAILLE est
+    trompeur : ce sont ses DÉPENDANCES qui déterminent le coût du portage.**
+
+    > Suite, au pas 6 : ce BVH a finalement été écrit, et le constat ci-dessus
+    > reste exact — `step2` ne gagne que 0,079 s sur `death.stl`. Ce qui a
+    > justifié le travail n'est ni sa taille ni son temps propre, mais qu'il
+    > **débloque** step2/step7 et que le gain croît avec la densité du
+    > maillage (×221 sur `death_hi-res.stl`).
+
+    Conséquence actée : le portage ne peut plus être piloté par le profil. Il
+    doit devenir **systématique et guidé par les dépendances** — d'abord
+    `types.hpp` réel, puis `core/bvh.cpp` (débloque step1/2/7/9), puis
+    `core/kdtree.cpp` (13 usages de `cKDTree`), puis les étapes
+    une par une. Les gains de 1-2 s viendront en supplément, sans être
+    cherchés.
+
+    ### Le pas 5 : `core/kdtree.cpp` — arbre k-d spatial
+
+    **Portage ARCHITECTURAL, pas une optimisation, et assumé comme tel.**
+    `scipy.spatial.cKDTree` est déjà natif (C) : le gain de vitesse attendu
+    est nul à légèrement négatif. Le but est de retirer la **dernière
+    primitive spatiale de scipy du cœur** — après quoi il ne reste plus, côté
+    scipy, que l'algèbre creuse (`scipy.sparse`, CG) et `ProximityQuery`
+    (trimesh). C'est la première application de la règle « guidé par les
+    dépendances » ci-dessus : aucun poste chaud ne le désignait.
+
+    **nanoflann écarté** au profit d'un **k-d tree maison** (~180 lignes,
+    `cpp/src/core/kdtree.cpp`) : median-split sur l'axe le plus étendu, 1-NN
+    récursif avec élagage, requête par rayon. Cohérent avec `types.hpp`
+    (« aucune dépendance tierce à ce stade ») et suffisant pour le contrat
+    réel — voir ci-dessous.
+
+    **Périmètre verrouillé par lecture des 9 sites `.query(...)` du
+    pipeline** (step1 `mesh_data.kdtree`, step3, step4 ×3, step5 ×2, step6,
+    step7) : **tous** passent un tableau `(M,3)` et demandent le plus proche
+    voisin unique (`k=1`, défaut de scipy). Aucun `k>1`, aucune requête
+    arbre-contre-arbre. Plus un seul site `query_ball_point` (un point, un
+    rayon : `core/constraints.py`, re-filtré derrière donc insensible à
+    l'ordre). Le module n'expose donc que `query_nn` (1-NN par lot) et
+    `query_radius` — porter davantage serait du code à maintenir pour un cas
+    que personne n'appelle.
+
+    **Équivalence.** `query_nn` rend la **distance euclidienne** (`p=2`,
+    `sqrt(dx*dx+dy*dy+dz*dz)`, accumulation `x→y→z`, `/fp:precise`) :
+    l'oracle confirme **indices identiques ET distances identiques au bit**
+    face à `cKDTree.query` sur 2500 requêtes / 6000 points aléatoires. Le
+    tie-break (deux points exactement équidistants) est tranché par **plus
+    petit indice** ; scipy ne le spécifie pas, mais les données réelles
+    (centres de tétraèdres/faces, sommets flottants) ne produisent jamais
+    d'égalité exacte — l'oracle utilise des données non dégénérées pour cette
+    raison, et le documente.
+
+    **Câblage : `core/spatial.py`**, enveloppe mince (même discipline que
+    `_PrintedGeometryIndex._native`). Elle expose exactement le sous-ensemble
+    utilisé — `.query()` (k=1, gère l'entrée `(3,)` → scalaires comme
+    scipy), `.query_ball_point()`, l'attribut `.data`. Choix scipy/natif
+    **figé à la construction**. Les 6 sites qui construisaient
+    `scipy.spatial.cKDTree(...)` passent à `core.spatial.KDTree(...)` ; les 9
+    sites `.query()` sont **inchangés** (compatibles canard). `import
+    scipy.spatial` retiré de step5/step7 (devenu inutilisé).
+
+    **Recette : 326/326 tests dans les DEUX positions de l'interrupteur**,
+    + 5 nouveaux tests d'équivalence (pas 5) : `query_nn` bit-exact vs
+    scipy, `query_radius` comme ensembles, dispatch du wrapper, `.data`
+    préservé, entrée 1-D → scalaires, non-régression interrupteur éteint.
+    Métrique géométrique inchangée (le portage ne déplace aucun résultat).
+    Gain de vitesse **non mesuré et non attendu** — conforme à l'intention.
+
+    ### Le pas 6 : `core/bvh.cpp` — et LA LEÇON LA PLUS CHÈRE DU PORTAGE
+
+    Cible : `trimesh.ray.ray_triangle.RayMeshIntersector`. Contrairement au
+    k-d tree, **la référence Python n'est PAS native** : `pyembree` est absent
+    de ce venv (vérifié, pas supposé), donc trimesh tombe sur son
+    implémentation pure numpy. Le gain est donc réel, et il est gros.
+
+    Périmètre verrouillé par lecture : **un seul point d'entrée est appelé**,
+    `intersects_location` (step2 détection de ponts, step7 deadline
+    d'accessibilité). `intersects_first`, `intersects_any` et
+    `contains_points` ne sont appelés nulle part — non portés. Les deux
+    appelants **ignorent `index_tri`** et réduisent par `.min()`, donc
+    l'oracle porte sur l'**ensemble** des couples `(index_ray, location)`
+    dédoublonnés, jamais sur l'ordre (même discipline qu'au pas 1).
+
+    #### Le bug : le broad phase N'EST PAS une optimisation
+
+    Première version : BVH descendu par un test rayon/AABB classique
+    (tranches), en supposant que le broad phase n'était qu'un filtre
+    conservateur — deux sur-ensembles différents, la narrow phase tranchant
+    ensuite de la même façon. **Faux.**
+
+    Les micro-mesures disaient pourtant « identique au bit » : 3 000 rayons
+    aléatoires, directions verticales / quelconques / non normalisées,
+    origines lointaines, rayons ratant tout — tout concordait, sur `death.stl`
+    comme sur `turkish.stl`. **C'est la mesure sur le PIPELINE qui a révélé le
+    défaut** : `step2` passait de **49 ponts détectés à 0**.
+
+    Cause : `ray_bounds` clippe le paramètre `t` à `buffer_dist = 1e-5` avant
+    de construire la boîte du rayon, ce qui **exclut des candidats la face
+    d'où part le rayon**. La narrow phase, elle, la laisserait passer :
+    `step2` décale son origine de 1e-6 sous la face, l'auto-impact tombe à
+    `dot = -1e-6` — exactement le seuil du filtre « vers l'avant » — et le
+    calcul flottant réel donne `-9.999999994736442e-07`, strictement
+    supérieur au seuil. Autrement dit : **c'est le broad phase de trimesh,
+    plus strict que sa propre narrow phase, qui évite l'auto-intersection.**
+
+    > **Leçon, à appliquer à tout portage restant** : une structure
+    > d'accélération n'est « qu'une optimisation » seulement si son critère
+    > est un sur-ensemble STRICT du critère exact. Quand elle est plus
+    > stricte quelque part — ici d'un facteur 10 sur une tolérance —, elle
+    > fait partie du comportement observable et doit être transcrite, pas
+    > améliorée. Et : **des rayons aléatoires ne testent pas les cas que le
+    > pipeline produit réellement.** Aucun des 3 000 ne partait d'une face.
+
+    #### Le mécanisme retenu
+
+    Le BVH remplace **rtree comme INDEX**, pas la **REQUÊTE**. La boîte du
+    rayon reste celle de `ray_bounds`, transcrite à l'identique ; le BVH sert
+    à trouver vite les triangles dont l'AABB la recoupe — exactement ce que
+    faisait `tree.intersection(bounds)`. Les AABB de triangles sont donc
+    **exactes et sans marge**, comme celles indexées par
+    `triangles.bounds_tree`. Le jeu de candidats est identique **par
+    construction**, plus par chance.
+
+    Effet secondaire heureux, mesuré : c'est aussi **plus rapide** que la
+    version fautive, la boîte d'un rayon vertical étant une colonne très fine
+    que le BVH élague bien.
+
+    La narrow phase est une **transcription**, pas un meilleur algorithme :
+    `planes_lines` (ligne infinie, seuil absolu 1e-5), barycentrique par
+    Cramer dans le même ordre d'opérations, appartenance à `±tol.zero=1e-13`,
+    filtre avant à `-1e-6`, dédoublonnage `unique_rows` quantifié à 8
+    décimales (`tol.merge`). Écrire un Möller-Trumbore aurait été plus court
+    et plus rapide — et aurait donné d'autres flottants, donc un oracle
+    inutilisable.
+
+    #### Mesures
+
+    | modèle | faces | trimesh | natif | gain |
+    |---|---:|---:|---:|---:|
+    | `death.stl` | 2 418 | 0,057 s | 0,0015 s | **×38** |
+    | `turkish.stl` | 10 180 | 0,106 s | 0,0018 s | **×60** |
+    | `death_hi-res.stl` | 226 156 | 0,927 s | 0,0042 s | **×221** |
+
+    (1 500 rayons verticaux, impacts **identiques au bit** dans les trois cas.)
+
+    Sur le pipeline, `step2` sur `death.stl` : **0,102 s → 0,023 s**, à
+    `bridges=49 / overhangs=359 / risk` identiques. Le gain absolu reste
+    petit *sur ce modèle* — c'est le piège documenté au point d'inflexion
+    ci-dessus, `step2` ne pesait que 0,1 s — mais il croît avec la densité du
+    maillage, et il débloque le portage de step2/step7.
+
+    **Câblage** : `core.spatial.RayIntersector`, même discipline que `KDTree`
+    (choix figé à la construction). `step1._build_acceleration_structures` la
+    construit, `MeshData.bvh` la porte, step2/step7 l'appellent sans
+    changement. Une option passée au chemin natif **lève** au lieu d'être
+    ignorée en silence.
+
+    **7 tests d'équivalence** (pas 6), dont deux qui n'existeraient pas sans
+    le bug : celui qui verrouille l'exclusion de la face d'origine sur une
+    face plate, et celui qui vérifie que sur une face non plate le natif fait
+    **le même choix que trimesh** — y compris quand trimesh accepte
+    l'auto-impact. L'oracle exige la conformité, pas la propreté.
+
+    ### BILAN CONSOLIDÉ après les pas 1 + 2 + 3 + 4
+
+    | | Python | C++ | gain |
+    |---|---:|---:|---:|
+    | **pipeline complet** | 237,1 s | **43,3 s** | **×5,5** |
+
+    Métrique identique à chaque pas : 0,466578 %, 1085 défauts d'ordre, 0
+    surplomb réel. **326/326 tests verts** dans les deux positions.
+
+    ### Détail des pas 1 + 2 + 3
+
+    | | Python | C++ | gain |
+    |---|---:|---:|---:|
+    | **pipeline complet** | 237,1 s | **51,2 s** | **×4,6** |
+    | step1→8 | 98,5 s | 41,6 s | ×2,4 |
+    | **step9b** | 138,6 s | **9,6 s** | **×14,4** |
+
+    Métrique **identique** à chaque étape : 0,466578 %, 1085 défauts d'ordre,
+    0 surplomb réel. **321/321 tests verts** dans les deux positions de
+    l'interrupteur.
+
+    Le rapport de force s'est inversé : `step9b` ne pèse plus que 19 % du
+    temps, `step1→8` en fait 81 %.
+
+    ### Détail des pas 1 + 2 (quatre configurations d'affilée)
+
+    Les quatre mesures ci-dessous ont tourné **dans la même session**, seule
+    façon d'obtenir des soustractions fiables vu la variance de la machine
+    (voir section suivante). Elles se recoupent : 77,2 = 48,0 + 29,2.
+
+    | | Python | C++ | gain |
+    |---|---:|---:|---:|
+    | **pipeline complet (step1→8 + step9b)** | **237,1 s** | **77,2 s** | **×3,07** |
+    | step1→8 | 98,5 s | 48,0 s | ×2,05 |
+    | step9b | 138,6 s | 29,2 s | **×4,75** |
+
+    Métrique **strictement identique** dans les deux cas : `unsupported_fraction`
+    = 0,466578 %, 1085 défauts d'ordre, 0 surplomb réel.
+
+    **À garder en tête avant de citer ce ×3,07** : il est obtenu avec
+    **1040 lignes de C++** face à ~14 900 lignes de Python encore en place,
+    soit ~7 % du code. Les étapes 1 à 7 et 10 tournent toujours intégralement
+    en Python. C'est le rendement d'un ordre piloté par le profil, pas celui
+    d'un moteur porté — et cela signifie aussi que le gain suivant sera
+    beaucoup plus cher, puisque le temps restant est réparti sur beaucoup plus
+    de code (step1 ~25 s dont 14 s de TetGen déjà natif et incompressible,
+    step4 ~14 s, le reste de step9b).
+
+    **Conséquence pour l'objectif commercial de 10 s** : même en portant
+    parfaitement tout le Python restant, l'ordre de grandeur atteignable à
+    cette résolution est ~25-35 s, dominé par TetGen et l'algèbre creuse.
+    Descendre sous 10 s exigera aussi des changements ALGORITHMIQUES — le
+    facteur de duplication de 7,46 sur l'index et les 690 candidats par
+    requête en sont deux, déjà chiffrés. À dire maintenant, pas à l'arrivée.
+
+    ### Variance de mesure sur cette machine : ~9-11 %
+
+    Deux exécutions de la MÊME configuration Python ont donné 89,7 s puis
+    97,5 s, et 212,9 s puis 237,1 s. **Toute comparaison par soustraction
+    entre runs séparés est donc suspecte** — les configurations à comparer
+    doivent tourner d'affilée, dans les mêmes conditions.
+
+    Piège concret rencontré : une variante « step1→8 seul » codée avec
+    `APEX_USE_CPP=0` restait valable tant que step1→8 était identique dans les
+    deux modes, et est devenue fausse dès le portage de step8. Elle affichait
+    97,5 s pour step1→8 alors que le pipeline C++ COMPLET faisait 76,3 s —
+    une impossibilité qui a révélé le mélange. **Une mesure de référence
+    devient obsolète dès que ce qu'elle mesure change.**
+
+    ### Vérification
+
+    - **331/331 tests verts avec `APEX_USE_CPP=0` ET `=1`** (305 d'origine
+      + 26 d'équivalence, dont 5 pour le k-d tree du pas 5). Mesuré à
+      185,7 s (C++) contre 187,6 s (Python) : les deux positions de
+      l'interrupteur passent la suite, à durée équivalente — le pas 5
+      n'était pas un portage de vitesse (voir sa section).
+    - **Pas 6 (BVH) : 340/340 dans les deux positions** (331 + 9, dont 7
+      d'équivalence pour le BVH lui-même) — 181,7 s (C++) contre 183,6 s
+      (Python), toujours équivalent en durée sur `death.stl` : le gain du
+      pas 6 est diagnostiqué mais pas dominant sur ce modèle (voir sa
+      section, « débloque » plutôt que « accélère massivement » ici).
+    - **Pas 7 (step4) : 351/351 dans les deux positions** (340 + 7
+      d'équivalence pour step4, + 4 sur la réutilisation de la sonde) — 198,8 s (C++) contre 195,5 s (Python). La
+      bit-exactitude du fix de la sonde est prouvée par un A/B **en
+      processus** (`test_probe_is_reused_when_constraints_add_nothing`,
+      `array_equal`), pas par une comparaison de sommes de contrôle : un
+      checksum imprimé à 9 décimales est arrondi, donc incapable de
+      distinguer l'égalité au bit d'un écart à 1e-15.
+    - `tests/test_cpp_equivalence.py` : candidats identiques au
+      Python requête par requête (150 requêtes × 2 marges, avec une garde
+      contre le faux vert où *tout* serait vide des deux côtés), concordance
+      des deux modes, cohérence de `candidates_endpoints` avec
+      `candidates_near` **dans les deux implémentations**, index vide, et
+      non-régression du défaut (interrupteur éteint ⇒ aucun objet natif).
+    - Métrique `step9b` **strictement identique** aux trois configurations.
+      Un portage qui déplacerait la métrique serait un bug, pas un progrès.
+
+    ### Ce que la mesure impose pour la suite — LA PRIORITÉ A BASCULÉ
+
+    step9b ne pèse plus que **23,2 s sur 112,9 s** ; les **89,7 s de
+    step1→8 sont désormais 79 % du temps**, dont `step8` est de loin le plus
+    gros poste. Continuer à optimiser step9b serait suivre le plan au lieu
+    de suivre la mesure — exactement ce que ce fichier reproche partout
+    ailleurs.
+
+    Deux chiffres cadrent le reste du travail sur l'index, et ils ne disent
+    pas la même chose :
+
+    - **facteur de duplication 7,46** — chaque capsule rendue est rencontrée
+      7,46 fois. C'est la limite #27/#30, enfin chiffrée. Les estampilles
+      suppriment le *coût* du dédoublonnage, pas les visites ; seul un BVH
+      (une capsule référencée une seule fois) les supprimerait.
+    - **690,6 candidats uniques par requête** — et ce chiffre-là **ne dépend
+      pas de la structure spatiale** : un BVH parfait rendrait les mêmes 690
+      candidats. C'est un plancher, pas un défaut d'implémentation.
+
+    Conséquence : le levier suivant sur step9b n'est pas un BVH mais
+    **l'arrêt anticipé**. `core/geometry_utils.point_has_support_along_direction`
+    exécute ~15 opérations numpy sur 690 éléments pour ne rendre qu'un
+    **booléen**, 272 868 fois, sans jamais court-circuiter dès le premier
+    appui trouvé. À garder pour quand step8 aura été traité.
+
+    ### Le pas 7 : `step4_field_solver.py` — et LE PORTAGE QUI NE PAYE PAS
+
+    **Résultat principal, contre-intuitif et mesuré : `step4` passe de
+    9,45 s à 4,60 s (×2,05) — et la moitié de ce gain vient de code PYTHON,
+    pas du C++. Le solveur Eigen, seule pièce que l'utilisateur avait
+    explicitement demandé d'inclure, se mesure à ×1,01 : il ne rapporte
+    RIEN.**
+
+    #### Étape 0 — un système résolu DEUX FOIS (fix Python, bit-exact)
+
+    Trouvé en profilant avant d'écrire du C++ : `build_static_system` résout
+    le système une seconde fois **uniquement pour renseigner
+    `UpwardGrowthDiagnostic`**, dont le résidu doit être mesuré sur le champ
+    réellement résolu. Or `main.py` active `enforce_upward_growth=True`, et
+    passe `constraints=None` — donc `solve_with_constraints` re-résout
+    **exactement le même système** : `A` et `b` identiques, vérifié.
+
+    Fix : la sonde est conservée (`FieldSolverStaticSystem.probe_values`) et
+    réutilisée quand les trois conditions sont réunies — une sonde existe,
+    les contraintes ont une contribution strictement nulle (`nnz == 0`,
+    testé et non supposé), et aucun `initial_guess` n'est fourni (le
+    solveur itératif partant d'ailleurs ne rend pas le même vecteur). Le
+    tableau est **copié**, jamais aliasé : `solve_with_constraints` est
+    appelable plusieurs fois sur le même système statique, et une mutation
+    par l'appelant reviendrait sinon dans le résultat suivant.
+
+    **9,45 s → 7,47 s, champ identique AU BIT** (checksum
+    `1257825.311560218` inchangé). Zéro C++.
+
+    > **Pourquoi le faire AVANT le portage, et pas après** : sans ce fix, la
+    > réécriture C++ aurait supprimé le solve redondant au passage et se
+    > serait attribué ses 2,0 s. C'est exactement l'erreur de mesure que ce
+    > fichier documente ailleurs (« une mesure de référence devient obsolète
+    > dès que ce qu'elle mesure change »).
+
+    #### Ce qui a été porté, et ce que ça rapporte
+
+    | poste | avant | après | gain |
+    |---|---:|---:|---:|
+    | `_blend_tet_directions` | 2,35 s | **0,72 s** | **×3,2** |
+    | `_compute_shape_gradients` | 0,36 s | **0,012 s** | **×30** |
+    | solveur CG (Eigen) | 1,83 s | 1,81 s | **×1,01 — RIEN** |
+
+    **`_blend_tet_directions` : le gain est ALGORITHMIQUE, pas linguistique.**
+    Le Python interroge un k-d tree par région avec la totalité des centres
+    de tétraèdres — 22 × 387 978 = **8,5 M de distances** sur `death.stl` @
+    0,8 — et ce k-d tree est **déjà natif depuis le pas 5**. Or la fenêtre de
+    Hann annule toute source au-delà du rayon : mesuré, seules **21,4 %** de
+    ces paires sont dans le rayon et **69,2 % sont écartables par un simple
+    test d'AABB élargie**. Transcrire la fonction telle quelle n'aurait donc
+    rien donné — c'est mot pour mot la leçon du pas 3.
+
+    L'élagage est **exact, pas heuristique** : un tétraèdre hors de la boîte
+    élargie est à plus de `radius` sur au moins un axe, donc sa fenêtre est
+    nulle et son poids aussi. Le seul usage restant d'une distance hors
+    rayon est le repli `nearest_source`, emprunté par les tétraèdres
+    qu'aucune source n'atteint : ceux-là sont repris dans une **seconde
+    passe sans élagage** qui retrouve l'argmin exact. Un test dédié force ce
+    chemin avec un rayon de 1e-3, où presque tous les tétraèdres y tombent.
+
+    #### LE RÉSULTAT NÉGATIF : Eigen ne rapporte rien
+
+    L'utilisateur avait choisi « tout porter y compris Eigen, accepter la
+    perte de bit-exactitude » sur la foi d'une estimation de ~0,5-0,8 s de
+    gain, tirée du surcoût Python visible au profil (0,39 s dans la boucle
+    `cg` de scipy, plus le dispatch `LinearOperator`).
+
+    **La mesure dit ×1,01** : 1,833 s (scipy) contre 1,812 s (Eigen), même
+    algorithme, même préconditionneur diagonal, même critère d'arrêt, 978
+    itérations, résidus 9,4e-9 et 9,7e-9. La raison est simple une fois
+    mesurée : le coût est **dominé par le produit matrice-vecteur creux**
+    (1,42 s sur 1,90 s), et `csr_matvec` de scipy est déjà du C aussi rapide
+    que celui d'Eigen. Il n'y avait pas de surcoût Python à retirer.
+
+    **Conséquence actée : le solveur Eigen est construit, testé et mesuré,
+    mais N'EST PAS CÂBLÉ.** `_solve_linear_system` continue d'appeler scipy.
+    Le câbler coûterait la bit-exactitude — donc la garantie que la métrique
+    step9b ne bouge pas, invariant tenu sur les pas 1 à 6 — pour un gain
+    nul. Même discipline que partout ailleurs dans ce fichier : un mécanisme
+    qui ne démontre pas de gain reste disponible, jamais imposé.
+
+    > **Leçon** : le profil disait « 0,39 s de Python dans `cg` ». J'en ai
+    > déduit un gain, et c'était un raisonnement, pas une mesure. Le temps
+    > Python d'une boucle n'est récupérable que s'il n'est pas déjà masqué
+    > par le calcul natif qu'elle pilote.
+
+    #### Équivalence : la tolérance remplace le bit, et c'est déclaré
+
+    Premier portage du projet dont l'équivalence n'est pas bit-à-bit. Deux
+    causes, mesurées séparément :
+    - `compute_shape_gradients` inverse une 3×3 **par la formule des
+      cofacteurs**, là où numpy appelle LAPACK (LU à pivot partiel) : même
+      inverse, autres arrondis. Écart **relatif** 7,2e-14 — la précision
+      machine. (L'écart absolu de 6,3e-9 n'était pas interprétable : les
+      gradients montent à 86 703 sur maillage fin.)
+    - le solveur Eigen (non câblé) : ~2,6e-9 relatif.
+
+    Le checksum du champ passe de `1257825.311560218` à
+    `1257825.311525613` — 8ᵉ chiffre significatif, cohérent avec 1e-14
+    propagé à travers un CG résolu à 1e-8. Les tests d'équivalence
+    **déclarent** donc une tolérance, chacune justifiée par sa mesure, au
+    lieu d'un `array_equal`.
+
+    #### Périmètre
+
+    Le **chemin par défaut** (celui que `main.py` exerce). Les mécanismes
+    opt-in — directions géodésiques (#52), rétroaction de surplomb (#53),
+    lissage vectoriel itératif (#55), modulation du lissage, diffusion des
+    directions — restent **intégralement en Python**, désactivés par défaut,
+    donc jamais exécutés : les porter figerait un contrat pour du code que
+    personne n'appelle.
+
+    #### Seconde passe : assemblage CSR direct, et un TROISIÈME calcul redondant
+
+    **4,66 s → 4,04 s.** Deux corrections, encore une fois moitié
+    algorithmiques :
+
+    **1. Assemblage direct en CSR (×2,04 sur les deux matrices).** Le chemin
+    scipy assemble par `coo_matrix((data,(rows,cols))).tocsr()` : 16 entrées
+    par tétraèdre, **6,2 M** sur `death.stl` @ 0,8, à trier puis dédupliquer
+    — et il le refait **intégralement pour chacune des deux matrices**,
+    alors qu'elles ont *exactement* le même motif de sparsité (celui de
+    l'adjacence nœud-nœud, qui ne dépend que de la topologie, jamais des
+    poids). Le motif est désormais construit **une fois** (`_FemPattern`) et
+    chaque matrice n'a plus qu'à accumuler dedans par recherche
+    dichotomique. 0,971 s → 0,476 s, coefficients à 3,9e-16 relatif, second
+    membre **exact**.
+
+    Le motif est **passé explicitement** de `build_static_system` aux deux
+    assemblages, jamais mémorisé sur le `TetMesh` : un cache invisible
+    survivrait à une modification de `tetrahedra` et produirait une matrice
+    silencieusement fausse.
+
+    **2. `tet_face_topology` calculé DEUX FOIS** (0,2 s chacun) :
+    `_map_boundary_faces_to_surface` en gardait les faces frontière et
+    jetait les paires internes, `_build_tet_tet_adjacency` faisait
+    l'inverse — même passe, chacun jetant la moitié du résultat. La première
+    rend maintenant les paires en sous-produit ; la seconde les accepte.
+    Troisième calcul redondant trouvé dans step4 en deux passes de profil.
+
+    **Limite assumée** : le motif natif du terme de direction est un
+    **sur-ensemble** (il couvre tous les tétraèdres, là où scipy ne crée
+    d'entrées que pour les actifs). Les entrées surnuméraires valent
+    exactement zéro et ne coûtent rien en pratique, `build_static_system`
+    additionnant ce terme à la rigidité dont le motif est déjà complet. Le
+    test d'équivalence vérifie donc l'égalité **mathématique**, pas celle
+    des motifs — et le documente plutôt que de la masquer.
+
+    #### Bilan step4 et ce qui reste
+
+    | étape | temps | nature du gain |
+    |---|---:|---|
+    | départ | 9,45 s | — |
+    | fix du solve redondant | 7,47 s | **Python**, bit-exact |
+    | blend + gradients de forme | 4,60 s | C++ (blend : algorithmique) |
+    | assemblage CSR + topologie partagée | **4,04 s** | C++ + algorithmique |
+
+    **×2,34 au total, dont une part importante sans C++.** Trois calculs
+    redondants trouvés en profilant — le solve, la topologie, le motif de
+    sparsité —, tous invisibles à la lecture du code.
+
+    **Reste** : le CG à **1,91 s, soit 48 % de step4**, et il est hors de
+    portée — Eigen y est mesuré à ×1,01 (voir ci-dessus). Descendre plus bas
+    exigerait de changer le PRÉCONDITIONNEUR (le Jacobi actuel laisse 978
+    itérations) ou la formulation, c'est-à-dire un changement algorithmique à
+    mesurer sur la métrique step9b, pas un portage.
+
+    **Eigen 3.4.0** est vendoré dans `cpp/third_party/eigen/` (header-only,
+    MPL-2.0 vérifiée à la source) et intégré au build.
+
+    ### Le pas 8 : SAT triangle-triangle (`step1_ingest.py`)
+
+    Après le pas 7, la question posée était « on porte tout step1 ». La
+    lecture du fichier (2144 lignes) a montré que ce n'est PAS un bon
+    candidat au sens littéral : ~90 % du fichier appelle directement
+    trimesh/pymeshfix (`slice_plane`, opérations booléennes, triangulation
+    de polygones, `MeshFix.repair`) — de la logique de réparation de
+    maillage sur des bibliothèques tierces, ni portable à coût raisonnable
+    ni souhaitable à porter. `_build_tet_adjacency` (l'adjacence
+    nœud-nœud du TetMesh) est déjà natif depuis le pas 4
+    (`tet_unique_edges`). Le seul point chaud réel restant, identifié par
+    lecture et non par profil (le chemin nominal `death.stl` ne le
+    déclenche jamais), est le test SAT triangle-triangle
+    (`_triangles_cross`) et la boucle qui l'appelle sur toutes les paires
+    candidates (`_find_self_intersecting_faces`) — utilisés uniquement sur
+    le chemin de réparation d'auto-intersections (déclenché sur
+    `turkish.stl` : 50 faces auto-intersectantes détectées par ce test).
+
+    **Portage** : `cpp/include/apex/mesh_repair.hpp` +
+    `cpp/src/core/mesh_repair.cpp`. Deux fonctions exposées :
+    - `triangles_cross(t0, t1)` — transcription bit-exacte du théorème de
+      l'axe séparateur (11 axes : 2 normales de face + 9 produits croisés
+      arête×arête), même tolérance `_COPLANAR_EPS = 1e-9`, mêmes axes de
+      norme `< 1e-12` ignorés (arêtes parallèles ou face dégénérée).
+      Bit-exact par construction : mêmes opérations flottantes, même ordre.
+    - `find_self_intersecting_faces(triangles, faces)` — broad-phase +
+      narrow-phase complet, transcription de `_find_self_intersecting_faces`
+      (exclusion des paires de triangles partageant un sommet, chaque paire
+      `(i,j)` avec `j>i` visitée une seule fois).
+
+    **Le broad-phase natif N'A PAS besoin d'être identique à `bounds_tree`
+    (rtree) côté Python**, contrairement au BVH de rayons du pas 6. Un BVH
+    maison sur AABB exactes (même structure que `TriangleBVH`, réutilisée
+    en interne) suffit : le narrow-phase (SAT) est déterministe et
+    bit-exact des deux côtés, donc tout sur-ensemble conservateur de
+    candidats donne le même résultat final — contrairement au cas des
+    rayons, où le broad-phase de trimesh s'est révélé PLUS STRICT que sa
+    propre narrow-phase et faisait donc partie du comportement observable
+    (voir pas 6). Ici, aucune structure d'index n'est un comportement
+    observable : seul le test SAT compte.
+
+    `_triangles_cross` (dans `step1_ingest.py`) dispatche vers
+    `apex_core.triangles_cross` quand `APEX_USE_CPP=1`, bénéficiant du même
+    coup `_fill_loop_min_weight` (triangulation Klincsek du rebouchage, qui
+    appelle `_triangles_cross` en boucle interne) — cette dernière fonction
+    elle-même N'EST PAS portée (état Python riche : cache mémoire, DP
+    O(n³)), seule la primitive SAT qu'elle appelle l'est.
+
+    **6 tests d'équivalence** (pas 8) : paire qui se croise réellement,
+    contact simple sans intersection (bord commun coplanaire, doit rester
+    `False`), balayage aléatoire de 400 paires avec garde anti-faux-vert
+    (au moins une paire croisée doit être tirée), maillage synthétique avec
+    une vraie auto-intersection CSG, maillage propre (ensemble vide des
+    deux côtés), et non-régression du branchement dans
+    `step1_ingest._find_self_intersecting_faces` elle-même.
+
+    **357/357 tests dans les deux positions de l'interrupteur** (351 + 6) —
+    192,57 s (Python) contre 184,09 s (C++) sur la suite complète. Gain non
+    mesuré sur le pipeline `death.stl` (chemin nominal, ce code n'y est
+    jamais exercé) — conforme à l'attente : ce portage vise `turkish.stl`
+    et tout modèle qui déclenche la cascade de réparation, pas le cas
+    déjà propre.
+
+    ### Le pas 9 : segments d'intersection + winding number (`_self_intersection_resolve.py`)
+
+    Reprofilage du pipeline complet (`main.run_pipeline`, step1→step8,
+    `death.stl`, résolution 0.8, C++ actif pas 1-8) après le pas 8 :
+    **40,4 s au total**, et `_finish_geometric_resolution` /
+    `resolve_self_intersections` en 2ᵉ position (~13,5 s) — le plus gros
+    poste Python restant après TetGen (incompressible, isolé par design).
+    Le fichier source (953 lignes) est majoritairement du calcul numpy
+    maison (102 refs `np.` contre 9 `trimesh.`) — profil **inverse** de
+    `step1_ingest.py` (pas 8), donc un bon candidat contrairement à ce
+    dernier.
+
+    **Portées** (`cpp/include/apex/mesh_intersect.hpp` +
+    `cpp/src/core/mesh_intersect.cpp`) : `triangle_triangle_segment`
+    (15856 appels mesurés, 2,59 s cumulées), `generalized_winding_number`
+    (formule fermée, 0,92 s), et le broad+narrow-phase de
+    `_intersection_segments` (3,22 s). `_subdivide_face`,
+    `_split_keyhole_polygon`, `_weld_line_endpoints`,
+    `_close_small_boundary_loops` **NE SONT PAS portées** : dépendance
+    forte à shapely (`polygonize`, `unary_union`, `Polygon`) et networkx,
+    beaucoup d'état/cas particuliers — même diagnostic que la partie non
+    portable de `step1_ingest.py`.
+
+    **`Triangle3` déplacé dans `types.hpp`** (partagé entre
+    `mesh_repair.hpp` et `mesh_intersect.hpp`), et le BVH interne sur AABB
+    de triangles factorisé dans `apex/internal/triangle_aabb_bvh.hpp`
+    (partagé entre `mesh_repair.cpp` et `mesh_intersect.cpp`, structure
+    purement interne, aucun contrat d'équivalence).
+
+    #### Équivalence : TOLÉRANCE EXPLICITE — deuxième portage du projet après step4
+
+    `triangle_triangle_segment` résout un système 3×3
+    (`np.linalg.solve`, LAPACK) pour localiser le point de référence sur la
+    droite d'intersection des deux plans porteurs. Le pas 7 avait déjà
+    mesuré qu'une inversion 3×3 par cofacteurs (la seule alternative sans
+    nouvelle dépendance) diverge de LAPACK à ~1e-14 relatif — jamais au
+    bit. **Décision explicite de l'utilisateur** (posée avant d'écrire le
+    code, par analogie avec le pas 7) : cofacteurs + tolérance documentée,
+    plutôt que de renoncer à ce portage ou de lier une dépendance
+    supplémentaire pour un seul solve 3×3. Mesuré : écart max **9,77e-15**
+    sur 562 paires de triangles réellement croisées (2000 tirées) — trois
+    ordres de grandeur sous les tolérances propres du module (`_EPS=1e-10`,
+    snap à `1e-9 * scale`).
+
+    `generalized_winding_number` est une formule fermée sans solve, donc
+    **quasi**-bit-exacte : écart mesuré 1,1e-15 sur 300 points × 1280
+    triangles — un ULP de bruit dû à la réduction `np.sum` de numpy
+    (potentiellement pairwise), pas à un solve. Documenté comme tel plutôt
+    que faussement annoncé bit-exact (erreur de rédaction initiale du
+    header, corrigée après la première mesure empirique).
+
+    #### LA VRAIE LIMITE, MESURÉE ET ASSUMÉE : l'ordre des segments par face n'est pas reproductible
+
+    Contrairement au SAT du pas 8 (qui ne rend qu'un booléen, insensible à
+    l'ordre des candidats), ici **l'ordre compte** : `_subdivide_face`
+    (non portée) itère `per_face[i]` dans l'ordre reçu, et cet ordre
+    influence quels points de la chaîne de découpe sont vus en premier,
+    donc la triangulation exacte produite.
+
+    Le Python reçoit cet ordre de `tree.intersection(query)`
+    (rtree/libspatialindex). **Vérifié, pas supposé** : cet ordre n'est
+    **jamais** trié par indice de triangle (mesuré sur les 10180 requêtes
+    de `turkish.stl` — 100% non triées) — c'est un ordre spatial interne à
+    la structure R-tree, non reproductible sans réimplémenter
+    libspatialindex. Un tri par indice croissant côté C++ a été tenté (par
+    hypothèse erronée que rtree triait par indice) : ça a réduit mais pas
+    éliminé la divergence — conservé malgré tout (rapproche sans coût),
+    mais documenté pour ce qu'il est : une approximation, pas une
+    transcription.
+
+    **Mesure bout-en-bout** sur un motif synthétique reproduisant
+    `turkish.stl` (deux nervures qui se traversent) — seul appelant réel de
+    `_intersection_segments`, via `resolve_self_intersections` :
+
+    | | Python (rtree) | C++ (BVH maison) |
+    |---|---:|---:|
+    | vitesse | 29,98 s | **2,60 s (×11,5)** |
+    | faces en sortie | 10270 | 10264 |
+    | volume | 49270,855 | 49270,298 (**1,13e-5 relatif**) |
+    | `euler_number` | −34 | **−35** |
+
+    L'écart d'`euler_number` est une **vraie divergence topologique
+    mineure** (pas seulement du bruit flottant) : signature d'une boucle de
+    bord fermée différemment par `_close_small_boundary_loops` en aval (le
+    fichier documente lui-même ce mécanisme comme sensible à l'ordre —
+    "convergence en 2 passes", "3 boucles de 3 arêtes").
+
+    **Décision explicite de l'utilisateur, posée via AskUserQuestion avant
+    d'agir** (trois options : accepter et documenter / ne porter que les
+    deux primitives bit-exactes / chercher à reproduire l'ordre rtree) :
+    garder le portage complet. Le gain (×11,5, sur le plus gros poste
+    Python restant après le pas 8) l'emporte sur une divergence mesurée
+    comme mineure, sur un mécanisme déjà **best-effort** par construction
+    (`resolve_self_intersections` rend `None` dans de nombreux cas selon sa
+    propre docstring — jamais censé produire une réponse canonique unique).
+    Chercher à reproduire l'ordre exact de libspatialindex a été explicitement
+    écarté comme hors de portée raisonnable pour un écart déjà mineur.
+
+    #### Vérification
+
+    5 tests d'équivalence (pas 9) : balayage aléatoire de
+    `triangle_triangle_segment` (500 paires, garde anti-faux-vert sur le
+    nombre de paires croisées, tolérance 1e-9), cas limites explicites
+    (triangle dégénéré, plans parallèles), `generalized_winding_number`
+    (tolérance 1e-10, garde sur un point clairement intérieur ET un
+    clairement extérieur), `find_intersection_segments` (mêmes faces
+    affectées, même nombre de segments par face — pas le même ordre),
+    et `resolve_self_intersections` bout-en-bout (tolérance de volume
+    relative 1e-3, `is_watertight` identique).
+
+    **362/362 tests dans les deux positions de l'interrupteur** (357 + 5) —
+    195,02 s (Python) contre 168,82 s (C++) sur la suite complète.
+
+    ### Le pas 10 : interpolation inverse-distance (`step6_toolpath2d.py`)
+
+    **DERNIER portage guidé par le profil.** Reprofilage après le pas 9
+    (step1→step8, `death.stl`, résolution 0.8, C++ actif) : **43,1 s
+    profilées dont 22,4 s d'attente TetGen (52 %)**, et hors TetGen **plus
+    aucun poste Python isolé ne dépasse 2,1 s**.
+    `_interpolate_out_of_plane` était ce dernier poste (2,10 s de temps
+    propre, 2853 appels) — pondération inverse-distance `1/d^power` de
+    l'offset hors-plan, dont le coût venait de la matrice de distances
+    `(K,M)` que numpy matérialise en entier.
+
+    Porté dans `cpp/include/apex/interpolate.hpp` +
+    `cpp/src/core/interpolate.cpp` : une seule passe par requête (plus
+    proche voisin, détection de coïncidence et les deux accumulations
+    comprises), sans jamais matérialiser la matrice. **×2,8 mesuré** sur
+    une taille réaliste (400 requêtes × 300 sources, 300 répétitions :
+    1,64 s → 0,58 s).
+
+    **Équivalence : tolérance serrée, pas le bit — mesuré, pas supposé.**
+    Ni solve ni BLAS ici (contrairement aux pas 7 et 9), la transcription
+    est terme à terme ; mais les deux réductions (`weights.sum(axis=1)`,
+    `(weights * offsets).sum(axis=1)`) sont accumulées séquentiellement là
+    où numpy peut sommer par paires. Mesure sur 200 tirages aléatoires
+    (tailles et coïncidences variées) : écart max **8,88e-16**, et
+    **36/200 seulement bit-identiques** — même phénomène qu'au pas 9. Un
+    ULP de bruit, sans conséquence sur un offset en millimètres dont les
+    seuils d'usage vont de 1e-9 (`_COINCIDENT_EPS`) à 1e-3.
+
+    Les trois cas limites du Python sont transcrits tels quels car ils ne
+    sont pas cosmétiques : coïncidence (`0**-power` exploserait → valeur
+    source exacte), `total <= 0` (sous-débordement sur de très grandes
+    distances → repli sur le plus proche), et `argmin` rendant le **premier**
+    minimum en cas d'égalité (comparaison stricte).
+
+    3 tests d'équivalence (pas 10), dont une garde anti-faux-vert vérifiant
+    qu'au moins un cas coïncident a bien été tiré.
+
+    **365/365 tests dans les deux positions de l'interrupteur** (362 + 3) —
+    185,71 s (Python) contre 171,35 s (C++) sur la suite complète.
+
+    ### CE QUI RESTE À PORTER — le profil ne guide plus
+
+    Après le pas 10, le paysage mesuré sur `death.stl` @ 0.8 :
+
+    | poste | temps propre | nature |
+    |---|---:|---|
+    | **TetGen** (`WaitForSingleObject`) | **22,40 s** | sous-processus, **plancher dur** |
+    | `argsort` numpy | 1,31 s | déjà natif |
+    | `csr_matvec` (CG scipy) | 1,21 s | déjà natif, Eigen mesuré ×1,01 (pas 7) |
+    | `ufunc.reduce` | 0,95 s | déjà natif |
+    | `apex_core.resolve_axis_angles_batch` | 0,86 s | **déjà C++** |
+    | `step8::_smooth_all_axes` | 0,80 s | Python |
+    | `core::point_in_polygon_2d` | 0,73 s | Python |
+    | `np.linalg.norm` (327 k appels) | 0,72 s | dispatch numpy diffus |
+
+    **TetGen fait à lui seul 52 % du temps** et ne bougera pas. Ce qui reste
+    en Python est éparpillé en dizaines de postes à 0,1-0,8 s : le portage
+    doit désormais être **systématique** (étapes entières : step5, step6,
+    step7), plus guidé par le profil. C'est le même « point d'inflexion »
+    que celui documenté après le pas 4, mais cette fois il n'y a plus de
+    grappe à viser du tout.
+
+    **Plafond, à dire maintenant plutôt qu'à l'arrivée** : même en portant
+    parfaitement tout le Python restant, le plancher sur ce modèle à cette
+    résolution est ~25 s (TetGen + algèbre creuse). Descendre plus bas
+    exige de la **parallélisation** (plafond calculé ~18,5 s sur 8 cœurs,
+    voir la section dédiée) ou un changement algorithmique — pas du
+    portage.
+
+    ### Le pas 7 (préparatifs, conservés pour mémoire) : `step4_field_solver.py`
+
+    **Décision de l'utilisateur : porter step4 — assemblage FEM ET
+    résolution — EN UN SEUL BLOC, avec Eigen dès le départ.** Pas d'étape
+    intermédiaire qui assemblerait en C++ puis repasserait par scipy pour
+    résoudre. Choix délibérément à contre-courant du reste du plan (les pas
+    1-6 visaient chacun le plus petit incrément mesurable) : c'est le
+    morceau le plus dur du pipeline restant — 2522 lignes, 38 fonctions,
+    plusieurs mécanismes opt-in (rétroaction de surplomb #53, directions
+    géodésiques #52, lissage vectoriel itératif #55) — et l'utilisateur a
+    choisi de l'attaquer directement plutôt que par ses bords faciles
+    (`step2`, 318 lignes, aurait été le choix « petit pas »).
+
+    **RENDEZ-VOUS EXPLICITE AVANT D'ÉCRIRE LE PREMIER `.cpp` DE STEP4** :
+    l'utilisateur veut être notifié (via `AskUserQuestion`) au moment où
+    l'implémentation réelle commence, pour pouvoir charger les gros modèles
+    (`death_hi-res.stl`, `turkish.stl`) et un effort de raisonnement maximal
+    à ce moment précis plutôt que pendant la préparation. **Ne pas
+    commencer à écrire `step4.cpp`/`kinematics`-like code pour step4 sans
+    reposer cette question d'abord**, même si tout ce qui suit ici est prêt.
+
+    #### Préparatifs déjà faits (ceux-ci NE nécessitaient PAS ce rendez-vous)
+
+    - **Eigen 3.4.0 vendoré** dans `cpp/third_party/eigen/` (header-only,
+      dossier `Eigen/` + `COPYING.MPL2` + `COPYING.README` seulement — pas
+      le dépôt complet : docs/tests/lapack/blas non copiés, 6,7 Mo). Licence
+      **vérifiée à la source** (`COPYING.MPL2`), cohérente avec la pile déjà
+      actée dans la limite ci-dessous. PAS ENCORE intégré à
+      `cpp/CMakeLists.txt` — volontairement, pour ne pas figer de dépendance
+      de build avant que le code qui l'utilise existe (même discipline que
+      `types.hpp` réduit au minimum aux pas précédents).
+    - **Fumée de compilation validée** : un programme minimal
+      (`Eigen::SparseMatrix` + triplets + `SimplicialLDLT`) compile sous
+      MSVC 19.44 avec `/std:c++20 /O2` et résout correctement un système 3×3
+      de test — vérifié par exécution, pas supposé. Confirme que le
+      vendoring est utilisable avant d'investir dans l'assemblage réel.
+    - **Aucun contrat `types.hpp` figé pour step4** : le principe déjà
+      écrit dans `cpp/include/apex/types.hpp` (« ne pas transcrire de
+      dataclass avant d'avoir porté le code qui la consomme ») reste
+      respecté. Les dataclasses à transcrire (probablement `TetMesh`,
+      `MeshData` en lecture, `OverhangMap`, `RegionDependencyGraph`,
+      `ScalarField`, `Constraint`, plus les diagnostics optionnels
+      `UpwardGrowthDiagnostic`/`SupportFeedbackDiagnostic`/
+      `SmoothnessModulationDiagnostic`) restent à arrêter précisément une
+      fois l'implémentation réellement commencée.
+
+    #### Ce qui reste à décider AU moment du rendez-vous, pas avant
+
+    - Périmètre v1 exact : `build_static_system` + `solve_with_constraints`
+      + `run` au minimum ; les mécanismes opt-in (limites #52/#53/#55)
+      entrent-ils dans le premier portage ou restent-ils Python le temps
+      d'un second passage ?
+    - Solveur Eigen à utiliser : `SimplicialLDLT`/`SparseLU` en direct
+      (équivalent de `spsolve`) et `ConjugateGradient` préconditionné
+      (équivalent du CG+ILU actuel, `direct_solve_node_threshold` comme
+      bascule) — à confirmer contre le comportement exact de
+      `_solve_linear_system`.
+    - Stratégie d'équivalence : contrairement aux pas 1-6, un solveur creux
+      itératif (CG) ne garantit PAS un résultat bit-identique à scipy même à
+      code équivalent (ordre de réduction flottante différent selon
+      l'implémentation). L'oracle devra donc probablement basculer d'une
+      comparaison bit-exacte à une tolérance numérique explicite pour cette
+      seule étape — à trancher et documenter avant d'écrire les tests,
+      pas après.
+
+    ### LICENCES — DÉCISION PRISE : AGPL ASSUMÉE, TetGen CONSERVÉ
+
+    **Décision de l'utilisateur, actée : le logiciel sera 100 % gratuit et
+    open source, pour tous et pour toujours ; seule l'imprimante associée est
+    vendue. Dans ce cadre, TetGen (AGPL v3) et pymeshfix (AGPL v3) sont
+    CONSERVÉS.**
+
+    **Clarification ajoutée après une confusion en session (à ne pas
+    reproduire) : cette décision n'exclut PAS MIT/BSD/GPL-3.0 — au
+    contraire, elle les inclut explicitement.** Le paragraphe plus bas
+    (« Ce que le portage avait rendu visible ») mentionne une « pile
+    permissive » (Eigen, nanoflann, Clipper2, Geogram, manifold3d) : c'est un
+    inventaire de PRÉPARATIFS antérieurs à la décision ci-dessus, choisis
+    parce qu'ils sont permissifs et donc sans risque quel que soit l'angle
+    retenu ensuite — ce n'est PAS un plafond au-delà duquel une licence
+    deviendrait inacceptable. GPL-3.0 et MIT sont toutes deux compatibles
+    avec « gratuiciel pour tous et pour toujours » et avec AGPL (déjà
+    acceptée pour TetGen/pymeshfix) : ne pas réintroduire un critère
+    « permissif uniquement » qui n'a jamais été la décision actée ici.
+
+    Le raisonnement, à ne pas réouvrir sans raison nouvelle :
+
+    - **L'AGPL n'interdit pas l'usage commercial.** Confusion courante :
+      « libre » y désigne la liberté, pas la gratuité. Vendre du matériel
+      accompagné d'un logiciel AGPL est le schéma standard du secteur —
+      **PrusaSlicer, Bambu Studio et OrcaSlicer sont tous sous AGPL-3.0**, et
+      les deux premiers sont édités par des fabricants qui vendent des
+      imprimantes. Le critère n'est pas « est-ce commercial » mais « le code
+      source reste-t-il disponible sous la même licence ».
+    - **AGPLv3 et GPLv3 sont compatibles** (chacune a un article 13 autorisant
+      la combinaison). Le code du projet peut donc être GPL-3.0 ; l'ensemble
+      distribué traîne alors la clause réseau de l'AGPL, **inerte pour un
+      logiciel de bureau** (elle ne se déclenche que sur une interaction à
+      travers un réseau).
+    - **Séparation à distance de bras, déjà en place par accident heureux** :
+      `pipeline/_tetrahedralize_worker.py` est un exécutable SÉPARÉ recevant
+      deux chemins de fichiers sur `sys.argv`. Selon les critères de la FSF,
+      communiquer par arguments de ligne de commande et fichiers indique
+      normalement des programmes distincts — au contraire du partage d'un
+      espace d'adressage. Cette architecture existe pour isoler les segfaults
+      de TetGen (limite #35) et se trouve avoir cette conséquence juridique
+      par effet de bord. Terrain juridiquement CONTESTÉ : ne pas concevoir
+      autour de cet argument sans avis professionnel.
+
+    **Conséquences directes sur le plan de portage, toutes des simplifications :**
+
+    - le spike fTetWild est **abandonné** ;
+    - le découplage de `step5` est **abandonné** — et avec lui le risque
+      d'erreur de surface de ~0,06 mm identifié ci-dessous ;
+    - `add_hole` et `add_region`, les deux mécanismes mesurés dont dépend
+      step1 (limites #7 et #36/#48), sont **préservés tels quels** ;
+    - la géométrie reste **identique au bit près** ;
+    - il n'existe donc **aucun endroit du portage qui déplace la métrique**.
+
+    **RÈGLE D'ARCHITECTURE QUI EN DÉCOULE, à respecter au portage de step1 :
+    TetGen ne doit JAMAIS être lié dans `apex_core`.** Il doit rester dans un
+    exécutable dédié (`apex_tetgen_worker`), invoqué en sous-processus avec des
+    chemins de fichiers. Le lier détruirait d'un coup les DEUX protections :
+    l'isolation contre ses segfaults reproductibles, et la séparation
+    « programmes distincts » qui laisse le choix de licence ouvert.
+
+    ### Ce que le portage avait rendu visible (conservé pour mémoire)
+
+    Vérifié dans le venv, pas supposé : **TetGen est AGPL v3**
+    (`.venv/.../tetgen-0.8.4.dist-info/licenses/src/tetgen-license` ;
+    licence commerciale payante disponible auprès du WIAS Berlin), et
+    **pymeshfix également**. Le wrapper PyPI `tetgen` est MIT mais *embarque*
+    TetGen sous AGPL — la licence du wrapper ne change rien à celle du
+    moteur. **Cette contrainte existe déjà aujourd'hui**, indépendamment du
+    portage ; celui-ci ne fait que forcer la décision, puisqu'il faut de
+    toute façon choisir le tétraédriseur à lier.
+
+    Pile permissive retenue pour la suite (licences vérifiées à la source) :
+    Eigen (MPL-2.0), nanoflann (BSD-2), Clipper2 (BSL-1.0), Geogram (BSD-3),
+    manifold3d (Apache-2.0). Remplacements : **pymeshfix → manifold3d**
+    (déjà une dépendance du projet, auto-union pour résoudre les
+    auto-intersections) ; **TetGen → à trancher par un spike mesuré** entre
+    Geogram construit sans TetGen et fTetWild (MPL-2.0, mais tire GMP en
+    LGPL-3 et peut lier TetGen via `igl::tetgen` — les deux à auditer).
+
+    > **Le changement de tétraédriseur est le SEUL endroit du portage où
+    > l'équivalence bit-à-bit est impossible** : un autre mailleur donne un
+    > autre maillage, donc un autre champ, donc d'autres couches, donc une
+    > autre métrique. Il doit être traité comme un changement
+    > ALGORITHMIQUE, mesuré sur les quatre modèles, **isolé** du reste du
+    > portage — sinon un bug de portage et un effet du mailleur seront
+    > indiscernables.
+
+57. **Trois défauts de l'étape 6 corrigés (2026-09-26), présents depuis
+    l'origine dans TOUT Apex — trouvés en faisant passer les couches de la
+    méthode Bird par l'étape 6 (`research/S4_Slicer/bird_slice_deformed.py`,
+    hors dépôt). La
+    métrique step9b de référence (0,466578 % sur `death.stl`, limite #56)
+    est donc OBSOLÈTE : les trajectoires de tous les modèles ont changé.
+    À remesurer avant toute comparaison.**
+
+    1. **Espacement du remplissage dérivé de la taille de la couche.**
+       `_generate_infill` calculait `diagonal / density * 0,05` au lieu de
+       `nozzle_width / density` : une couche de 35 mm à 20 % recevait une
+       ligne tous les 8,75 mm au lieu de 2 mm, et plus une couche était
+       grande, plus elle était creuse (mesuré : 43 mm de remplissage au lieu
+       d'environ 160 sur une couche de 424 mm²). Désormais
+       `nozzle_width / min(density, 1)`, plafonné à 5 000 lignes par couche.
+    2. **Les trous ne recevaient aucune paroi.** `_offset_walls` ne traçait
+       que le bord extérieur de chaque offset, et seul le contour extérieur
+       d'origine était ajouté : ni le contour d'un trou, ni les parois qui
+       l'entourent n'existaient. Le remplissage butait contre un bord jamais
+       déposé. Le test existant vérifiait « rien DANS la cavité », jamais
+       « des parois AUTOUR ».
+    3. **Morceaux secondaires abandonnés.** Quand un offset coupait une zone
+       en plusieurs morceaux, `_largest_polygon` ne gardait que le plus
+       grand : les autres perdaient parois intérieures et remplissage
+       (99 couches du Benchy Bird, 561 mm²). `_largest_polygon` est
+       supprimée ; chaque morceau non dégénéré garde ses parois, et la
+       frontière du remplissage est l'union des morceaux du niveau le plus
+       profond.
+
+    Vérifié sur les couches Bird du Benchy : remplissage mesuré / attendu
+    0,27 → 1,26 en médiane, 153/153 morceaux avec trajectoire, 149/149 trous
+    bordés. 5 tests ajoutés (`tests/test_step6_toolpath2d.py`), dont les deux
+    tests de parois contrôlés comme ÉCHOUANT avec l'ancien code. Le test des
+    cavités vérifie désormais « strictement à l'intérieur » (le contour d'un
+    trou est tracé SUR son bord).
+
+    **Suite, même jour — motifs de remplissage.** Deux défauts de plus :
+    `infill_pattern` était reçu et **jamais lu** (GRID donnait des lignes
+    simples), et l'angle de balayage valait 0 à TOUTES les couches (lignes
+    empilées sans jamais se croiser). Nouveau motif par défaut, demandé par
+    l'utilisateur : `InfillPattern.CROSSED_ZIGZAG` — lignes croisées-alternées,
+    un zigzag continu par zone, selon l'axe u une couche sur deux et selon v
+    l'autre. Trois points de conception, chacun mesuré ou testé :
+    - **parité sur le RANG de l'isovaleur**, pas sur la position dans la
+      liste : ce sont les couches EMPILÉES (isovaleurs consécutives) qui
+      doivent se croiser, et l'ordre en arbre peut intercaler d'autres
+      branches. Vérifié sur le Benchy Bird : 199/199 couches conformes ;
+    - **raccords qui SUIVENT LE BORD** (`_boundary_connector`) : un raccord
+      droit sortait légèrement des bords irréguliers issus du maillage et
+      était refusé presque à chaque ligne (médiane : 1 ligne par zigzag).
+      Après : 89 % de la longueur balayée dans des zigzags d'au moins 3 lignes ;
+    - **zone décalée d'une demi-buse** : le polygone reçu est celui de la paroi
+      la plus intérieure, dont le bord EST l'axe de la paroi — des raccords le
+      suivant auraient redéposé la paroi.
+    GRID produit désormais deux balayages croisés (densité / 2 chacun) ;
+    LINES reste le comportement historique. Limite connue : dans une bande
+    plus étroite que quelques espacements, le zigzag est surtout fait de
+    raccords (dents de scie), l'orientation imposée par l'alternance ne
+    suivant pas la bande. 375/375 tests dans les deux positions.
+
+58. **Étape 8 : la tête était RETOURNÉE sur toutes les couches (corrigé le
+    2026-09-27).** Deux conventions coexistaient pour la direction à angles
+    nuls : step3 et step7 prennent **+Z** (sens d'impression = axe du corps
+    de la tête, +Z du modèle de tête), step8 et step10 prenaient **−Z**. Or
+    la cible que step8 donne à l'IK est la normale de couche (+∇φ, sens
+    d'impression) : avec la référence −Z, une couche plate (cible +Z) donnait
+    **B = 179,9°** — tête retournée, corps 40 mm SOUS la buse, dans la pièce —
+    et toute orientation était inversée (couche inclinée de 11,5° → B =
+    168,5°). Mesuré en positionnant la vraie tête (`aetheris-4.glb`) avec
+    `step9._positioned_toolhead_vertices`.
+
+    **Pourquoi personne ne l'a vu** : aucun G-code n'est produit ; les tests
+    de step8 construisaient des couches à normale **−Z** (`_simple_frame`,
+    commentée « buse vers le bas ») alors que step5 produit **+∇φ**, et ne
+    vérifiaient que des RELATIONS entre directions (opposées, égales), jamais
+    l'orientation physique. Seule l'étape 9 en voyait les effets : ses
+    collisions — et donc les supports de secours de step10 — sont à relire à
+    la lumière de ce défaut.
+
+    **Correction** : référence **+Z** dans step8 (et step10 par cohérence :
+    step10 ne compare que des écarts entre directions de même référence, son
+    comportement ne dépendait pas du signe). `deposition_reversed` (viser
+    −normale) redevient exact : tête retournée, corps sous la buse. 2 tests
+    ajoutés qui vérifient la position RÉELLE du corps de la tête (au-dessus
+    pour une couche plate, en dessous en dépôt inversé), contrôlés comme
+    ÉCHOUANT sans la correction.
+
+## Prochaine étape
+
+### État du chantier « dépôt sans support » (à lire avant de le rouvrir)
+
+Le défaut visible — sur `death.stl`, la coque en porte-à-faux apparaît
+déposée avant ce qui la porte — **n'est pas résolu**, et la session qui s'y
+est consacrée a surtout produit des résultats NÉGATIFS, tous mesurés (voir
+limite #51 pour le détail chiffré) :
+
+| mécanisme | état | mesure (matière déposée sans appui, step9b) |
+|---|---|---|
+| `LayerParams.support_driven_order` | existe enfin, opt-in **désactivé** | +15 % sur `death.stl` |
+| `SegmentationParams.anchor_growth_weight` | opt-in **désactivé** | -11 % `death`, **+76 % `turkish`** |
+| départage par marge angulaire | **retiré** (aucun cas d'usage) | dégrade sur 4 modèles / 4 |
+| `FieldSolverParams.use_geodesic_directions` | opt-in **désactivé** | −56 % / −42 % sur les 2 modèles fins, **×2,2 sur `death`**, `turkish` non mesuré |
+
+Quatre enseignements à ne pas repayer :
+1. **« Ancré au plateau » est le bon critère pour SIGNALER un risque et le
+   mauvais pour ORDONNER** : l'ordre par isovaleur donne aux couches
+   suspendues une continuité de proche en proche qui constitue un appui
+   local réel, que le réordonnancement détruit.
+2. **Le critère de choix de direction est DÉGÉNÉRÉ** : le risque résiduel de
+   la direction élue vaut exactement 0 pour toutes les régions des modèles
+   testés, donc `argmin` tranche par ordre d'indice — au hasard. C'est un
+   vrai problème de fond, non résolu ; « prendre la direction la plus
+   robuste » a été mesuré comme n'en étant PAS la sortie.
+3. **Trois mesures concordantes ne font pas une généralité** : activer un
+   mécanisme par défaut après 3 modèles favorables a été invalidé par le
+   4ᵉ. Mesurer sur les QUATRE modèles de `res/test_models/` avant toute
+   activation par défaut.
+4. **Aucun indicateur INTERMÉDIAIRE ne prédit la métrique de référence.**
+   Direction de dépôt, ancrage, ordre des couches : les quatre mécanismes
+   ci-dessus améliorent tous un indicateur intermédiaire, aucun n'améliore
+   step9b partout. La géodésique (limite #52) est le cas le plus net — elle
+   corrige un défaut de direction réel et mesuré (0 % → 28 % de tétraèdres
+   du dôme pointant vers le bas) tout en dégradant death.stl d'un facteur
+   2,2. Mesurer step9b, ou ne rien conclure.
+
+Le vrai point ouvert reste en amont, dans **step4** : un champ scalaire
+UNIQUE ne peut pas à la fois croître depuis le plateau et décroître
+localement sous un plafond suspendu. `enforce_upward_growth` masque ce
+conflit sans le résoudre (le désactiver aligne le champ sur la cible de
+step3 — 158,5° → 29,4° d'écart — mais fait perdre le contact plateau à
+TOUTES les couches). Pistes jamais mesurées : rendre ce flip conditionnel à
+la plage angulaire réelle de la tête (0-185°, elle PEUT déposer vers le
+bas), pondérer le terme de direction par région, ou un champ à plusieurs
+branches.
+
+**Les 10 étapes du cœur algorithmique sont écrites, stables et testées
+(272/272 tests).** `MachineProfile` décrit une cinématique générique à N
+axes de rotation composés (`rotation_axes: list[RotationAxisSpec]`, limites
+#18/#19) ; step3, step7, step8, step9 et step10 dispatchent tous sur la même
+famille de fonctions et de conventions génériques
+(`composed_rotation_directions`/`composed_rotation_angles_and_directions`,
+composition en ordre inverse de la liste) sans hypothèse figée sur le
+nombre d'axes de la machine réellement utilisée.
+
+`main.py` enchaîne maintenant step1→step10 sur un fichier STL/3MF réel
+(vérifié sur `res/test_models/l_shape_overhang.stl`, généré par
+`scripts/generate_test_model.py`), et `file_io/visualization_export.py`
+produit une scène GLB inspectable (mesh + couches + trajectoire) — voir
+« Détail de `main.py` et `file_io/visualization_export.py` » ci-dessus.
+
+L'orientation des couches près du plateau/des jonctions bénéficie
+maintenant de deux fixes complémentaires, activés par défaut : le mélange
+spatial de directions (limite #32, `_blend_tet_directions`) et le
+raffinement local de maillage près du plateau (limite #36, `add_region`) —
+confirmés visuellement sur `out_test.glb`. Le cas jonction multi-région
+reste sans raffinement local dédié (limite #36, portée explicitement
+limitée au cas plateau) — traitable plus tard avec le même mécanisme
+`add_region` si un modèle réel à plusieurs régions l'exige.
+
+**Le diagnostic du modèle en T réel (surplomb 3 axes,
+`res/test_models/l-triple-axis-overhanged-shape.stl`) a mené à trois fixes
+supplémentaires cette session, tous opt-in (défaut `None`, comportement
+historique inchangé) — voir limites #38/#39/#40/#41 pour le détail complet :**
+1. **step3** — critère angulaire de fusion de régions
+   (`max_region_merge_angle_deg`) : empêche deux sous-volumes
+   géométriquement incompatibles (ex: deux bras perpendiculaires) de
+   fusionner sur la seule base qu'une direction de compromis reste
+   techniquement compatible. 1 région → 5 régions sur le modèle en T.
+2. **step5** — clustering spatial des boucles disjointes
+   (`split_disjoint_clusters`) : scinde une couche en plusieurs `Layer`
+   quand ses contours forment des composantes spatialement disjointes et
+   non imbriquées (jonction en T/étoile), chacun avec son propre
+   `local_frame` cohérent.
+3. **step5** — tri par continuité spatiale (DFS sur un graphe de proximité
+   entre clusters d'isovaleurs successives, couplé automatiquement à
+   `split_disjoint_clusters`, pas de paramètre séparé) : résout le résidu
+   du fix précédent — deux clusters d'une même région step3 mais de
+   composantes spatiales disjointes (pied/bras d'un T) ne s'entrelacent
+   plus à chaque isovaleur. Grands sauts spatiaux entre clusters réduits de
+   42 → 7 (-83%) sur le modèle en T.
+
+Effet de bord mesuré et **non résolu** (limite #40) : le nombre
+d'orientations IK inatteignables (`step8_diagnostics`) sur le modèle en T
+reste à 528 avec ces trois fixes actifs — point ouvert pour une session
+future, indépendant du tri des couches lui-même.
+
+Repère visuel ajouté au GLB (limite #41) : une flèche verte indique le
+"haut" d'impression (+Z) dans `file_io/visualization_export.py`.
+
+**Résidu après le fix DFS (limite #40), diagnostiqué et en grande partie
+résolu plus avant cette session** : sur le modèle en T, quelques trajets à
+vide subsistaient entre branches (7 grands sauts mesurés). Trois pistes
+tentées pour les réduire directement en step5 (glouton plus-proche-voisin
+sur l'ordre des composantes, fenêtre de recherche élargie du graphe de
+continuité, seuil de connexion adaptatif dérivé du gradient local) ont
+toutes MESURÉ un résultat pire que l'état déjà commis (156.2 → jusqu'à
+203.7 de distance totale de trajet) — code exploratoire écarté, jamais
+commité. Cause racine finale identifiée par ce diagnostic : **PAS un
+problème d'algorithme de continuité step5**, mais un maillage tétraédrique
+bien trop grossier au bout du bras concerné (6 tétraèdres seulement dans
+toute cette zone), qui a mené à la découverte du bug #42 (`resolution` sans
+effet réel hors zone plateau).
+
+**Confirmé après le fix du bug #42** (aucun changement de code step5
+nécessaire) : re-mesuré sur le modèle en T avec les mêmes params
+(`max_region_merge_angle_deg=30.0`, `split_disjoint_clusters=3.0`) —
+grands sauts **7 → 5**, distance totale de trajet **156.2 → 101.7** (-35%),
+zone du bras+X passée de 6 à 34 tétraèdres. Effet de bord positif
+supplémentaire mesuré : orientations IK inatteignables (`step8_diagnostics`)
+**528 → 426** sur ce même modèle. Les sauts résiduels (5-6 selon le seuil de
+mesure) sont désormais **confirmés par mesure comme structurellement
+inévitables**, pas seulement supposés tels : augmenter la résolution du
+maillage ×30 (1913 → 57992 tétraèdres) ne les réduit pas du tout, et leurs
+isovaleurs décroissantes montrent qu'il s'agit de transitions entre branches
+disjointes du même rang topologique — voir le dernier point de la limite #40
+pour la mesure complète et pourquoi la piste "raffiner les zones de surplomb"
+a été écartée. Chantier clos, sauf si une optimisation de l'ORDRE de visite
+des branches (type voyageur de commerce sur les extrémités) est un jour
+souhaitée — sujet distinct de la continuité de couches.
+
+### Débit de step9 dégressif avec la matière accumulée (limite ouverte)
+
+Le débit de step9 se dégrade avec la matière accumulée (mesuré : 16.5 →
+3.7 pts/s entre le 250ᵉ et le 1750ᵉ point échantillonné, index passant de
+quelques centaines à ~2700 capsules ; la grille spatiale de
+`_PrintedGeometryIndex` limite le nombre de candidats mais pas assez). Sur
+`l_shape_overhang.stl`, la trajectoire complète (12105 points, modèle de
+tête réel) ne termine pas step9 en moins de 550s alors que les 250 premiers
+points seuls prennent 0.8s. Problème de performance distinct de la
+correction du signal — non traité, à chiffrer/prioriser séparément.
+
+Ce qui reste, hors cœur algorithmique :
+
+- **Un `resegmentation_hook` réel pour l'étape 10** — `main.py` le laisse
+  à `None` pour l'instant (voir détail ci-dessus). L'implémenter
+  demanderait de re-jouer step3→step8 avec une contrainte d'angle
+  supplémentaire (limite #23) ; c'est `main.py`, seul détenteur de
+  `mesh_data`, `tet_mesh`, `overhang_map`, du graphe de régions, de la
+  `ColorMap` et des params des 7 étapes concernées, qui devra le fournir.
+- **`config/params.py` + `config/schema.py`** — centraliser les dataclasses
+  de paramètres (aujourd'hui définies dans chaque `stepN_*.py`) et la
+  (dé)sérialisation JSON, pont avec l'UI TypeScript. À faire sans casser
+  les imports existants.
+- **`file_io/gcode_export.py`** — traduction de `ToolpathPoint.axis_angles`
+  (générique, N axes) vers la commande firmware réelle
+  (`G00 Y<C> X<R> Z<Z> B<B> F<feedrate>` pour la machine actuelle). Cette
+  traduction est **spécifique à une machine** et a été délibérément tenue
+  hors de step8/step9/step10 ; un plan dédié devra trancher le format
+  exact, la gestion de la rétraction, et comment décrire le mapping
+  axe générique → nom d'axe firmware sans re-figer le moteur sur une seule
+  machine.
+- **Types de machines à prendre en charge** (annoncés par l'utilisateur le
+  2026-09-28, voir limite #59). Tous se décrivent par
+  `MachineProfile.rotation_axes` et `position_coupled_axes`, sans changer le
+  contrat :
+  | type | profil |
+  |---|---|
+  | machine actuelle (R C Z B) | axes `[C, B]`, `position_coupled_axes = [0]` |
+  | + « axe D », 2ᵉ rotation de tête, perpendiculaire à la rotation autour de Y | axes `[C, B, D]`, `[0]` : B et D orientent, C reste imposé par la position |
+  | + plateau coulissant le long de X (axe linéaire) | axes `[C, B]`, `[]` : C devient libre pour l'orientation |
+  | les deux | axes `[C, B, D]`, `[]` : un axe d'orientation redondant |
+
+  L'upgrade de la machine, prévue après Maker Faire, ajoute un axe linéaire.
+  Reste à faire pour chaque type :
+  - un test d'étape 8 ;
+  - les directions candidates de step3 et step7, qui dépendent de la
+    position quand C est couplé ;
+  - la réorientation de step10 ;
+  - la traduction G-code (nom et sens de chaque axe dans le firmware).
+- **Interface graphique des paramètres d'angle** (demande de l'utilisateur,
+  2026-09-27) : tout paramètre d'angle (ex. seuil d'arête vive du lissage
+  non-planaire, défaut 150°) se règle par un **sélecteur graphique** qui
+  dessine l'angle comme un **arc de cercle**, avec la valeur en degrés
+  inscrite dedans. Convention affichée pour les arêtes : **angle ENTRE LES
+  FACES** (angle intérieur, 180° = plat), et non l'angle entre normales des
+  slicers classiques (150° entre faces = 30° entre normales). Le moteur peut
+  stocker l'une ou l'autre ; la conversion doit être unique et explicite.
+- **Ne pas centrer les modèles sur le plateau** (demande de l'utilisateur,
+  2026-09-29). Sur la machine actuelle, C est imposé par la position et B ne
+  penche que vers l'extérieur (+R) : les inclinaisons atteignables dépendent
+  donc de la POSITION de la pièce sur le plateau. Une pièce centrée a des
+  surplombs tournés vers le centre, que la tête ne peut pas servir. À faire :
+  - un **conseil dans l'interface** : ne pas centrer les modèles, et orienter
+    leurs surplombs vers l'extérieur du plateau ;
+  - une **contrainte dans l'auto-organiseur de plateau**, qui place les
+    modèles en conséquence.
+
+  Effet à MESURER avant d'en faire une règle : paramètre de décalage en
+  recherche (`bird_loop.py --offset=dx,dy`). Plateau : 300 mm de diamètre.
+- **Refuser dès l'entrée un modèle trop grand pour la machine** (demande de
+  l'utilisateur, 2026-09-27). Le pré-calcul de collision tête-plateau du
+  lissage non-planaire (recherche, `surface_skin.py`) traite le plateau
+  comme un PLAN INFINI — hypothèse prudente, conservée tant que le rayon
+  réel du plateau n'est pas dans `MachineProfile`. Le remède voulu n'est pas
+  d'affiner ce test mais de refuser à l'ingestion (step1) un modèle qui
+  déborde du volume/plateau utilisable (`MachineProfile.build_volume`,
+  aujourd'hui non renseigné), pour qu'aucun modèle trop grand ne traverse le
+  pipeline.
+
+### ROADMAP — Maker Faire Rome et temps de calcul (actée le 2026-09-27)
+
+**Échéance : Maker Faire Rome, dans moins d'un mois (fin octobre 2026).**
+Ce qui doit y être montré, choisi par l'utilisateur :
+- **des pièces imprimées exposées**, imprimées à l'avance ;
+- **une impression en direct** sur le stand.
+
+Pas de tranchage en direct : la vitesse de calcul n'est donc PAS un
+prérequis du salon. Deux choses le sont :
+
+1. **Export G-code réel pour la machine** (`file_io/gcode_export.py`, jamais
+   écrit ; commande `G00 Y<C> X<R> Z<Z> B<B> F<feedrate>`, rétractions à
+   trancher). **État inconnu, à vérifier en premier** : des scripts non
+   versionnés existent (`scripts/gen_l_overhang_gcode.py`,
+   `gen_elbow_tube_gcode.py`, `preview_gcode.py`,
+   `export_machine_animation.py`) et produisent peut-être déjà un G-code qui
+   imprime. Le relire avant d'écrire quoi que ce soit.
+2. **Trajectoire vérifiée en collision avec la vraie tête** (étape 9,
+   `aetheris-4.glb`) avant toute impression en direct : une collision devant
+   le public est le pire scénario. À relire à la lumière de la limite #58
+   (tête retournée jusqu'au 2026-09-27 : toutes les collisions antérieures
+   sont suspectes).
+
+À repousser APRÈS le salon si le temps manque : les 10 motifs sur surfaces
+(P4 complet), la validation sur tous les modèles, le portage C++ de la voie
+Bird, l'ironing.
+
+#### Temps de calcul : 10 minutes pour une étape est COMMERCIALEMENT INACCEPTABLE
+
+Constat de l'utilisateur sur la voie Bird (recherche, `research/S4_Slicer/`),
+mesuré sur `tilted benchy undertriangulated_repaired` (24 345 tétraèdres,
+313 couches, 22 474 faces de surface) :
+
+| phase | durée mesurée | cause |
+|---|---:|---|
+| P2 — zones de lissage (`surface_skin.py`) | **11 min 30** (200 s pré-calcul + 490 s zones) | boucle Python face par face ; faces retestées à chaque découpage en bandes |
+| P3 — corps creusé (`skin_carve.py`, couche par couche) | **~10-11 min** | défaut de CONCEPTION : la même découpe refaite 313 fois, par tranches, à coups d'unions shapely de milliers de morceaux |
+| tranchage de référence complet | 37 s (dont 3 s de couches) | — |
+
+**Règle de travail qui en découle** : mesurer la durée de chaque phase et
+la signaler dès qu'elle dépasse l'ordre de la seconde, au lieu de la
+découvrir en fin de calcul. Lancer les calculs en tâche de fond avec
+`python -u` (sinon le journal reste vide jusqu'à la fin, stdout étant
+tamponné vers un fichier).
+
+**P2 — trois leviers, dans cet ordre** (estimations NON mesurées) :
+1. **Dernier moment accessible par face**, calculé une seule fois. La
+   matière imprimée ne fait que croître : une face bloquée par l'objet à un
+   moment l'est à tous les suivants (la collision plateau ne dépend pas du
+   moment). Le découpage en bandes devient une comparaison d'entiers.
+   Résultat attendu IDENTIQUE face par face (à vérifier sur la carte).
+2. **Traitement groupé** : placer la tête et localiser les points pour des
+   milliers de faces en un appel numpy, au lieu de ~10 petits appels par face.
+3. **Parallélisation** multi-cœurs du pré-calcul (faces indépendantes).
+
+| version de P2 | estimation |
+|---|---:|
+| Python actuel | 690 s (mesuré) |
+| Python + leviers 1 et 2 | ~30-60 s |
+| C++ mono-cœur | ~10-20 s |
+| C++ 8 cœurs | ~2-5 s |
+| GPU | calcul < 1 s ; total ~1-3 s (parties fixes : chargement, subdivision, voisinages) |
+
+**P3 — refonte : découper UNE fois en 3D, puis trancher normalement.** La
+découpe est une propriété de la pièce, pas de chaque couche. (1) distance à
+la peau aux nœuds ; (2) affinage du maillage près de la peau (précision
+0,2 mm ; tétraèdres actuels de 1 à 5 mm) ; (3) découpe des tétraèdres le long
+de ψ = 0 (table de cas, comme les marching tetrahedra) ; (4) tranchage
+habituel du corps creusé. La version actuelle, lente mais exacte, sert
+d'ORACLE à la version rapide (même méthode que le portage C++).
+
+| version de P3 | estimation |
+|---|---:|
+| actuelle | ~10-11 min (mesuré) |
+| découpe 3D, Python | ~5-15 s |
+| découpe 3D, C++ multi-cœurs | ~1-3 s |
+| + GPU | ~1-2 s |
+
+**Grande inconnue : l'affinage (2).** S'il multiplie le nombre de
+tétraèdres par 5 à 10, le tranchage qui suit ralentit d'autant (3 s →
+15-30 s en Python). Première mesure à faire : le nombre de tétraèdres après
+affinage. Si l'affinage passe par TetGen (natif, mono-cœur), c'est lui qui
+fixe le plancher.
+
+**GPU (question de l'utilisateur, DirectX évoqué)** — ce qui s'y prête et ce
+qui ne s'y prête pas :
+- **oui** : distance à la peau par nœud, découpe par tétraèdre, coupes des
+  couches par tétraèdre, pré-calcul de collision de P2 par face (~30 M de
+  tests point-dans-tétraèdre) ;
+- **non** : affinage du maillage (topologie changeante), chaînage des
+  segments en contours dans une couche, décalages de polygones de l'étape 6
+  (Clipper/shapely) — processeur multi-cœurs, parallèle par couche.
+
+Réserves à peser avant le choix d'API :
+- **DirectX = Windows seulement** ; Vulkan, WebGPU ou CUDA (NVIDIA
+  seulement) si l'UI doit être multiplateforme ;
+- les GPU grand public sont rapides en **simple précision** seulement, ce
+  qui casse l'équivalence au bit près sur laquelle repose le portage (limite
+  #56 : porter d'abord, paralléliser ensuite) ;
+- une fois P2 et P3 à quelques secondes, **le goulot sera ailleurs** : la
+  boucle Bird (~100 s par passe) et l'étape 9. C'est là que le GPU
+  rapporterait le plus. La contrainte à respecter dès maintenant est de
+  FORME : des calculs indépendants par nœud, tétraèdre, face ou couche, sans
+  état partagé, pour que le passage au GPU ne demande pas de tout réécrire.

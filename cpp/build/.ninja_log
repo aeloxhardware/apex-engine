@@ -1,0 +1,15 @@
+# ninja log v7
+81	399	8124530621539209	CMakeFiles/apex_core.dir/src/core/interpolate.cpp.obj	ee8d618fecd138ce
+29	896	8124530621012026	CMakeFiles/apex_core.dir/src/core/support.cpp.obj	6aa6d17242abdf64
+48	1076	8124530621202107	CMakeFiles/apex_core.dir/src/core/bvh.cpp.obj	3165b2208e8e8482
+67	1107	8124530621387234	CMakeFiles/apex_core.dir/src/core/mesh_repair.cpp.obj	67bb128e91b0e32
+35	1126	8124530621072018	CMakeFiles/apex_core.dir/src/core/tet_topology.cpp.obj	e3ad80fd7b347f3f
+41	1237	8124530621142092	CMakeFiles/apex_core.dir/src/core/kdtree.cpp.obj	2cd4bed6431f7128
+24	1241	8124530620956888	CMakeFiles/apex_core.dir/src/core/kinematics.cpp.obj	6543e6efb4ce1d63
+54	1308	8124530621262080	CMakeFiles/apex_core.dir/src/core/field_solver.cpp.obj	2a68d75d8c6aac63
+17	1365	8124530620896877	CMakeFiles/apex_core.dir/src/core/printed_index.cpp.obj	f3ba320d554d783e
+88	1410	8124530621599879	CMakeFiles/apex_core.dir/src/core/mesh_distance.cpp.obj	b2854292810e7c82
+75	1457	8124530621463356	CMakeFiles/apex_core.dir/src/core/mesh_intersect.cpp.obj	830d6b960e415a55
+60	4706	8124530621332153	CMakeFiles/apex_core.dir/src/core/linear_solver.cpp.obj	319b8783275c2ecf
+95	7255	8124530621669949	CMakeFiles/apex_core.dir/bindings/module.cpp.obj	b15ef9bddfd1c592
+7256	11578	8124530693281152	R:/APEX_NEW_VERSION/slicer_engine/cpp/lib/apex_core.cp314-win_amd64.pyd	367aa816198494dd

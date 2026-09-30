@@ -1,0 +1,5 @@
+{
+  "tests/test_step5_layers.py::test_hollow_box_disjoint_contours_have_opposite_signed_area": true,
+  "tests/test_step5_layers.py::test_tripod_with_blend_reduces_loop_fragmentation": true,
+  "tests/test_step5_layers.py::test_node_within_weld_tolerance_of_plane_keeps_whole_contour": true
+}
