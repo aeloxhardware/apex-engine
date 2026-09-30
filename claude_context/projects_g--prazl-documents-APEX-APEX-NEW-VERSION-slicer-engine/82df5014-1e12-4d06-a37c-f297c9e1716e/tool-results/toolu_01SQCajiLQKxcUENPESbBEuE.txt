@@ -1,0 +1,252 @@
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step2_overhang.py-26-    step2 exactement dans les conditions du pipeline reel (MeshData avec
+tests\test_step2_overhang.py:27:    bvh/kdtree deja construits)."""
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step2_overhang.py-28-    import tempfile
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\core\constraints.py-50-    Aucune logique de calcul ici - uniquement un regroupement, pour eviter
+core\constraints.py:51:    que chaque assembleur recalcule les memes structures (KDTree sur les
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\core\constraints.py-52-    noeuds, gradients de fonctions de forme...).
+--
+core\constraints.py-61-    region_dependency_graph: RegionDependencyGraph
+core\constraints.py:62:    node_kdtree: Any                     # scipy.spatial.cKDTree sur tet_vertices
+core\constraints.py-63-    shape_gradients: np.ndarray          # shape (T, 3, 4) - gradients des fonctions de forme P1
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\core\constraints.py-115-
+core\constraints.py:116:    nearby = ctx.node_kdtree.query_ball_point(constraint.position, constraint.influence_radius)
+core\constraints.py-117-    if not nearby:
+--
+tests\test_cpp_equivalence.py-442-    Ce n'est pas cosmetique : `_map_boundary_faces_to_surface` interroge
+tests\test_cpp_equivalence.py:443:    ensuite le kdtree avec ces faces dans cet ordre, et l'ordre du resultat
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_cpp_equivalence.py-444-    s'y propage. Une permutation produirait des tableaux decales en aval, sans
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\file_io\visualization_export.py-19-import numpy as np
+file_io\visualization_export.py:20:from scipy.spatial import cKDTree
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\file_io\visualization_export.py-21-import trimesh
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\file_io\visualization_export.py-115-    Chaque face est rattachee a la couche dont un point de contour est le
+file_io\visualization_export.py:116:    plus proche de son centre (cKDTree sur tous les points de contour,
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\file_io\visualization_export.py-117-    chacun etiquete par l'index de sa couche dans l'ordre d'impression),
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\file_io\visualization_export.py-151-    face_centers = mesh_data.vertices[mesh_data.faces].mean(axis=1)
+file_io\visualization_export.py:152:    _distances, nearest = cKDTree(contour_points).query(face_centers)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\file_io\visualization_export.py-153-    face_layer = layer_of_point[np.asarray(nearest, dtype=np.int64)]
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\core\mesh_types.py-58-
+core\mesh_types.py:59:    bvh et kdtree sont typés `Any` car ce sont des objets de bibliothèques
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\core\mesh_types.py-60-    externes (trimesh / scipy.spatial) - on ne redéfinit pas leur structure ici.
+--
+core\mesh_types.py-67-    bvh: Any = None                # structure d'accélération pour ray-casting
+core\mesh_types.py:68:    kdtree: Any = None             # scipy.spatial.cKDTree sur les centres de faces
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\core\mesh_types.py-69-
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step7_scheduling.py-437-    groups_per_layer = _group_segments_by_color(colored)
+tests\test_step7_scheduling.py:438:    field_tree = scipy.spatial.cKDTree(tet_mesh.tet_vertices)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step7_scheduling.py-439-    sorted_isovalues = np.sort(np.asarray([l.isovalue for l in colored], dtype=float))
+--
+tests\test_step4_field_solver.py-265-# Fixtures synthetiques minimalistes (pas le pipeline step1->step3 complet) :
+tests\test_step4_field_solver.py:266:# _blend_tet_directions n'a besoin que de MeshData.vertices/faces/kdtree,
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step4_field_solver.py-267-# TetMesh.tet_vertices/tetrahedra, et RegionDependencyGraph - construits ici
+--
+tests\test_step4_field_solver.py-283-    MeshData minimal : une face triangulaire (degenere, un point x3 - suffit
+tests\test_step4_field_solver.py:284:    car seul le CENTRE de face compte pour le kdtree/les distances) par
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step4_field_solver.py-285-    position donnee dans `face_groups` (une liste de positions (3,) par
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step4_field_solver.py-287-    coherents en forme avec le contrat MeshData, jamais utilises autrement
+tests\test_step4_field_solver.py:288:    que via face_ids et le kdtree par _blend_tet_directions.
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step4_field_solver.py-289-    """
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step4_field_solver.py-295-    vertex_normals = np.repeat(face_normals, 3, axis=0)
+tests\test_step4_field_solver.py:296:    kdtree = scipy.spatial.cKDTree(positions)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step4_field_solver.py-297-    return MeshData(
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step4_field_solver.py-302-        is_watertight=False,
+tests\test_step4_field_solver.py:303:        kdtree=kdtree,
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\tests\test_step4_field_solver.py-304-    )
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step1_ingest.py-834-# ---------------------------------------------------------------------------
+pipeline\step1_ingest.py:835:# Etape 4 - Structures d'acceleration (BVH + KDTree)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step1_ingest.py-836-# ---------------------------------------------------------------------------
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step1_ingest.py-842-    bvh = trimesh.ray.ray_triangle.RayMeshIntersector(mesh)
+pipeline\step1_ingest.py:843:    kdtree = scipy.spatial.cKDTree(mesh.triangles_center)
+pipeline\step1_ingest.py:844:    return bvh, kdtree
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step1_ingest.py-845-
+--
+pipeline\step1_ingest.py-851-def _build_mesh_data(mesh: trimesh.Trimesh) -> MeshData:
+pipeline\step1_ingest.py:852:    bvh, kdtree = _build_acceleration_structures(mesh)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step1_ingest.py-853-    return MeshData(
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step1_ingest.py-859-        bvh=bvh,
+pipeline\step1_ingest.py:860:        kdtree=kdtree,
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step1_ingest.py-861-    )
+--
+scripts\diagnose_turkish_all_clusters.py-30-# cluster them spatially (simple: connected components within 3mm)
+scripts\diagnose_turkish_all_clusters.py:31:from scipy.spatial import cKDTree
+scripts\diagnose_turkish_all_clusters.py:32:tree = cKDTree(pts)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\scripts\diagnose_turkish_all_clusters.py-33-pairs = tree.query_pairs(r=3.0)
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-689-    seul tetraedre) et, pour chacune, retrouve la face du mesh de surface
+pipeline\step4_field_solver.py:690:    d'origine la plus proche via MeshData.kdtree (construit a l'etape 1 sur
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-691-    les centres de faces).
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-726-    centroids = tet_mesh.tet_vertices[boundary_face_nodes].mean(axis=1)
+pipeline\step4_field_solver.py:727:    _, nearest_surface_face_id = mesh_data.kdtree.query(centroids)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-728-
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-795-    comportement historique (plus-proche-voisin global sur TOUTES les
+pipeline\step4_field_solver.py:796:    faces de surface, une seule requete KDTree) - aucun changement de
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-797-    comportement par defaut.
+--
+pipeline\step4_field_solver.py-810-    if params.direction_blend_radius <= 0.0:
+pipeline\step4_field_solver.py:811:        _, nearest_face_per_tet = mesh_data.kdtree.query(tet_centers)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-812-        nearest_face_per_tet = np.asarray(nearest_face_per_tet, dtype=np.int64)
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-820-
+pipeline\step4_field_solver.py:821:    # Sources : une par region (KDTree sur les centres de SES SEULES faces,
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-822-    # pas toute la surface - distance a CETTE region precisement), plus le
+pipeline\step4_field_solver.py:823:    # plateau (plan, distance verticale directe - pas besoin de KDTree).
+pipeline\step4_field_solver.py-824-    source_directions: list[np.ndarray] = []
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-830-            continue
+pipeline\step4_field_solver.py:831:        region_tree = scipy.spatial.cKDTree(face_centers[region.face_ids])
+pipeline\step4_field_solver.py:832:        distances, _ = region_tree.query(tet_centers)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-833-        source_distances.append(np.asarray(distances, dtype=np.float64))
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-2134-    lissage (rigidite FEM), terme de surplomb, ancrage plateau, plus les
+pipeline\step4_field_solver.py:2135:    structures partagees (KDTree des noeuds, gradients de fonctions de
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-2136-    forme, volumes).
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-2171-    # chaque tetraedre herite du risque de la face de surface la plus
+pipeline\step4_field_solver.py:2172:    # proche de son centroide, via le kdtree deja construit a l'etape 1 sur
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-2173-    # les centres de faces. Reste un plus-proche-voisin strict (le melange
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-2176-    tet_centers = tet_mesh.tet_vertices[tet_mesh.tetrahedra].mean(axis=1)
+pipeline\step4_field_solver.py:2177:    _, nearest_face_per_tet = mesh_data.kdtree.query(tet_centers)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-2178-    nearest_face_per_tet = np.asarray(nearest_face_per_tet, dtype=np.int64)
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-2405-        region_dependency_graph=region_dependency_graph,
+pipeline\step4_field_solver.py:2406:        node_kdtree=scipy.spatial.cKDTree(tet_mesh.tet_vertices),
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-2407-        shape_gradients=shape_gradients,
+--
+pipeline\step4_field_solver.py-2478-        mesh_data: sortie de pipeline/step1_ingest.py (pour le mapping
+pipeline\step4_field_solver.py:2479:            surface -> volume via son kdtree).
+pipeline\step4_field_solver.py-2480-        overhang_map: sortie de pipeline/step2_overhang.py.
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step3_segmentation.py-338-    version bouclait en Python sur CHAQUE micro-composante et reconstruisait
+pipeline\step3_segmentation.py:339:    un `cKDTree` par candidat voisin a l'interieur de cette boucle - avec
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step3_segmentation.py-340-    318k composantes, ce n'etait tout simplement jamais fini (tue apres
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step3_segmentation.py-342-
+pipeline\step3_segmentation.py:343:    Fix : un seul passage vectorise par ITERATION plutot qu'un cKDTree par
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step3_segmentation.py-344-    composante. A chaque iteration, pour CHAQUE arete de `full_adjacency`
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step3_segmentation.py-520-    tet_labels = _merge_tiny_branch_components(tet_mesh, tet_labels, tet_centers)
+pipeline\step3_segmentation.py:521:    tree = scipy.spatial.cKDTree(tet_centers)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step3_segmentation.py-522-
+--
+pipeline\step3_segmentation.py-563-    faces: np.ndarray,
+pipeline\step3_segmentation.py:564:    tet_center_tree: "scipy.spatial.cKDTree",
+pipeline\step3_segmentation.py-565-    tet_labels: np.ndarray,
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step3_segmentation.py-630-
+pipeline\step3_segmentation.py:631:        _, nearest_tets = tet_center_tree.query(points)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step3_segmentation.py-632-        sample_labels = tet_labels[nearest_tets]
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-6-
+pipeline\step6_toolpath2d.py:7:Depend de Layer (step5, contour_3d + local_frame), MeshData (step1, kdtree
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-8-pour le pont surface/volume), OverhangMap (step2, is_bridge +
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-21-  5. Pour les boucles associees a une zone is_bridge (step2, via le meme
+pipeline\step6_toolpath2d.py:22:     pont kdtree surface/volume que step4/step5) : ajoute des parois
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-23-     d'ancrage supplementaires sur le perimetre puis reoriente l'infill
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-492-    Determine si une boucle de contour 3D touche une zone is_bridge (step2),
+pipeline\step6_toolpath2d.py:493:    via le meme pont kdtree surface/volume deja utilise par step4 (ancrage
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-494-    plateau) et step5 (association region). Retourne la direction de portee
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-502-    """
+pipeline\step6_toolpath2d.py:503:    _, nearest_faces = mesh_data.kdtree.query(contour_3d_loop)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-504-    nearest_faces = np.asarray(nearest_faces, dtype=np.int64)
+--
+pipeline\step6_toolpath2d.py-819-        layers: sortie de pipeline/step5_layers.py.
+pipeline\step6_toolpath2d.py:820:        mesh_data: sortie de pipeline/step1_ingest.py (kdtree, pont
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-821-            surface/volume pour la detection de pont).
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-7-
+pipeline\step7_scheduling.py:8:Depend de Layer (step5/step6), MeshData (step1, kdtree + bvh), ColorMap
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-9-(peinture utilisateur), RegionDependencyGraph (step3), ScalarField (step4).
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-17-  1. Projette ColorMap.per_face_color sur chaque segment de trajectoire, via
+pipeline\step7_scheduling.py:18:     le pont kdtree surface/volume deja utilise par step4/step5/step6, mais
+pipeline\step7_scheduling.py-19-     adapte sur deux points (voir _edge_colors_for_polyline) : relevement
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-20-     2D -> 3D prealable, et exploitation de la DISTANCE retournee par le
+pipeline\step7_scheduling.py:21:     kdtree (ignoree par step6) pour distinguer matiere visible et matiere
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-22-     interne.
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-146-
+pipeline\step7_scheduling.py:147:    IMPORTANT - pourquoi PAS `mesh_data.kdtree` ici : ce kdtree est construit
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-148-    sur les CENTRES DE FACE (`step1_ingest`), donc la distance qu'il retourne
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-158-    distance reelle a la surface et l'identifiant du triangle reellement le
+pipeline\step7_scheduling.py:159:    plus proche (l'indice du kdtree devient lui aussi douteux pres des aretes
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-160-    sur un maillage grossier).
+--
+pipeline\step7_scheduling.py-464-    mesh_data: MeshData,
+pipeline\step7_scheduling.py:465:    field_tree: scipy.spatial.cKDTree,
+pipeline\step7_scheduling.py-466-    field_values: np.ndarray,
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-502-
+pipeline\step7_scheduling.py:503:    _, nearest_nodes = field_tree.query(sample_points)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-504-    phi = field_values[np.asarray(nearest_nodes, dtype=np.int64)]
+--
+pipeline\step7_scheduling.py-517-    mesh_data: MeshData,
+pipeline\step7_scheduling.py:518:    field_tree: scipy.spatial.cKDTree,
+pipeline\step7_scheduling.py-519-    field_values: np.ndarray,
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-535-      - `phi` en un point 3D quelconque est lu au noeud du TetMesh le plus
+pipeline\step7_scheduling.py:536:        proche (kdtree), plutot que par localisation tetraedrique +
+pipeline\step7_scheduling.py-537-        interpolation barycentrique : machinerie neuve pour un gain nul, une
+--
+pipeline\step7_scheduling.py-751-        layers: sortie de pipeline/step6_toolpath2d.py (toolpath_2d rempli).
+pipeline\step7_scheduling.py:752:        mesh_data: sortie de step1 (kdtree pour la projection de couleur,
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-753-            bvh pour les rayons d'accessibilite).
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-791-
+pipeline\step7_scheduling.py:792:    # phi est defini par NOEUD du TetMesh : le kdtree de lecture du champ se
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-793-    # construit donc sur `tet_vertices`, dont `scalar_field.values` partage
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-794-    # exactement l'indexation.
+pipeline\step7_scheduling.py:795:    field_tree = scipy.spatial.cKDTree(tet_mesh.tet_vertices)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-796-    field_values = np.asarray(scalar_field.values, dtype=float)
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-750-    Pour chaque tetraedre, retrouve la region de sa face de surface la plus
+pipeline\step5_layers.py:751:    proche (via mesh_data.kdtree sur le centroide du tetraedre) - meme
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-752-    technique que step4_field_solver.build_static_system pour le meme
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-759-    tet_centers = tet_mesh.tet_vertices[tet_mesh.tetrahedra].mean(axis=1)
+pipeline\step5_layers.py:760:    _, nearest_face = mesh_data.kdtree.query(tet_centers)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-761-    nearest_face = np.asarray(nearest_face, dtype=np.int64)
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-1640-
+pipeline\step5_layers.py:1641:    node_tree = scipy.spatial.cKDTree(tet_mesh.tet_vertices)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-1642-
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-1648-            continue
+pipeline\step5_layers.py:1649:        _, nearest = node_tree.query(np.vstack(points))
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-1650-        values = geodesic[np.asarray(nearest, dtype=np.int64)]
+--
+pipeline\step5_layers.py-1668-        tet_mesh: sortie de pipeline/step1_ingest.py.
+pipeline\step5_layers.py:1669:        mesh_data: sortie de pipeline/step1_ingest.py (kdtree pour le pont
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-1670-            surface/volume).
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\scripts\prototype_local_retriangulation11.py-15-from collections import Counter
+scripts\prototype_local_retriangulation11.py:16:from scipy.spatial import cKDTree
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\scripts\prototype_local_retriangulation11.py-17-from shapely.geometry import Polygon
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\scripts\prototype_local_retriangulation11.py-79-face_centroids = cleaned.vertices[cleaned.faces].mean(axis=1)
+scripts\prototype_local_retriangulation11.py:80:tree = cKDTree(flagged_pts)
+scripts\prototype_local_retriangulation11.py:81:dists, _ = tree.query(face_centroids, k=1)
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\scripts\prototype_local_retriangulation11.py-82-faces_to_remove = dists < EXPAND_RADIUS
+--
+g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\scripts\prototype_local_retriangulation12.py-7-from collections import Counter
+scripts\prototype_local_retriangulation12.py:8:from scipy.spatial import cKDTree
+
+[Showing results with pagination = limit: 250]

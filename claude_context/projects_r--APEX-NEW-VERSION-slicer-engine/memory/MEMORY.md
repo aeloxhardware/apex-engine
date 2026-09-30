@@ -1,0 +1,7 @@
+- [Bird automation goal](bird-automation-goal.md) — automate the manual S4-Slicer iteration schedule; first need a judge that matches the user's verdicts
+- [Research code stays local](research-code-stays-local.md) — research/S4_Slicer is never versioned, by the user's choice
+- [Safe long runs](safe-long-runs.md) — heavy runs crashed the PC; kill Python children, batch queries, test small first
+- [Maker Faire Rome deadline](maker-faire-rome-deadline.md) — end Oct 2026: printed parts + live print; G-code and collision check first
+- [Machine kinematics](machine-kinematics.md) — current printer R C Z B: C imposed by position, B one side 0-185°; upgrade adds a linear axis; support both
+- [G-code scripts not a model](gcode-scripts-not-a-model.md) — gen_*_gcode.py are fixed-shape generators; never base gcode_export on them
+- [R: disk is small](disk-r-small.md) — 8 GB project drive fills fast; archive/build on H:
