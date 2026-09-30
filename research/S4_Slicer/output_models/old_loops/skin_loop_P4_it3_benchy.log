@@ -1,0 +1,37 @@
+tilted_benchy_undertriangulated_repaired_pin passe 4 : 33 zones, motif general rectilinear, angle 45.0 deg, recouvrement 0.2, epaisseur 0.2, cordons de bord 1
+  zone   0 moment 242    86.5 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  98.4% | 0.2 s
+  zone   1 moment 207    10.6 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  97.6% | 0.0 s
+  zone   2 moment 193    11.0 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  97.7% | 0.0 s
+  zone   3 moment 192     4.3 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.0% | 0.0 s
+  zone   4 moment 196    33.3 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  99.4% | 0.1 s
+  zone   5 moment 196    21.3 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  98.4% | 0.1 s
+  zone   6 moment 232    30.8 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  97.7% | 0.1 s
+  zone   7 moment  22     2.6 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.5% | 0.0 s
+  zone   8 moment   8    12.7 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  99.6% | 0.0 s
+  zone   9 moment 258     2.8 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.0% | 0.0 s
+  zone  10 moment  10    13.7 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  98.5% | 0.0 s
+  zone  11 moment 225    37.4 mm2 rectilinear             2 passes, profondeur ok  99.7%, couverture  99.9% | 0.1 s
+  zone  12 moment 178    16.5 mm2 rectilinear             2 passes, profondeur ok  99.8%, couverture  98.8% | 0.0 s
+  zone  13 moment 298  1217.7 mm2 rectilinear            33 passes, profondeur ok  99.9%, couverture  99.6% | 3.6 s
+  zone  14 moment 297    18.0 mm2 rectilinear             3 passes, profondeur ok  99.7%, couverture  99.4% | 0.1 s
+  zone  15 moment 299    36.3 mm2 rectilinear             2 passes, profondeur ok  99.8%, couverture  99.7% | 0.1 s
+  zone  16 moment 218    13.7 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  98.5% | 0.0 s
+  zone  17 moment 234    33.1 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  99.4% | 0.1 s
+  zone  18 moment 245   141.8 mm2 rectilinear            14 passes, profondeur ok 100.0%, couverture  98.8% | 0.4 s
+  zone  19 moment 245    36.8 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  99.5% | 0.1 s
+  zone  20 moment 141    14.6 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  99.0% | 0.0 s
+  zone  21 moment 108    66.2 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  99.2% | 0.1 s
+  zone  22 moment 121    11.8 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  97.5% | 0.0 s
+  zone  23 moment 141    19.3 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.4% | 0.1 s
+  zone  24 moment  52    38.5 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  99.1% | 0.1 s
+  zone  25 moment 207    30.3 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  99.3% | 0.1 s
+  zone  26 moment 146    19.2 mm2 rectilinear             7 passes, profondeur ok 100.0%, couverture  96.1% | 0.1 s
+  zone  27 moment 144    11.9 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  95.8% | 0.0 s
+  zone  28 moment 227     4.9 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  96.0% | 0.0 s
+  zone  29 moment 226     2.3 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  93.5% | 0.0 s
+  zone  30 moment 260     2.6 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  90.0% | 0.0 s
+  zone  31 moment 146    16.2 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  99.4% | 0.0 s
+  zone  32 moment 122     9.7 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  97.0% | 0.0 s
+
+33/33 zones tracees ; couverture ponderee 99.2% ; profondeur ok ponderee 99.9% ; 6 s au total
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_pin_skin_paths_pass4.pkl

@@ -1,0 +1,13 @@
+controle gradient : 30/30 tetraedres calculables, ecart max a (0,0,1) = 6.7e-16
+creusement parallele : 10 processus
+creusement sous les zones de surface (epaisseur 0.2 mm) : 102/147 couches recalculees (8 s)
+premiere couche : motif concentric_conform, 6 passes
+etapes 5+6 dans l'espace deforme : 147 couches (9 s)
+planeite : ecart en z max par couche = 0.0e+00 mm ; couches avec un contour invalide : 0/147 (avant : 65/284) ; raisons : {}
+remplissage mesure / attendu : aucune couche assez grande pour en attendre
+morceaux (zone coupee par la 1re paroi, > 0,5 mm2) : 2, dont SANS trajectoire : 0
+trous : 0, bordes par leur contour : 0
+retour : 27956 points, hors de tout tetraedre 0 (0.00%), ambigus (plissement) 201 (0.72%), coupes (a plus de w/2 hors du volume) 0 (0.00%), sauts transformes en trajets a vide 54
+segments ramenes : median 0.14 mm, 99e centile 0.68 mm, max 1.00 mm (avant subdivision : max 39,2)
+contours ramenes -> surface du STL d'origine : mediane 0.200 mm, 95e centile 0.200 mm, max 1.983 mm
+sortie : R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_l_shape_overhang_pin_deformed_slice_skin_pass16.pkl

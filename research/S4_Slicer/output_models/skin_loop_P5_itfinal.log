@@ -1,0 +1,10 @@
+l_shape_overhang passe 16 : 147 couches de corps (rangs croissants), 4 zones de lissage inserees
+vitesse de depot 25 mm/s ; tete B limitee a 750 deg/s et 300 deg/s2 : temps des passes de lissage 0.2 min -> 0.2 min (x1.00)
+angles de tete (C impose par la position) : 0.5 s ; zones avec des points au-dela de 45 deg : 0
+collisions : 2671 points de lissage testes en 4.6 s
+
+zones en collision (RETIREES) : 0/4 (0 mm2 sur 84)
+zones gardees : 4, ecart tete / normale max par zone : mediane 6 deg, max 11 deg
+points de collision (rognage) : 0 sur 2671
+5 s au total
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_l_shape_overhang_pin_print_order_pass16.pkl

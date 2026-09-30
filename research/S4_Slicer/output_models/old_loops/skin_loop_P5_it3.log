@@ -1,0 +1,15 @@
+dino passe 5 : 310 couches de corps (rangs croissants), 25 zones de lissage inserees
+lissage temporel des axes d'orientation (etape 8) : vitesse 13.08996938995747 rad/s, acceleration 5.235987755982989 rad/s2
+angles de tete (C impose par la position) : 8.6 s ; zones avec des points au-dela de 45 deg : 3
+collisions : 2118 points de lissage testes en 9.4 s
+
+zones en collision (RETIREES) : 5/25 (917 mm2 sur 1353)
+  zone   3 moment 249   223.6 mm2 : plateau 0, piece 3, au-dela de 45 deg 90 (penetration max 0.45 mm), ecart tete max 51 deg
+  zone   5 moment 124   382.5 mm2 : plateau 0, piece 2, au-dela de 45 deg 11 (penetration max 0.52 mm), ecart tete max 48 deg
+  zone   7 moment 238   208.4 mm2 : plateau 0, piece 0, au-dela de 45 deg 151 (penetration max 0.00 mm), ecart tete max 60 deg
+  zone  17 moment 142     4.9 mm2 : plateau 0, piece 9, au-dela de 45 deg 0 (penetration max 1.01 mm), ecart tete max 29 deg
+  zone  19 moment 127    97.8 mm2 : plateau 0, piece 2, au-dela de 45 deg 0 (penetration max 1.13 mm), ecart tete max 41 deg
+zones gardees : 20, ecart tete / normale max par zone : mediane 29 deg, max 44 deg
+points de collision (rognage) : 268 sur 2118
+18 s au total
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_dino_pin_print_order_pass5.pkl

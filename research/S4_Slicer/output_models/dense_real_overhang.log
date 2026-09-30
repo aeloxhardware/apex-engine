@@ -1,0 +1,261 @@
+Modele : real_overhang   ROTATION_MULTIPLIER=1.0   bareme MAX_OVERHANG=[30.0, 20.0, 10.0, 5.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+parsing switches
+success
+Delaunizing vertices...
+Delaunay seconds:  0
+Creating surface mesh ...
+Surface mesh seconds:  0.001
+Recovering boundaries...
+Boundary recovery seconds:  0
+Removing exterior tetrahedra ...
+Exterior tets removal seconds:  0
+Recovering Delaunayness...
+Delaunay recovery seconds:  0.001
+Refining mesh...
+  21 insertions, added 17 points, 14 subfaces in queue.
+  6 insertions, added 5 points, 6 subfaces in queue.
+  8 insertions, added 4 points, 75 tetrahedra in queue.
+  11 insertions, added 7 points, 165 tetrahedra in queue.
+  15 insertions, added 8 points, 293 tetrahedra in queue.
+  20 insertions, added 10 points, 419 tetrahedra in queue.
+  26 insertions, added 12 points, 577 tetrahedra in queue.
+  35 insertions, added 19 points, 809 tetrahedra in queue.
+  47 insertions, added 22 points, 1118 tetrahedra in queue.
+  62 insertions, added 32 points, 1592 tetrahedra in queue.
+  83 insertions, added 42 points, 2317 tetrahedra in queue.
+  111 insertions, added 59 points, 3281 tetrahedra in queue.
+  148 insertions, added 82 points, 4550 tetrahedra in queue.
+  197 insertions, added 108 points, 6175 tetrahedra in queue.
+  263 insertions, added 151 points, 8476 tetrahedra in queue.
+  350 insertions, added 203 points, 10365 tetrahedra in queue.
+Refinement seconds:  0.015
+Smoothing vertices...
+Mesh smoothing seconds:  0.013
+Improving mesh...
+Mesh improvement seconds:  0.001
+
+Writing nodes.
+Writing elements.
+
+Writing faces.
+Writing edges.
+
+Output seconds:  0
+Total running seconds:  0.031
+Statistics:
+
+  Input points: 16
+  Input facets: 28
+  Input segments: 24
+  Input holes: 0
+  Input regions: 0
+
+  Mesh points: 917
+  Mesh tetrahedra: 3285
+  Mesh faces: 7245
+  Mesh faces on exterior boundary: 1350
+  Mesh faces on input facets: 1350
+  Mesh edges on input segments: 230
+  Steiner points on input facets:  455
+  Steiner points on input segments:  206
+  Steiner points inside domain: 240
+
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:207: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:135: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:178: RuntimeWarning: invalid value encountered in divide
+  overhang_direction /= np.linalg.norm(overhang_direction, axis=1)[:, None]
+tetraedres : 3285   aretes >150 deg dans l'ORIGINAL : 0 (max 90.0 deg)
+
+passe MAX_OVH  retournes  ecrases  lames  diedre max surplomb int.   duree
+    1      30          0        0      0       97.1         2.89 %      7s
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:677: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    2      20          0        0      0      105.0         5.05 %      7s
+    3      10          0        0      0      149.9         5.39 %      5s
+    4       5          6        4      0      148.3         7.09 %      5s
+    5       0         11       11      2      177.8        17.87 %      6s
+    6       0         19       18      3      177.6        18.20 %      6s
+    7       0         25       14      2      160.9        18.72 %      6s
+    8       0         31       15      2      156.2        18.78 %      6s
+    9       0         37       18      3      174.8        18.57 %      6s
+Modele : real_overhang   ROTATION_MULTIPLIER=1.001   bareme MAX_OVERHANG=[30.0, 30.0, 30.0]
+parsing switches
+success
+Delaunizing vertices...
+Delaunay seconds:  0
+Creating surface mesh ...
+Surface mesh seconds:  0
+Recovering boundaries...
+Boundary recovery seconds:  0
+Removing exterior tetrahedra ...
+Exterior tets removal seconds:  0
+Recovering Delaunayness...
+Delaunay recovery seconds:  0
+Refining mesh...
+  21 insertions, added 17 points, 14 subfaces in queue.
+  6 insertions, added 5 points, 6 subfaces in queue.
+  8 insertions, added 4 points, 75 tetrahedra in queue.
+  11 insertions, added 7 points, 165 tetrahedra in queue.
+  15 insertions, added 8 points, 293 tetrahedra in queue.
+  20 insertions, added 10 points, 419 tetrahedra in queue.
+  26 insertions, added 12 points, 577 tetrahedra in queue.
+  35 insertions, added 19 points, 809 tetrahedra in queue.
+  47 insertions, added 22 points, 1118 tetrahedra in queue.
+  62 insertions, added 32 points, 1592 tetrahedra in queue.
+  83 insertions, added 42 points, 2317 tetrahedra in queue.
+  111 insertions, added 59 points, 3281 tetrahedra in queue.
+  148 insertions, added 82 points, 4550 tetrahedra in queue.
+  197 insertions, added 108 points, 6175 tetrahedra in queue.
+  263 insertions, added 151 points, 8476 tetrahedra in queue.
+  350 insertions, added 203 points, 10365 tetrahedra in queue.
+Refinement seconds:  0.013
+Smoothing vertices...
+Mesh smoothing seconds:  0.013
+Improving mesh...
+Mesh improvement seconds:  0
+
+Writing nodes.
+Writing elements.
+
+Writing faces.
+Writing edges.
+
+Output seconds:  0.001
+Total running seconds:  0.027
+Statistics:
+
+  Input points: 16
+  Input facets: 28
+  Input segments: 24
+  Input holes: 0
+  Input regions: 0
+
+  Mesh points: 917
+  Mesh tetrahedra: 3285
+  Mesh faces: 7245
+  Mesh faces on exterior boundary: 1350
+  Mesh faces on input facets: 1350
+  Mesh edges on input segments: 230
+  Steiner points on input facets:  455
+  Steiner points on input segments:  206
+  Steiner points inside domain: 240
+
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:207: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:135: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:178: RuntimeWarning: invalid value encountered in divide
+  overhang_direction /= np.linalg.norm(overhang_direction, axis=1)[:, None]
+tetraedres : 3285   aretes >150 deg dans l'ORIGINAL : 0 (max 90.0 deg)
+
+passe MAX_OVH  retournes  ecrases  lames  diedre max surplomb int.   duree
+    1      30          0        0      0       97.2         2.89 %      7s
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:677: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    2      30          0        0      0      103.5         4.17 %      7s
+    3      30          0        0      0      117.3         4.44 %      6s
+Modele : real_overhang   ROTATION_MULTIPLIER=2.0   bareme MAX_OVERHANG=[30.0, 30.0, 30.0]
+parsing switches
+success
+Delaunizing vertices...
+Delaunay seconds:  0
+Creating surface mesh ...
+Surface mesh seconds:  0
+Recovering boundaries...
+Boundary recovery seconds:  0
+Removing exterior tetrahedra ...
+Exterior tets removal seconds:  0.001
+Recovering Delaunayness...
+Delaunay recovery seconds:  0
+Refining mesh...
+  21 insertions, added 17 points, 14 subfaces in queue.
+  6 insertions, added 5 points, 6 subfaces in queue.
+  8 insertions, added 4 points, 75 tetrahedra in queue.
+  11 insertions, added 7 points, 165 tetrahedra in queue.
+  15 insertions, added 8 points, 293 tetrahedra in queue.
+  20 insertions, added 10 points, 419 tetrahedra in queue.
+  26 insertions, added 12 points, 577 tetrahedra in queue.
+  35 insertions, added 19 points, 809 tetrahedra in queue.
+  47 insertions, added 22 points, 1118 tetrahedra in queue.
+  62 insertions, added 32 points, 1592 tetrahedra in queue.
+  83 insertions, added 42 points, 2317 tetrahedra in queue.
+  111 insertions, added 59 points, 3281 tetrahedra in queue.
+  148 insertions, added 82 points, 4550 tetrahedra in queue.
+  197 insertions, added 108 points, 6175 tetrahedra in queue.
+  263 insertions, added 151 points, 8476 tetrahedra in queue.
+  350 insertions, added 203 points, 10365 tetrahedra in queue.
+Refinement seconds:  0.013
+Smoothing vertices...
+Mesh smoothing seconds:  0.013
+Improving mesh...
+Mesh improvement seconds:  0
+
+Writing nodes.
+Writing elements.
+
+Writing faces.
+Writing edges.
+
+Output seconds:  0.001
+Total running seconds:  0.028
+Statistics:
+
+  Input points: 16
+  Input facets: 28
+  Input segments: 24
+  Input holes: 0
+  Input regions: 0
+
+  Mesh points: 917
+  Mesh tetrahedra: 3285
+  Mesh faces: 7245
+  Mesh faces on exterior boundary: 1350
+  Mesh faces on input facets: 1350
+  Mesh edges on input segments: 230
+  Steiner points on input facets:  455
+  Steiner points on input segments:  206
+  Steiner points inside domain: 240
+
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:207: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:135: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:178: RuntimeWarning: invalid value encountered in divide
+  overhang_direction /= np.linalg.norm(overhang_direction, axis=1)[:, None]
+tetraedres : 3285   aretes >150 deg dans l'ORIGINAL : 0 (max 90.0 deg)
+
+passe MAX_OVH  retournes  ecrases  lames  diedre max surplomb int.   duree
+    1      30          0        0      0      105.2         4.32 %      7s
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:677: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    2      30         11        8      2      172.2         4.23 %      6s
+    3      30         24       22      4      170.1         3.74 %      5s

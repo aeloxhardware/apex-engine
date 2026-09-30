@@ -1,0 +1,10 @@
+tilted benchy undertriangulated_repaired passe 4 : 313 couches de corps (rangs croissants), 25 zones de lissage inserees
+lissage temporel des axes d'orientation (etape 8) : vitesse 13.08996938995747 rad/s, acceleration 5.235987755982989 rad/s2
+angles de tete (C impose par la position) : 4.4 s ; zones avec des points au-dela de 45 deg : 0
+collisions : 1121 points de lissage testes en 4.7 s
+
+zones en collision (RETIREES) : 0/25 (0 mm2 sur 648)
+zones gardees : 25, ecart tete / normale max par zone : mediane 26 deg, max 44 deg
+points de collision (rognage) : 0 sur 1121
+9 s au total
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_pin_print_order_pass4.pkl

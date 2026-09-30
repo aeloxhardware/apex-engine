@@ -1,0 +1,27 @@
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:207: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:135: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+Squirtle : 116402 tetraedres
+juges : repli si plus grande zone > 30.0 mm2 ; pas de changement si deplacement < 25% du plus grand deja vu
+passe MAX_OVH   MULT  depl. med.   zone max  duree  decision
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:863: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    1      30      1     1.324mm     0.6mm2   757s  acceptee -> MAX_OVERHANG 20
+    2      20      1     1.009mm     0.9mm2   750s  acceptee -> MAX_OVERHANG 10
+    3      10      1     1.387mm     4.0mm2   634s  acceptee -> MAX_OVERHANG 5
+    4       5      1     1.391mm     8.5mm2   570s  acceptee -> MAX_OVERHANG 0
+    5       0      1     0.934mm    29.7mm2   541s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    -       0      1     0.670mm    34.9mm2   448s  REPLI sur une passe repetee -- rien a reculer
+
+arret : repli en repetant les derniers reglages -- 5 passe(s) acceptee(s), derniers reglages MAX_OVERHANG=0, ROTATION_MULTIPLIER=1
+resultat : R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_Squirtle_final.stl

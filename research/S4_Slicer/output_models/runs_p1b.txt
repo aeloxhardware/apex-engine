@@ -1,0 +1,8 @@
+real_overhang|0.5 --base-contact
+death_repaired|--base-contact
+l_shape_overhang|0.5 --no-pin
+l_shape_overhang|0.5
+l_shape_overhang|0.5 --base-contact
+l-triple-axis-overhanged-shape|0.5 --no-pin
+l-triple-axis-overhanged-shape|0.5
+l-triple-axis-overhanged-shape|0.5 --base-contact

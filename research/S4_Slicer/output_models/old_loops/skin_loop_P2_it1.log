@@ -1,0 +1,13 @@
+micro-zones (distance au bord < 0.60 mm) : 26 rattachees, 9 isolees et 16 a voisines inaccessibles non lissees (89.0 mm2) | 4.2 s
+dino_pin passe 5 : 14462 faces (18432 apres coupe), 310 couches
+  retenue              9131 faces   42.0% de la surface
+  inatteignable        1970 faces   11.9% de la surface
+  collision plateau    4098 faces   28.2% de la surface
+  collision objet       427 faces    3.1% de la surface
+  contact plateau      1956 faces   13.8% de la surface
+  zone trop petite       71 faces    0.1% de la surface
+  micro-zone non lissee    779 faces    1.0% de la surface
+  morceaux apres coupe aux aretes (< 150 deg entre faces) : 60 ; bandes (minimum) : 104 ; zones : 70 (moments 55 a 309)
+  chaque zone accessible a son moment : True
+  sommets de surface non localises dans un tetraedre : 9
+  temps : surface et phi 0.1 s ; IK couplee a la position (12506 faces) 2.5 s ; collision (10536 faces, 4581 points de tete) 55.8 s ; coupe le long de 33 lignes de niveau 0.0 s ; bandes et zones 4.2 s ; total 62.7 s

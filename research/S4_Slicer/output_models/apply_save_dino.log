@@ -1,0 +1,14 @@
+etape 8 : 1027544 points (3315 polylignes) en 216 s ; corps : ecart tete / normale de couche median 3.3 deg, 95e 15.5, max 85.8 ; > 5 deg 35.3%, > 45 deg 0.1%
+borne de B selon la hauteur : 1080 points ramenes (0.11%) ; |dB| median 27.8 deg, max 109.0
+  20000/88453 points testes, 41 s, 0 evenements
+  40000/88453 points testes, 95 s, 14 evenements
+  60000/88453 points testes, 169 s, 54 evenements
+  80000/88453 points testes, 232 s, 192 evenements
+tour 1 : 192 points en contact ; resolus par un autre B : 192/192 (paliers 45/90/181 deg : [97, 85, 10])
+  applique a 3729 points (lissage +-1 / 3 mm)
+  20000/88453 points testes, 333 s, 0 evenements
+  40000/88453 points testes, 386 s, 0 evenements
+  60000/88453 points testes, 456 s, 0 evenements
+  80000/88453 points testes, 516 s, 0 evenements
+tour 2 : 0 points en contact ; resolus par un autre B : 0/0 (paliers 45/90/181 deg : [0, 0, 0])
+etape 9 : 88453 echantillons (1 sur 1) en 569 s ; 0 evenements sur 0 points ; par type : {}

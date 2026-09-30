@@ -1,0 +1,33 @@
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:220: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:148: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+base figee : 108 cellules, 203 noeuds, jusqu'a 0.20 mm du plateau (surplomb le plus bas a partir de 0.00 mm)
+tilted benchy undertriangulated_repaired : 24345 tetraedres
+juges : repli si plus grande zone > 30.0 mm2 ; pas de changement si deplacement < 25% du plus grand deja vu
+passe MAX_OVH   MULT  depl. med.   zone max  duree  decision
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:888: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    1      30      1     0.637mm     0.1mm2    52s  acceptee -> MAX_OVERHANG 20
+    2      20      1     0.700mm     3.0mm2    56s  acceptee -> MAX_OVERHANG 10
+    3      10      1     0.790mm     8.3mm2    59s  acceptee -> MAX_OVERHANG 5
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:191: RuntimeWarning: invalid value encountered in divide
+  overhang_direction /= np.linalg.norm(overhang_direction, axis=1)[:, None]
+    4       5      1     0.690mm     8.0mm2    60s  acceptee -> MAX_OVERHANG 0
+    -       0      1     0.529mm    33.8mm2    63s  REPLI -- passe rejetee, essai a overhang=2.5
+    -     2.5      1     0.602mm    33.8mm2    60s  REPLI -- passe rejetee, essai a overhang=3.75
+    5    3.75      1     0.588mm    22.4mm2    60s  acceptee -> MAX_OVERHANG 0
+    -       0      1     0.400mm    82.8mm2    62s  REPLI -- passe rejetee, essai a overhang=1.875
+    -   1.875      1     0.487mm    83.2mm2    62s  REPLI -- ecart minimal atteint sur overhang
+
+arret : repli meme avec le plus petit ecart sur overhang -- 5 passe(s) acceptee(s), derniers reglages MAX_OVERHANG=3.75, ROTATION_MULTIPLIER=1
+resultat : R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_pin_reach_off70_0_final.stl

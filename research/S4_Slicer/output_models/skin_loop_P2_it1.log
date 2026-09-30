@@ -1,0 +1,13 @@
+micro-zones (distance au bord < 0.60 mm) : 0 rattachees, 0 isolees et 0 a voisines inaccessibles non lissees (0.0 mm2) | 0.1 s
+l_shape_overhang_pin passe 16 : 1120 faces (1120 apres coupe), 147 couches
+  retenue               200 faces   20.9% de la surface
+  inatteignable         648 faces   55.3% de la surface
+  collision plateau     256 faces   21.2% de la surface
+  collision objet         0 faces    0.0% de la surface
+  contact plateau        16 faces    2.5% de la surface
+  zone trop petite        0 faces    0.0% de la surface
+  micro-zone non lissee      0 faces    0.0% de la surface
+  morceaux apres coupe aux aretes (< 150 deg entre faces) : 5 ; bandes (minimum) : 5 ; zones : 5 (moments 111 a 146)
+  chaque zone accessible a son moment : True
+  sommets de surface non localises dans un tetraedre : 0
+  temps : surface et phi 0.0 s ; IK couplee a la position (1104 faces, centre + 3 sommets) 0.9 s ; collision (456 faces, 4581 points de tete, calcule) 0.3 s ; coupe le long de 0 lignes de niveau 0.0 s ; bandes et zones 0.1 s ; total 1.4 s

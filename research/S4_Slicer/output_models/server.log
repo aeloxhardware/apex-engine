@@ -1,0 +1,21 @@
+[server] modele: benchy upsidedown tilted
+[server] ingestion initiale...
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:207: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:135: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:178: RuntimeWarning: invalid value encountered in divide
+  overhang_direction /= np.linalg.norm(overhang_direction, axis=1)[:, None]
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:677: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+[server] pret -- 32971 tetraedres
+[server] ouvrir http://127.0.0.1:8765/ dans le navigateur

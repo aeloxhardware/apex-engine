@@ -1,0 +1,17 @@
+tilted benchy undertriangulated_repaired passe 4 : 313 couches de corps (rangs croissants), 35 zones de lissage inserees
+lissage temporel des axes d'orientation (etape 8) : limites de vitesse/acceleration NON renseignees dans le profil machine -> sans effet
+angles de tete (C impose par la position) : 12.9 s ; zones avec des points au-dela de 45 deg : 0
+collisions : 3152 points de lissage testes en 10.1 s
+
+zones en collision (RETIREES) : 7/35 (168 mm2 sur 2096)
+  zone   4 moment 191    34.6 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.62 mm), ecart tete max 30 deg
+  zone   5 moment 191    37.1 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.16 mm), ecart tete max 29 deg
+  zone  14 moment 303    22.2 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.16 mm), ecart tete max 44 deg
+  zone  15 moment 312    44.0 mm2 : plateau 0, piece 2, au-dela de 45 deg 0 (penetration max 0.42 mm), ecart tete max 45 deg
+  zone  16 moment 213    15.5 mm2 : plateau 0, piece 3, au-dela de 45 deg 0 (penetration max 0.76 mm), ecart tete max 20 deg
+  zone  18 moment 219    12.4 mm2 : plateau 0, piece 6, au-dela de 45 deg 0 (penetration max 0.59 mm), ecart tete max 26 deg
+  zone  34 moment 193     2.6 mm2 : plateau 0, piece 3, au-dela de 45 deg 0 (penetration max 0.91 mm), ecart tete max 25 deg
+zones gardees : 28, ecart tete / normale max par zone : mediane 26 deg, max 44 deg
+points de collision (rognage) : 20 sur 3152
+23 s au total
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_pin_print_order_pass4.pkl

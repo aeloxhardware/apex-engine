@@ -1,0 +1,4 @@
+etape 8 : 943807 points (4921 polylignes) en 186 s ; corps : ecart tete / normale de couche median 9.1 deg, 95e 27.4, max 89.1 ; > 5 deg 69.0%, > 45 deg 1.7%
+  5000/6480 points testes, 26 s (192 pts/s), 9 evenements
+etape 9 : 6480 echantillons (1 sur 10) en 59 s ; 10 evenements sur 9 points ; par type : {('platform', 'body'): 8, ('printed_part', 'body'): 2}
+  penetration mediane 4.80 mm, max 78.00 mm

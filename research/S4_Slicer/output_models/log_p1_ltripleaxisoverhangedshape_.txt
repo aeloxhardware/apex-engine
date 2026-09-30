@@ -1,0 +1,40 @@
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:207: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:135: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:178: RuntimeWarning: invalid value encountered in divide
+  overhang_direction /= np.linalg.norm(overhang_direction, axis=1)[:, None]
+base figee : 12 cellules, 12 noeuds, jusqu'a 18.00 mm du plateau (surplomb le plus bas a partir de 18.00 mm)
+l-triple-axis-overhanged-shape : 42 tetraedres
+juges : repli si plus grande zone > 30.0 mm2 ; pas de changement si deplacement < 25% du plus grand deja vu
+passe MAX_OVH   MULT  depl. med.   zone max  duree  decision
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:863: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    1      30      1     0.071mm     0.0mm2     1s  acceptee -> MAX_OVERHANG 20
+    2      20      1     0.077mm     0.0mm2     1s  acceptee -> MAX_OVERHANG 10
+    3      10      1     0.084mm     0.0mm2     1s  acceptee -> MAX_OVERHANG 5
+    4       5      1     0.423mm     0.0mm2     1s  acceptee -> MAX_OVERHANG 0
+    5       0      1     0.410mm     0.0mm2     2s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    6       0      1     0.026mm     0.0mm2     1s  acceptee, peu de changement -> multiplicateur 1.5
+    7       0    1.5     0.044mm     0.0mm2     1s  acceptee, peu de changement -> multiplicateur 2
+    8       0      2     0.131mm     0.0mm2     0s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    9       0      2     0.065mm     0.0mm2     1s  acceptee, peu de changement -> multiplicateur 2.5
+   10       0    2.5     0.164mm     0.0mm2     0s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+   11       0    2.5     0.166mm     0.0mm2     0s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+   12       0    2.5     0.078mm     0.0mm2     1s  acceptee, peu de changement -> multiplicateur 3
+   13       0      3     0.188mm     0.0mm2     0s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+   14       0      3     0.099mm     0.0mm2     1s  acceptee, peu de changement -> multiplicateur 3.5
+   15       0    3.5     0.225mm     0.0mm2     0s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+   16       0    3.5     0.225mm     0.0mm2     0s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+
+arret : plafond de 16 passes atteint -- 16 passe(s) acceptee(s), derniers reglages MAX_OVERHANG=0, ROTATION_MULTIPLIER=3.5
+resultat : R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_l-triple-axis-overhanged-shape_pin_final.stl

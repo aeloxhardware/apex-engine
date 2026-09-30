@@ -1,0 +1,30 @@
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:207: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:135: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:178: RuntimeWarning: invalid value encountered in divide
+  overhang_direction /= np.linalg.norm(overhang_direction, axis=1)[:, None]
+benchy upsidedown tilted : 32971 tetraedres
+juges : repli si plus grande zone > 30.0 mm2 ; pas de changement si deplacement < 25% du plus grand deja vu
+passe MAX_OVH   MULT  depl. med.   zone max  duree  decision
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:677: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    1      30      1     2.185mm     0.3mm2   108s  acceptee -> MAX_OVERHANG 20
+    2      20      1     1.580mm     0.7mm2   102s  acceptee -> MAX_OVERHANG 10
+    3      10      1     1.141mm     6.0mm2   111s  acceptee -> MAX_OVERHANG 5
+    4       5      1     0.930mm    13.7mm2   102s  acceptee -> MAX_OVERHANG 0
+    -       0      1     0.926mm   149.6mm2   108s  REPLI -- passe rejetee, essai a overhang=2.5
+    -     2.5      1     0.893mm   152.8mm2   109s  REPLI -- passe rejetee, essai a overhang=3.75
+    -    3.75      1     0.863mm   152.1mm2   108s  REPLI -- ecart minimal atteint sur overhang
+
+arret : repli meme avec le plus petit ecart sur overhang -- 4 passe(s) acceptee(s), derniers reglages MAX_OVERHANG=5, ROTATION_MULTIPLIER=1
+resultat : R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_benchy_upsidedown_tilted_final.stl

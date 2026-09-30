@@ -1,0 +1,27 @@
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:223: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:151: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+tilted benchy undertriangulated_repaired : 24345 tetraedres
+juges : repli si plus grande zone > 30.0 mm2 ; pas de changement si deplacement < 25% du plus grand deja vu
+passe MAX_OVH   MULT  depl. med.   zone max  duree  decision
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:891: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    1      30      1     1.071mm     1.2mm2    84s  acceptee -> MAX_OVERHANG 20
+    2      20      1     0.791mm     1.6mm2    96s  acceptee -> MAX_OVERHANG 10
+    3      10      1     1.076mm     2.1mm2   103s  acceptee -> MAX_OVERHANG 5
+    4       5      1     1.129mm    14.2mm2   105s  acceptee -> MAX_OVERHANG 0
+    5       0      1     1.100mm    19.9mm2   111s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    -       0      1     0.409mm   102.7mm2   107s  REPLI sur une passe repetee -- rien a reculer
+
+arret : repli en repetant les derniers reglages -- 5 passe(s) acceptee(s), derniers reglages MAX_OVERHANG=0, ROTATION_MULTIPLIER=1
+resultat : R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_final.stl

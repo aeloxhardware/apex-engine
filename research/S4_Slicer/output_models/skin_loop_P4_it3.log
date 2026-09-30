@@ -1,0 +1,31 @@
+death_repaired_pin passe 3 : 27 zones, motif general rectilinear, angle 45.0 deg, recouvrement 0.2, epaisseur 0.2, cordons de bord 1
+  zone   0 moment 214   142.9 mm2 rectilinear            17 passes, profondeur ok 100.0%, couverture  98.4% | 0.4 s
+  zone   1 moment 198     4.4 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  99.0% | 0.0 s
+  zone   2 moment 107    52.5 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  99.1% | 0.2 s
+  zone   3 moment 134   124.5 mm2 rectilinear             9 passes, profondeur ok 100.0%, couverture  99.1% | 0.4 s
+  zone   4 moment 184    74.8 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  99.8% | 0.3 s
+  zone   5 moment 194  1627.2 mm2 rectilinear            37 passes, profondeur ok 100.0%, couverture  99.7% | 5.8 s
+  zone   6 moment 210   426.5 mm2 rectilinear            34 passes, profondeur ok 100.0%, couverture  99.4% | 1.5 s
+  zone   7 moment 167     2.7 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  96.0% | 0.0 s
+  zone   8 moment 168     7.7 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  96.0% | 0.0 s
+  zone   9 moment 174    10.4 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  97.6% | 0.0 s
+  zone  10 moment 178     8.8 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  97.5% | 0.0 s
+  zone  11 moment 195    83.5 mm2 rectilinear             5 passes, profondeur ok  99.8%, couverture  99.8% | 0.3 s
+  zone  12 moment 202     6.2 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  95.5% | 0.0 s
+  zone  13 moment 172     8.1 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.5% | 0.0 s
+  zone  14 moment 178    11.2 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  96.4% | 0.0 s
+  zone  15 moment 214     4.6 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  99.0% | 0.0 s
+  zone  16 moment 169    65.1 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  97.8% | 0.2 s
+  zone  17 moment 140    53.9 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  99.2% | 0.2 s
+  zone  18 moment 138    31.2 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  99.4% | 0.1 s
+  zone  19 moment 140    61.8 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  99.5% | 0.2 s
+  zone  20 moment 138    31.5 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  99.2% | 0.1 s
+  zone  21 moment 116    14.4 mm2 rectilinear             2 passes, profondeur ok  99.8%, couverture  99.3% | 0.0 s
+  zone  22 moment  71    17.7 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  99.2% | 0.0 s
+  zone  23 moment  49     3.1 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  96.0% | 0.0 s
+  zone  24 moment  63    31.4 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  97.8% | 0.1 s
+  zone  25 moment  71     5.8 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  95.0% | 0.0 s
+  zone  26 moment 117     4.7 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  92.5% | 0.0 s
+
+27/27 zones tracees ; couverture ponderee 99.4% ; profondeur ok ponderee 100.0% ; 10 s au total
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_death_repaired_pin_skin_paths_pass3.pkl

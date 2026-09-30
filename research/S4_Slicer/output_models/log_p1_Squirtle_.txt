@@ -1,0 +1,31 @@
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:207: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:135: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+base figee : 3037 cellules, 1731 noeuds, jusqu'a 0.20 mm du plateau (surplomb le plus bas a partir de 0.00 mm)
+Squirtle : 116402 tetraedres
+juges : repli si plus grande zone > 30.0 mm2 ; pas de changement si deplacement < 25% du plus grand deja vu
+passe MAX_OVH   MULT  depl. med.   zone max  duree  decision
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:863: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    1      30      1     1.054mm     0.6mm2   728s  acceptee -> MAX_OVERHANG 20
+    2      20      1     1.017mm     0.9mm2   746s  acceptee -> MAX_OVERHANG 10
+    3      10      1     1.120mm     3.6mm2   612s  acceptee -> MAX_OVERHANG 5
+    4       5      1     1.121mm    10.8mm2   567s  acceptee -> MAX_OVERHANG 0
+    5       0      1     0.932mm    13.6mm2   518s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    6       0      1     0.670mm    19.3mm2   442s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    7       0      1     0.571mm    19.9mm2   325s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    8       0      1     0.402mm    20.6mm2   299s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    -       0      1     0.406mm    35.3mm2   305s  REPLI sur une passe repetee -- rien a reculer
+
+arret : repli en repetant les derniers reglages -- 8 passe(s) acceptee(s), derniers reglages MAX_OVERHANG=0, ROTATION_MULTIPLIER=1
+resultat : R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_Squirtle_pin_final.stl

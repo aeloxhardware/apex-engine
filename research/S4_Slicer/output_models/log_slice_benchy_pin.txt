@@ -1,0 +1,10 @@
+controle gradient : 32971/32971 tetraedres calculables, ecart max a (0,0,1) = 6.3e-14
+etapes 5+6 dans l'espace deforme : 232 couches (6 s)
+planeite : ecart en z max par couche = 2.2e-16 mm ; couches avec un contour invalide : 62/232 (avant : 65/284) ; raisons : {'Self-intersection': 81}
+remplissage mesure / attendu, sur 97 couches qui en attendent : mediane 1.41, 10e-90e centiles 1.18-1.96 (couche 185 avant : 0,27)
+morceaux (zone coupee par la 1re paroi, > 0,5 mm2) : 148, dont SANS trajectoire : 0
+trous : 115, bordes par leur contour : 115
+retour : 247542 points, hors de tout tetraedre 1958 (0.79%), ambigus (plissement) 1884 (0.76%), coupes (a plus de w/2 hors du volume) 279 (0.11%), sauts transformes en trajets a vide 126
+segments ramenes : median 0.37 mm, 99e centile 0.80 mm, max 1.00 mm (avant subdivision : max 39,2)
+contours ramenes -> surface du STL d'origine : mediane 0.000 mm, 95e centile 0.000 mm, max 1.202 mm
+sortie : R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_benchy_upsidedown_tilted_pin_deformed_slice_pass4.pkl

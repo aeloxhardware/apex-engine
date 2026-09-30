@@ -1,0 +1,14 @@
+rognage P5 : 11676 points de collision, 3041 faces retirees (rayon 2.0 mm, 2028.8 mm2)
+micro-zones (distance au bord < 0.60 mm) : 3 rattachees, 7 isolees et 2 a voisines inaccessibles non lissees (14.5 mm2) | 1.9 s
+dino_pin passe 5 : 14462 faces (14532 apres coupe), 310 couches
+  retenue              2995 faces   20.2% de la surface
+  inatteignable        1970 faces   11.9% de la surface
+  collision plateau    4098 faces   28.2% de la surface
+  collision objet      3468 faces   25.8% de la surface
+  contact plateau      1956 faces   13.8% de la surface
+  zone trop petite       11 faces    0.0% de la surface
+  micro-zone non lissee     34 faces    0.2% de la surface
+  morceaux apres coupe aux aretes (< 150 deg entre faces) : 44 ; bandes (minimum) : 47 ; zones : 27 (moments 80 a 308)
+  chaque zone accessible a son moment : True
+  sommets de surface non localises dans un tetraedre : 9
+  temps : surface et phi 0.1 s ; IK couplee a la position (12506 faces) 2.5 s ; collision (10536 faces, 4581 points de tete) 53.1 s ; coupe le long de 3 lignes de niveau 0.0 s ; bandes et zones 1.9 s ; total 57.5 s

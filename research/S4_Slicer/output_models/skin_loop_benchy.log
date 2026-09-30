@@ -1,0 +1,22 @@
+tour 1
+  P2         75 s  (code 0, skin_loop_P2_it1.log)
+  P4          9 s  (code 0, skin_loop_P4_it1.log)
+  P3        509 s  (code 0, skin_loop_P3_it1.log)
+  P5         32 s  (code 0, skin_loop_P5_it1.log)
+  -> 582 points de collision ; zones en collision (RETIREES) : 34/50 (2603 mm2 sur 2875)
+tour 2
+  P2         71 s  (code 0, skin_loop_P2_it2.log)
+  P4          7 s  (code 0, skin_loop_P4_it2.log)
+  P3        369 s  (code 0, skin_loop_P3_it2.log)
+  P5         24 s  (code 0, skin_loop_P5_it2.log)
+  -> 20 points de collision ; zones en collision (RETIREES) : 7/35 (168 mm2 sur 2096)
+tour 3
+  P2         71 s  (code 0, skin_loop_P2_it3.log)
+  P4          7 s  (code 0, skin_loop_P4_it3.log)
+  P3        352 s  (code 0, skin_loop_P3_it3.log)
+  P5         23 s  (code 0, skin_loop_P5_it3.log)
+  -> 11 points de collision ; zones en collision (RETIREES) : 4/33 (73 mm2 sur 2028)
+3 tours sans zero collision : zones restantes retirees, tranchage refait sans leur creusement
+  P3        339 s  (code 0, skin_loop_P3_itfinal.log)
+  P5         22 s  (code 0, skin_loop_P5_itfinal.log)
+  -> zones retirees : [4, 5, 16, 28] ; points de collision restants : 0

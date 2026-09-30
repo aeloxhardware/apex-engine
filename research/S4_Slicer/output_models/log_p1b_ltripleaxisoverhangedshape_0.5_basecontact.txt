@@ -1,0 +1,100 @@
+parsing switches
+success
+Delaunizing vertices...
+Delaunay seconds:  0
+Creating surface mesh ...
+Surface mesh seconds:  0.001
+Recovering boundaries...
+Boundary recovery seconds:  0
+Removing exterior tetrahedra ...
+Exterior tets removal seconds:  0
+Recovering Delaunayness...
+Delaunay recovery seconds:  0
+Refining mesh...
+  22 insertions, added 16 points, 53 tetrahedra in queue.
+  7 insertions, added 6 points, 106 tetrahedra in queue.
+  9 insertions, added 4 points, 202 tetrahedra in queue.
+  12 insertions, added 8 points, 319 tetrahedra in queue.
+  16 insertions, added 8 points, 430 tetrahedra in queue.
+  21 insertions, added 10 points, 549 tetrahedra in queue.
+  28 insertions, added 13 points, 732 tetrahedra in queue.
+  38 insertions, added 21 points, 1020 tetrahedra in queue.
+  50 insertions, added 27 points, 1316 tetrahedra in queue.
+  67 insertions, added 38 points, 1770 tetrahedra in queue.
+  89 insertions, added 53 points, 2634 tetrahedra in queue.
+  119 insertions, added 67 points, 3663 tetrahedra in queue.
+  159 insertions, added 92 points, 5041 tetrahedra in queue.
+  212 insertions, added 124 points, 6738 tetrahedra in queue.
+  282 insertions, added 171 points, 8649 tetrahedra in queue.
+Refinement seconds:  0.022
+Smoothing vertices...
+Mesh smoothing seconds:  0.015
+Improving mesh...
+Mesh improvement seconds:  0.001
+
+Writing nodes.
+Writing elements.
+
+Writing faces.
+Writing edges.
+
+Output seconds:  0.001
+Total running seconds:  0.041
+Statistics:
+
+  Input points: 17
+  Input facets: 30
+  Input segments: 27
+  Input holes: 0
+  Input regions: 0
+
+  Mesh points: 799
+  Mesh tetrahedra: 2935
+  Mesh faces: 6432
+  Mesh faces on exterior boundary: 1124
+  Mesh faces on input facets: 1124
+  Mesh edges on input segments: 185
+  Steiner points on input facets:  389
+  Steiner points on input segments:  158
+  Steiner points inside domain: 235
+
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:207: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:135: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  surface_mesh = tet.extract_surface()
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:178: RuntimeWarning: invalid value encountered in divide
+  overhang_direction /= np.linalg.norm(overhang_direction, axis=1)[:, None]
+base figee : 25 cellules, 32 noeuds, jusqu'a 1.71 mm du plateau (surplomb le plus bas a partir de 18.00 mm)
+l-triple-axis-overhanged-shape : 2935 tetraedres
+juges : repli si plus grande zone > 30.0 mm2 ; pas de changement si deplacement < 25% du plus grand deja vu
+passe MAX_OVH   MULT  depl. med.   zone max  duree  decision
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\bird_core.py:870: PyVistaFutureWarning: The default value of `algorithm` for the filter
+`UnstructuredGrid.extract_surface` will change in the future. It currently defaults to
+`'dataset_surface'`, but will change to `None`. Explicitly set the `algorithm` keyword to
+silence this warning.
+  tet.extract_surface().save(path)
+    1      30      1     0.385mm     0.0mm2     9s  acceptee -> MAX_OVERHANG 20
+    2      20      1     0.328mm     0.0mm2     9s  acceptee -> MAX_OVERHANG 10
+    3      10      1     0.189mm     0.0mm2    10s  acceptee -> MAX_OVERHANG 5
+    4       5      1     0.177mm     0.0mm2    11s  acceptee -> MAX_OVERHANG 0
+    5       0      1     0.200mm     0.0mm2    10s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    6       0      1     0.159mm     0.0mm2    11s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    7       0      1     0.159mm     0.0mm2    10s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    8       0      1     0.141mm     0.0mm2    10s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+    9       0      1     0.095mm     0.0mm2    11s  acceptee, peu de changement -> multiplicateur 1.5
+   10       0    1.5     0.145mm     0.0mm2    10s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+   11       0    1.5     0.099mm     0.0mm2     9s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+   12       0    1.5     0.044mm     0.0mm2     9s  acceptee, peu de changement -> multiplicateur 2
+   13       0      2     0.091mm     0.0mm2     8s  acceptee, peu de changement -> multiplicateur 2.5
+   14       0    2.5     0.143mm     0.0mm2     9s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+   15       0    2.5     0.148mm     0.0mm2     9s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+   16       0    2.5     0.127mm     0.0mm2     9s  acceptee, bareme epuise mais ca bouge encore -> meme passe
+
+arret : plafond de 16 passes atteint -- 16 passe(s) acceptee(s), derniers reglages MAX_OVERHANG=0, ROTATION_MULTIPLIER=2.5
+resultat : R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_l-triple-axis-overhanged-shape_a0.5_pinc_final.stl

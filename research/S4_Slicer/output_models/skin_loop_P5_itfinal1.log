@@ -1,0 +1,10 @@
+death_repaired passe 3 : 217 couches de corps (rangs croissants), 26 zones de lissage inserees
+vitesse de depot 25 mm/s ; tete B limitee a 750 deg/s et 300 deg/s2 : temps des passes de lissage 2.7 min -> 4.6 min (x1.70)
+angles de tete (C impose par la position) : 8.1 s ; zones avec des points au-dela de 45 deg : 0
+collisions : 40082 points de lissage testes en 82.4 s
+
+zones en collision (RETIREES) : 0/26 (0 mm2 sur 1289)
+zones gardees : 26, ecart tete / normale max par zone : mediane 28 deg, max 45 deg
+points de collision (rognage) : 0 sur 40082
+91 s au total
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_death_repaired_pin_print_order_pass3.pkl

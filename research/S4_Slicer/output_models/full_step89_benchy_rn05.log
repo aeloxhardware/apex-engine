@@ -1,0 +1,15 @@
+etape 8 : 937856 points (5185 polylignes) en 184 s ; corps : ecart tete / normale de couche median 6.5 deg, 95e 20.0, max 88.1 ; > 5 deg 59.7%, > 45 deg 0.8%
+  5000/64218 points testes, 9 s (574 pts/s), 59 evenements
+  10000/64218 points testes, 16 s (627 pts/s), 71 evenements
+  15000/64218 points testes, 23 s (640 pts/s), 71 evenements
+  20000/64218 points testes, 31 s (640 pts/s), 81 evenements
+  25000/64218 points testes, 40 s (625 pts/s), 548 evenements
+  30000/64218 points testes, 49 s (608 pts/s), 858 evenements
+  35000/64218 points testes, 59 s (591 pts/s), 858 evenements
+  40000/64218 points testes, 70 s (568 pts/s), 870 evenements
+  45000/64218 points testes, 82 s (546 pts/s), 968 evenements
+  50000/64218 points testes, 95 s (527 pts/s), 978 evenements
+  55000/64218 points testes, 109 s (503 pts/s), 978 evenements
+  60000/64218 points testes, 128 s (468 pts/s), 978 evenements
+etape 9 : 64218 echantillons (1 sur 1) en 163 s ; 978 evenements sur 903 points ; par type : {('platform', 'body'): 893, ('printed_part', 'body'): 85}
+  penetration mediane 14.94 mm, max 76.29 mm

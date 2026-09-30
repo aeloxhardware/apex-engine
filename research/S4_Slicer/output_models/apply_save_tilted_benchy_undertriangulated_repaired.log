@@ -1,0 +1,14 @@
+etape 8 : 943807 points (4921 polylignes) en 200 s ; corps : ecart tete / normale de couche median 9.1 deg, 95e 27.4, max 89.1 ; > 5 deg 69.0%, > 45 deg 1.7%
+borne de B selon la hauteur : 546 points ramenes (0.06%) ; |dB| median 21.1 deg, max 140.5
+  20000/64793 points testes, 33 s, 4 evenements
+  40000/64793 points testes, 76 s, 5 evenements
+  60000/64793 points testes, 138 s, 23 evenements
+tour 1 : 23 points en contact ; resolus par un autre B : 14/23 (paliers 45/90/181 deg : [1, 5, 8])
+  applique a 229 points (lissage +-1 / 3 mm)
+  20000/64793 points testes, 220 s, 0 evenements
+  40000/64793 points testes, 265 s, 0 evenements
+  60000/64793 points testes, 327 s, 9 evenements
+tour 2 : 9 points en contact ; resolus par un autre B : 0/9 (paliers 45/90/181 deg : [0, 0, 0])
+  NON resolus : 9 ; z median 38.2 mm ; B median 0 deg
+etape 9 : 64793 echantillons (1 sur 1) en 372 s ; 9 evenements sur 9 points ; par type : {('printed_part', 'body'): 9}
+  penetration mediane 0.04 mm, max 0.22 mm

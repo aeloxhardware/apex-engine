@@ -1,0 +1,18 @@
+etape 8 : 943807 points (4921 polylignes) en 186 s ; corps : ecart tete / normale de couche median 9.1 deg, 95e 27.4, max 89.1 ; > 5 deg 69.0%, > 45 deg 1.7%
+  5000/64793 points testes, 9 s (528 pts/s), 52 evenements
+  10000/64793 points testes, 17 s (603 pts/s), 55 evenements
+  15000/64793 points testes, 24 s (627 pts/s), 55 evenements
+  20000/64793 points testes, 32 s (632 pts/s), 56 evenements
+  25000/64793 points testes, 40 s (620 pts/s), 60 evenements
+  30000/64793 points testes, 50 s (599 pts/s), 60 evenements
+  35000/64793 points testes, 60 s (584 pts/s), 60 evenements
+  40000/64793 points testes, 71 s (565 pts/s), 64 evenements
+  45000/64793 points testes, 82 s (551 pts/s), 80 evenements
+  50000/64793 points testes, 94 s (534 pts/s), 81 evenements
+  55000/64793 points testes, 107 s (514 pts/s), 87 evenements
+  60000/64793 points testes, 124 s (483 pts/s), 90 evenements
+reorientation (tolerance 45 deg) : 50/83 points en collision resolus par un autre B
+  resolus : |dB| median 11.3 deg, max 41.5 ; ecart a la normale apres median 15.6 deg
+  NON resolus : 33 (corps 33) ; z median 35.9 mm (min 0.7, max 38.8) ; B median 96 deg
+etape 9 : 64793 echantillons (1 sur 1) en 163 s ; 90 evenements sur 83 points ; par type : {('platform', 'body'): 69, ('printed_part', 'body'): 21}
+  penetration mediane 2.88 mm, max 78.08 mm
