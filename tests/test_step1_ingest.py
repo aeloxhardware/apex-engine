@@ -991,3 +991,107 @@ def test_tetrahedralize_cascade_rejects_collapsed_pymeshfix_repair(monkeypatch):
     # jamais le faux resultat pymeshfix (boite 0.1x0.1x0.1) accepte a sa
     # place par la cascade.
     assert tet_mesh.tet_vertices[:, 2].max() > 5.0
+
+
+# ---------------------------------------------------------------------------
+# Refus des modeles trop grands (feuille de route, 2026-10-01)
+# ---------------------------------------------------------------------------
+
+def test_min_enclosing_circle_exact_on_known_shapes():
+    import numpy as np
+    from pipeline.step1_ingest import _min_enclosing_circle
+    square = np.array([[0, 0], [2, 0], [2, 2], [0, 2], [1, 1]], dtype=float)
+    c, r = _min_enclosing_circle(square)
+    assert np.allclose(c, [1, 1]) and abs(r - np.sqrt(2)) < 1e-12
+    tri = np.array([[0, 0], [10, 0], [5, 1]], dtype=float)      # obtus : diametre du grand cote
+    c, r = _min_enclosing_circle(tri)
+    assert np.allclose(c, [5, 0]) and abs(r - 5) < 1e-12
+    rng = np.random.default_rng(3)
+    pts = rng.normal(size=(300, 2))
+    c, r = _min_enclosing_circle(pts)
+    assert np.all(np.linalg.norm(pts - c, axis=1) <= r + 1e-9)
+
+
+def test_check_fits_platform_is_placement_independent():
+    import numpy as np
+    import pytest
+    from pipeline.step1_ingest import ModelTooLargeError, check_fits_platform
+    # rectangle 200 x 200 : diagonale 282,8 -> rayon 141,4 < 150, tient
+    box = np.array([[x, y, z] for x in (0, 200) for y in (0, 200) for z in (0, 50)], dtype=float) + 500.0
+    assert abs(check_fits_platform(box, 150.0) - np.hypot(100, 100)) < 1e-9
+    big = box * [1.1, 1.1, 1.0]
+    with pytest.raises(ModelTooLargeError) as e:
+        check_fits_platform(big, 150.0)
+    assert e.value.footprint_radius > 150.0
+    with pytest.raises(ModelTooLargeError):
+        check_fits_platform(box, 150.0, max_height=40.0)
+    assert check_fits_platform(big, None) == 0.0   # plateau inconnu : aucun refus
+
+
+def test_speculative_tetgen_uses_parallel_attempt_only_when_probe_left_mesh_intact(monkeypatch):
+    """Logique de l'execution speculative de `_tetrahedralize` (session du
+    2026-10-01) : la tentative finale lancee en parallele de la sonde n'est
+    retenue que si la sonde a laisse le maillage INTACT ; sinon elle est
+    ignoree et la tentative reelle porte sur le maillage repare."""
+    import trimesh
+    import pipeline.step1_ingest as s1
+    mesh = trimesh.creation.box(extents=[4, 4, 4])
+    resolved = trimesh.creation.box(extents=[4, 4, 4.0001])
+    repaired = trimesh.creation.box(extents=[4, 4, 4.0002])
+    calls = []
+
+    def fake_once(candidate, resolution, npr, *rest):
+        calls.append((id(candidate), npr))
+        if candidate is mesh:
+            raise RuntimeError("The input surface mesh contain self-intersections.")
+        return ("tets", id(candidate), npr)
+
+    monkeypatch.setattr(s1, "_tetrahedralize_once_isolated", fake_once)
+    monkeypatch.setattr(s1, "resolve_self_intersections", lambda m: resolved)
+    monkeypatch.setattr(s1, "_find_self_intersecting_faces", lambda m: [])
+    monkeypatch.setattr(s1, "_repair_with_pymeshfix", lambda m: None)
+    monkeypatch.setattr(s1, "_is_recoverable_tetgen_error", lambda e: True)
+
+    # 1) sonde reussie (maillage intact) : resultat de la tentative speculative
+    monkeypatch.setattr(s1, "_finish_geometric_resolution", lambda r, res: (r, None))
+    calls.clear()
+    out = s1._tetrahedralize(mesh, 1.0, near_platform_resolution=0.5)
+    assert out == ("tets", id(resolved), 0.5)
+    assert calls.count((id(resolved), 0.5)) == 1        # jamais rejouee
+
+    # 2) sonde qui repare : speculation ignoree, vraie tentative sur le repare
+    monkeypatch.setattr(s1, "_finish_geometric_resolution", lambda r, res: (repaired, None))
+    calls.clear()
+    out = s1._tetrahedralize(mesh, 1.0, near_platform_resolution=0.5)
+    assert out == ("tets", id(repaired), 0.5)
+
+    # 3) interrupteur coupe : comportement serie historique, meme resultat
+    monkeypatch.setattr(s1, "_SPECULATIVE_TETGEN", False)
+    monkeypatch.setattr(s1, "_finish_geometric_resolution", lambda r, res: (r, None))
+    calls.clear()
+    assert s1._tetrahedralize(mesh, 1.0, near_platform_resolution=0.5) == ("tets", id(resolved), 0.5)
+
+
+def test_probe_tet_mesh_reused_for_no_refinement_attempt(monkeypatch):
+    """La sonde reussie de `_finish_geometric_resolution` rend son TetMesh ; la
+    tentative « sans raffinement plateau » sur le meme maillage le reutilise
+    au lieu de refaire le meme calcul (turkish.stl : 7,26 s)."""
+    import trimesh
+    import pipeline.step1_ingest as s1
+    mesh = trimesh.creation.box(extents=[4, 4, 4])
+    repaired = trimesh.creation.box(extents=[4, 4, 4.0002])
+    calls = []
+
+    def fake_once(candidate, resolution, npr, *rest):
+        calls.append((id(candidate), npr))
+        raise RuntimeError("The input surface mesh contain self-intersections.")
+
+    monkeypatch.setattr(s1, "_tetrahedralize_once_isolated", fake_once)
+    monkeypatch.setattr(s1, "resolve_self_intersections", lambda m: mesh.copy())
+    monkeypatch.setattr(s1, "_find_self_intersecting_faces", lambda m: [])
+    monkeypatch.setattr(s1, "_repair_with_pymeshfix", lambda m: None)
+    monkeypatch.setattr(s1, "_is_recoverable_tetgen_error", lambda e: True)
+    monkeypatch.setattr(s1, "_finish_geometric_resolution", lambda r, res: (repaired, "SONDE"))
+    out = s1._tetrahedralize(mesh, 1.0, near_platform_resolution=0.5)
+    assert out == "SONDE"
+    assert (id(repaired), None) not in calls      # jamais recalcule

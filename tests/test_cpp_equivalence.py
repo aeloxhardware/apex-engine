@@ -1666,3 +1666,519 @@ def test_mesh_distance_vulkan_falls_back_to_cpu():
     assert backend in (1, 2)
     if backend == 1:
         assert reason
+
+
+# ---------------------------------------------------------------------------
+# Pas 13 - marching tetrahedra + soudure (step5), equivalence AU BIT
+# ---------------------------------------------------------------------------
+
+def _random_tet_field(seed: int, n: int = 600):
+    from scipy.spatial import Delaunay
+    rng = np.random.default_rng(seed)
+    pts = rng.uniform(-10.0, 10.0, size=(n, 3))
+    tets = Delaunay(pts).simplices.astype(np.int64)
+    values = 0.3 * pts[:, 0] + np.sin(pts[:, 1] * 0.4) + 0.05 * pts[:, 2] ** 2 + rng.normal(0, 0.05, n)
+    return pts, tets, values
+
+
+def _python_extract(pts, tets, values, iso, tol):
+    from core.mesh_types import TetMesh
+    from pipeline.step5_layers import _extract_isosurface_triangles, _weld_vertices
+    tm = TetMesh(tet_vertices=pts, tetrahedra=tets, tet_adjacency=None)
+    per = values[tets]
+    v, f, src = _extract_isosurface_triangles(tm, values, iso, per.min(axis=1), per.max(axis=1))
+    wv, wf = _weld_vertices(v, f, tol)
+    return wv, wf, src
+
+
+def test_isosurface_extractor_bit_exact_vs_python():
+    core = _cpp.module()
+    if not hasattr(core, "IsosurfaceExtractor"):
+        pytest.skip("module natif anterieur au pas 13")
+    total_caps = total_quads = merged = 0
+    for seed in range(4):
+        pts, tets, values = _random_tet_field(seed)
+        ex = core.IsosurfaceExtractor(pts, tets, values)
+        isos = list(np.quantile(values, [0.1, 0.3, 0.5, 0.7, 0.9])) + [float(values[7])]  # iso sur un noeud exact
+        for iso in isos:
+            for tol in (0.0, 1e-6, 0.05):
+                wv, wf, src = _python_extract(pts, tets, values, float(iso), tol)
+                nv, nf, nsrc = ex.extract(float(iso), tol)
+                assert np.array_equal(src, nsrc)
+                assert np.array_equal(wf, nf)
+                assert np.array_equal(wv, nv)          # au bit : aucune reduction
+                if tol > 0:
+                    merged += 3 * len(wf) - len(wv)
+            per = values[tets]
+            above = (per >= iso).sum(axis=1)
+            cand = (per.min(axis=1) <= iso) & (iso <= per.max(axis=1))
+            total_caps += int(((above == 1) | (above == 3))[cand].sum())
+            total_quads += int((above == 2)[cand].sum())
+    # garde anti-faux-vert : les deux cas geometriques et la soudure ont bien ete exerces
+    assert total_caps > 100 and total_quads > 100 and merged > 100
+
+
+def test_isosurface_extractor_empty_and_validation():
+    core = _cpp.module()
+    if not hasattr(core, "IsosurfaceExtractor"):
+        pytest.skip("module natif anterieur au pas 13")
+    pts, tets, values = _random_tet_field(9, 200)
+    ex = core.IsosurfaceExtractor(pts, tets, values)
+    v, f, s = ex.extract(float(values.max()) + 1.0, 1e-6)
+    assert v.shape == (0, 3) and f.shape == (0, 3) and s.shape == (0,)
+    with pytest.raises(ValueError):
+        core.IsosurfaceExtractor(pts, np.array([[0, 1, 2, 10**9]]), values)
+
+
+# ---------------------------------------------------------------------------
+# Pas 14 - trace de bord natif (outline), identique a trimesh sur boucles simples
+# ---------------------------------------------------------------------------
+
+def _outline_python(vertices, faces):
+    previous = _cpp.set_enabled(False)
+    try:
+        from pipeline.step5_layers import _extract_closed_contours
+        return _extract_closed_contours(vertices, faces)
+    finally:
+        _cpp.set_enabled(previous)
+
+
+def test_boundary_loops_match_trimesh_outline(restore_switch):
+    core = _cpp.module()
+    if not hasattr(core, "boundary_loops") or not hasattr(core, "IsosurfaceExtractor"):
+        pytest.skip("module natif anterieur au pas 14")
+    import pipeline.step5_layers as s5
+    loops_seen = native_used = 0
+    for seed in range(6):
+        pts, tets, values = _random_tet_field(seed, 800)
+        ex = core.IsosurfaceExtractor(pts, tets, values)
+        for iso in np.quantile(values, [0.15, 0.35, 0.5, 0.65, 0.85]):
+            v, f, _ = ex.extract(float(iso), 1e-6)
+            expected = _outline_python(v, f)
+            _cpp.set_enabled(True)
+            before = s5._NATIVE_OUTLINE_FALLBACKS
+            got = s5._extract_closed_contours(v, f)
+            native_used += int(s5._NATIVE_OUTLINE_FALLBACKS == before)
+            assert len(got) == len(expected)
+            for a, b in zip(got, expected):
+                assert np.array_equal(a, b)
+            loops_seen += len(expected)
+    assert loops_seen > 20 and native_used > 20   # garde anti-faux-vert
+
+
+def test_boundary_loops_fall_back_on_non_manifold_border():
+    core = _cpp.module()
+    if not hasattr(core, "boundary_loops"):
+        pytest.skip("module natif anterieur au pas 14")
+    bowtie = np.array([[0, 1, 2], [0, 3, 4]], dtype=np.int64)   # sommet 0 de degre 4
+    assert core.boundary_loops(bowtie, 5) is None
+    square = np.array([[0, 1, 2], [0, 2, 3]], dtype=np.int64)
+    loops = core.boundary_loops(square, 4)
+    assert [list(l) for l in loops] == [[0, 1, 2, 3, 0]]
+    degenerate = np.array([[0, 0, 1]], dtype=np.int64)
+    assert core.boundary_loops(degenerate, 2) == []
+
+
+# ---------------------------------------------------------------------------
+# Pas 17 - IK couplee a la position (step8, machine actuelle), tolerance declaree
+# ---------------------------------------------------------------------------
+
+def test_coupled_ik_native_matches_python(restore_switch):
+    import pipeline.step8_machine_toolpath as s8
+    from core.mesh_types import MachineProfile, RotationAxisSpec
+    machine = MachineProfile(
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+                       RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
+        platform_origin=np.zeros(3), position_coupled_axes=[0], radial_direction=np.array([0.0, -1.0, 0.0]))
+    rng = np.random.default_rng(17)
+    pos = rng.uniform(-40, 40, (600, 3))
+    pos[::50, :2] = 0.0                                     # points SUR l'axe : heritage de C
+    dirs = rng.normal(size=(600, 3))
+    dirs[:, 2] = np.abs(dirs[:, 2]) + 0.3
+    dirs[::7] = [0.0, 0.0, 1.0]                             # depots verticaux : repli grille du natif
+    raw = [s8._RawPoint(position=p, desired_direction=d / np.linalg.norm(d), layer_id=0, segment_index=0,
+                        color_id=None, feedrate=1.0, extrusion=1.0, is_travel=False) for p, d in zip(pos, dirs)]
+    ref = np.array([0.0, 0.0, 1.0])
+    params = s8.Step8Params()
+    _cpp.set_enabled(False)
+    a_py, r_py = s8._resolve_all_axis_angles_coupled(raw, machine.rotation_axes, ref, machine, params)
+    _cpp.set_enabled(True)
+    a_cc, r_cc = s8._resolve_all_axis_angles_coupled(raw, machine.rotation_axes, ref, machine, params)
+    a_py, a_cc = np.array(a_py), np.array(a_cc)
+    assert np.abs(a_py - a_cc).max() < 1e-7            # degres
+    assert np.abs(np.array(r_py) - np.array(r_cc)).max() < 1e-6   # radians (acos mal conditionnee pres de 0)
+    # memes diagnostics a 5 deg : l'assertion qui compte reellement (pas 2)
+    lim = np.radians(params.max_unreachable_angular_error_deg)
+    assert np.array_equal(np.array(r_py) > lim, np.array(r_cc) > lim)
+    assert (np.array(r_py) > lim).sum() > 50          # garde : des cibles inatteignables existent
+
+
+# ---------------------------------------------------------------------------
+# Pas 12 - point_in_polygon_2d natif, au bit
+# ---------------------------------------------------------------------------
+
+def test_point_in_polygon_2d_native_matches_python(restore_switch):
+    core = _cpp.module()
+    if not hasattr(core, "point_in_polygon_2d"):
+        pytest.skip("module natif anterieur au pas 12")
+    from core.geometry_utils import point_in_polygon_2d
+    rng = np.random.default_rng(12)
+    inside_count = total = 0
+    for _ in range(60):
+        n = int(rng.integers(6, 40))
+        ang = np.sort(rng.uniform(0, 2 * np.pi, n))
+        rad = rng.uniform(1.0, 5.0, n)
+        poly = np.column_stack([rad * np.cos(ang), rad * np.sin(ang)])
+        pts = rng.uniform(-6, 6, (80, 2))
+        pts[:5] = poly[:5]                          # sommets exacts : cas limites
+        pts[5:8, 1] = poly[:3, 1]                   # meme ordonnee qu'un sommet
+        for p in pts:
+            _cpp.set_enabled(False)
+            a = point_in_polygon_2d(p, poly)
+            _cpp.set_enabled(True)
+            b = point_in_polygon_2d(p, poly)
+            assert a == b
+            inside_count += a
+            total += 1
+    assert 0.1 * total < inside_count < 0.9 * total   # garde : les deux issues exercees
+
+
+# ---------------------------------------------------------------------------
+# Pas 19 - matiere deja deposee (step9 rapide), minimum exact au bit
+# ---------------------------------------------------------------------------
+
+def test_past_material_index_matches_python_fast_checker(restore_switch):
+    core = _cpp.module()
+    if not hasattr(core, "PastMaterialIndex"):
+        pytest.skip("module natif anterieur au pas 19")
+    from scipy.spatial import cKDTree
+    rng = np.random.default_rng(19)
+    dense = rng.uniform(0, 30, (20000, 3))
+    owner = rng.integers(0, 5000, 20000).astype(np.int64)
+    idx = core.PastMaterialIndex(dense, owner)
+    tree = cKDTree(dense)
+    owner_pad = np.r_[owner, np.iinfo(np.int64).max]
+    reach = 1.2
+    hits = 0
+    for trial in range(300):
+        verts = rng.uniform(0, 30, (60, 3))
+        limit = int(rng.integers(0, 5000))
+        # reference : algorithme Python de FastCollisionChecker
+        dist, ii = tree.query(verts, k=16, distance_upper_bound=reach)
+        past = owner_pad[ii] < limit
+        d_past = np.where(past, dist, np.inf).min(axis=1)
+        sat = np.isfinite(dist[:, -1]) & ~np.isfinite(d_past)
+        for vi in np.flatnonzero(sat):
+            near = np.asarray(tree.query_ball_point(verts[vi], reach), dtype=int)
+            near = near[owner[near] < limit]
+            if len(near):
+                d_past[vi] = float(np.linalg.norm(dense[near] - verts[vi], axis=1).min())
+        ref = float(d_past.min())
+        got = idx.min_past_distance(verts, limit, reach)
+        assert (ref == got) or (not np.isfinite(ref) and not np.isfinite(got))
+        hits += np.isfinite(ref)
+    assert 50 < hits < 300          # garde : cas avec et sans matiere passee
+
+
+# ---------------------------------------------------------------------------
+# Pas 24 - export G-code natif, texte identique ligne a ligne
+# ---------------------------------------------------------------------------
+
+def _random_machine_toolpath(seed, n=3000):
+    rng = np.random.default_rng(seed)
+    steps = rng.normal(0, 0.4, (n, 3))
+    steps[:, 2] = np.abs(steps[:, 2]) * 0.05
+    pos = np.cumsum(steps, axis=0) + [20.0, 5.0, 0.1]
+    pos[100:110, :2] = 0.0                                  # passages au centre (Y herite)
+    jumps = rng.choice(n, 60, replace=False)
+    pos[jumps] += rng.uniform(-15, 15, (60, 3)) * [1, 1, 0.1]   # trajets longs
+    pos[:, 2] = np.maximum(pos[:, 2], 0.05)
+    c = (np.degrees(np.arctan2(pos[:, 1], pos[:, 0])) + 90.0) % 360.0
+    b = np.clip(rng.normal(20, 30, n), 0, 185)
+    ext = (rng.uniform(size=n) > 0.08).astype(float)
+    ext[0] = 0
+    skin = rng.uniform(size=n) > 0.7
+    return {"position": pos, "axis_angles": np.column_stack([c, b]), "extrusion": ext, "is_skin": skin}
+
+
+@pytest.mark.parametrize("variant", ["defaut", "pivot", "sans_table"])
+def test_gcode_export_native_identical_text(restore_switch, variant):
+    core = _cpp.module()
+    if not hasattr(core, "export_gcode_body"):
+        pytest.skip("module natif anterieur au pas 24")
+    import main
+    from file_io.gcode_export import GcodeParams, export_gcode, head_zlow_from_table
+    machine = main._default_machine_profile()
+    machine.nozzle_model = None
+    params = GcodeParams() if variant != "pivot" else GcodeParams(z_reference="pivot", tilt_sign=-1.0)
+    hz = None if variant == "sans_table" else head_zlow_from_table(np.arange(0, 185.5, 0.5), -np.linspace(1, 30, 371))
+    for seed in range(3):
+        tp = _random_machine_toolpath(seed)
+        _cpp.set_enabled(False)
+        a, ra = export_gcode(tp, machine, params, head_zlow=hz)
+        _cpp.set_enabled(True)
+        b, rb = export_gcode(tp, machine, params, head_zlow=hz)
+        assert a == b
+        for k in ("moves", "travels", "retractions", "clearance_axes", "filament_mm", "c_mismatch_deg",
+                  "tip_z_min", "head_z_min", "tip_below_plate", "head_below_margin", "fw_x_range",
+                  "fw_y_range", "fw_z_range", "print_time_s"):
+            assert getattr(ra, k) == getattr(rb, k), k
+        assert ra.retractions > 5 and ra.clearance_axes["R"] + ra.clearance_axes["Z"] > 5   # garde
+
+
+def test_feed_plan_native_bit_exact(restore_switch):
+    core = _cpp.module()
+    if not hasattr(core, "feed_plan_caps"):
+        pytest.skip("module natif anterieur au pas 24")
+    from file_io.gcode_export import feed_plan
+    tp = _random_machine_toolpath(7, 20000)
+    _cpp.set_enabled(False)
+    a = feed_plan(tp["position"], tp["axis_angles"], 750.0, 300.0, [0], 25.0)
+    _cpp.set_enabled(True)
+    b = feed_plan(tp["position"], tp["axis_angles"], 750.0, 300.0, [0], 25.0)
+    assert a[0] == b[0] and a[1] == b[1] and np.array_equal(a[2], b[2])
+    assert (a[2] < 1.0).sum() > 100     # garde : le ralentissement est bien exerce
+
+
+# ---------------------------------------------------------------------------
+# Pas 15 : remplissage 2D d'une zone (step6), Clipper2 contre shapely/GEOS.
+# PAS au bit (entiers 1e-6 mm, autre depart d'anneau) : aires des parois et
+# longueurs de remplissage a tolerance declaree, sur des zones sans angle
+# aigu (la ou les onglets de GEOS et Clipper2 different, voir CLAUDE.md #56).
+# ---------------------------------------------------------------------------
+
+def _star_region(rng):
+    # contour lisse (pas d'angle aigu) : rayon modulé par une sinusoïde
+    n = int(rng.integers(40, 120))
+    ang = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    rad = 10.0 + rng.uniform(0.5, 2.0) * np.sin(int(rng.integers(2, 6)) * ang + rng.uniform(0, 6))
+    outer = np.column_stack([rad * np.cos(ang), rad * np.sin(ang)])
+    holes = []
+    if rng.random() < 0.5:
+        t = np.linspace(0, 2 * np.pi, 24, endpoint=False)
+        holes.append(np.column_stack([2.5 * np.cos(t), 2.5 * np.sin(t)]))
+    return outer, holes
+
+
+def test_fill_region_native_matches_shapely(restore_switch):
+    core = _cpp.module()
+    if not hasattr(core, "fill_region"):
+        pytest.skip("module natif anterieur au pas 15")
+    from shapely.geometry import Polygon
+    from pipeline import step6_toolpath2d as s6
+
+    def length(polys):
+        return sum(float(np.linalg.norm(np.diff(p, axis=0), axis=1).sum()) for p in polys)
+
+    rng = np.random.default_rng(15)
+    codes = {s6.InfillPattern.LINES: 0, s6.InfillPattern.GRID: 1, s6.InfillPattern.CROSSED_ZIGZAG: 2}
+    checked = 0
+    for k in range(40):
+        outer, holes = _star_region(rng)
+        pattern = list(codes)[k % 3]
+        angle = float(rng.uniform(0, np.pi))
+        walls, innermost = s6._offset_walls(outer, holes, 0.4, 2, 1e-6)
+        infill = s6._generate_infill(innermost, 0.2, pattern, 0.4, angle)
+        valid, n_infill, n_walls = core.fill_region(outer, holes, 0.4, 2, 1e-6, 0.2, codes[pattern], angle)
+        assert valid
+        py_walls = walls[: len(walls) - 1 - len(holes)]
+        assert len(n_walls) == len(py_walls)
+        area_py = sum(abs(Polygon(w).area) for w in py_walls)
+        area_c = sum(abs(Polygon(w).area) for w in n_walls)
+        assert abs(area_c - area_py) <= 1e-3 * area_py
+        for w in n_walls:
+            assert np.array_equal(w[0], w[-1])          # anneaux fermes, comme shapely
+        assert abs(length(n_infill) - length(infill)) <= 1e-3 * max(length(infill), 1.0)
+        checked += length(infill) > 0
+    assert checked >= 30, "le jeu d'essai doit produire du remplissage"
+
+
+def test_fill_region_orientation_and_degenerate():
+    core = _cpp.module()
+    if not hasattr(core, "fill_region"):
+        pytest.skip("module natif anterieur au pas 15")
+    from shapely.geometry import LinearRing
+    square = np.array([[0, 0], [10, 0], [10, 10], [0, 10]], float)
+    hole = np.array([[4, 4], [6, 4], [6, 6], [4, 6]], float)
+    valid, _infill, walls = core.fill_region(square, [hole], 0.4, 1, 0.0, 0.2, 2, 0.0)
+    assert valid and len(walls) == 2
+    # orientation de GEOS : exterieur horaire, trou anti-horaire
+    assert not LinearRing(walls[0]).is_ccw and LinearRing(walls[1]).is_ccw
+    # zone d'aire nulle : ignoree entierement (comme `_offset_walls` -> [])
+    flat = np.array([[0, 0], [5, 0], [10, 0]], float)
+    valid, infill, walls = core.fill_region(flat, [], 0.4, 2, 0.0, 0.2, 2, 0.0)
+    assert not valid and not infill and not walls
+
+
+# ---------------------------------------------------------------------------
+# Pas 21a : etape 2 entiere en natif (surplombs, risque, ponts, portee).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("shape", ["hollow", "l_shape", "sphere"])
+def test_overhang_map_native_matches_python(restore_switch, shape):
+    core = _cpp.module()
+    if not hasattr(core, "overhang_map"):
+        pytest.skip("module natif anterieur au pas 21a")
+    import os
+    import tempfile
+    import trimesh
+    from pipeline import step2_overhang as s2
+    from pipeline.step1_ingest import run as ingest_run
+
+    if shape == "hollow":
+        mesh = trimesh.creation.box(extents=[10, 10, 10]).difference(
+            trimesh.creation.box(extents=[4, 4, 4]), engine="manifold")
+    elif shape == "l_shape":
+        v = trimesh.creation.box(extents=[4, 4, 20]); v.apply_translation([0, 0, 10])
+        h = trimesh.creation.box(extents=[20, 4, 4]); h.apply_translation([8, 0, 20])
+        mesh = v.union(h, engine="manifold")
+    else:
+        mesh = trimesh.creation.icosphere(subdivisions=2, radius=5.0)
+    with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as f:
+        path = f.name
+    mesh.export(path)
+    try:
+        mesh_data, _, _ = ingest_run(path, resolution=2.0)
+    finally:
+        os.unlink(path)
+    params = s2.OverhangParams()
+    _cpp.set_enabled(False)
+    ref = s2.run(mesh_data, params)
+    _cpp.set_enabled(True)
+    assert s2._native_overhang_map(mesh_data, params) is not None, "le natif doit avoir tourne"
+    nat = s2.run(mesh_data, params)
+    assert np.array_equal(ref.is_overhang, nat.is_overhang)
+    assert np.array_equal(ref.is_bridge, nat.is_bridge)
+    assert np.allclose(ref.risk_score, nat.risk_score, rtol=0, atol=1e-12)
+    assert np.array_equal(np.isnan(ref.bridge_span_direction), np.isnan(nat.bridge_span_direction))
+    # La portee est un axe principal : unique (au signe canonique pres) sauf
+    # quand deux variances sont egales (plafond carre). On verifie donc ce qui
+    # est garanti : meme variance le long des deux directions, par composante.
+    bridges = np.flatnonzero(ref.is_bridge)
+    for row in np.unique(ref.bridge_span_direction[bridges], axis=0):
+        faces = bridges[np.all(ref.bridge_span_direction[bridges] == row, axis=1)]
+        pts = mesh_data.vertices[np.unique(mesh_data.faces[faces])]
+        pts = pts - pts.mean(axis=0)
+        native_rows = np.unique(nat.bridge_span_direction[faces], axis=0)
+        assert len(native_rows) == 1
+        var_ref, var_nat = np.var(pts @ row), np.var(pts @ native_rows[0])
+        assert abs(var_ref - var_nat) <= 1e-9 * max(var_ref, 1e-12)
+    if shape == "hollow":
+        assert ref.is_bridge.any(), "la cavite doit produire un pont, sinon le test ne verifie rien"
+
+
+# ---------------------------------------------------------------------------
+# Pas 21b : etape 3, chemin par defaut, IDENTIQUE (ordre des dependances compris).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("merge", [None, 30.0])
+def test_segmentation_native_matches_python(restore_switch, merge):
+    core = _cpp.module()
+    if not hasattr(core, "segment_default"):
+        pytest.skip("module natif anterieur au pas 21b")
+    import os
+    import tempfile
+    from dataclasses import replace
+    import trimesh
+    from pipeline import step2_overhang as s2, step3_segmentation as s3
+    from pipeline.step1_ingest import run as ingest_run
+
+    # T couche + bras pendant : plusieurs regions et dependances
+    v = trimesh.creation.box(extents=[4, 4, 20]); v.apply_translation([0, 0, 10])
+    h = trimesh.creation.box(extents=[24, 4, 4]); h.apply_translation([0, 0, 22])
+    d = trimesh.creation.box(extents=[4, 4, 10]); d.apply_translation([10, 0, 15])
+    mesh = v.union(h, engine="manifold").union(d, engine="manifold")
+    with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as f:
+        path = f.name
+    mesh.export(path)
+    try:
+        mesh_data, tet_mesh, report = ingest_run(path, resolution=2.0)
+    finally:
+        os.unlink(path)
+    om = s2.run(mesh_data, s2.OverhangParams())
+    params = replace(s3.SegmentationParams(), platform_z=report.platform_z_used, max_region_merge_angle_deg=merge)
+    _cpp.set_enabled(False)
+    a = s3.run(mesh_data, om, params, tet_mesh)
+    _cpp.set_enabled(True)
+    b = s3.run(mesh_data, om, params, tet_mesh)
+    if merge is not None:
+        assert len(a.regions) > 1, "la fixture doit produire plusieurs regions"
+    assert a.regions.keys() == b.regions.keys()
+    assert a.dependencies == b.dependencies
+    assert a.region_print_depth == b.region_print_depth
+    for k in a.regions:
+        assert np.array_equal(a.regions[k].face_ids, b.regions[k].face_ids)
+        assert np.array_equal(a.regions[k].target_direction, b.regions[k].target_direction)
+
+
+# ---------------------------------------------------------------------------
+# Pas 21c : etape 7 entiere (couleur, lissage, trous, ordonnancement).
+# ---------------------------------------------------------------------------
+
+def _schedule_signature(colored, schedule):
+    layers = [([np.asarray(p).tolist() for p in (l.toolpath_2d or [])], list(l.segment_colors or []), l.color_id)
+              for l in colored]
+    passes = [(list(p.segments), p.color_id, p.is_hole_fill, tuple(p.layer_range), list(p.deferred_regions))
+              for p in schedule.passes]
+    return layers, passes
+
+
+@pytest.mark.parametrize("case", ["none", "two_tone", "lateral", "lateral_merge", "cheap_holes"])
+def test_schedule_native_matches_python(restore_switch, case):
+    core = _cpp.module()
+    if not hasattr(core, "schedule_layers"):
+        pytest.skip("module natif anterieur au pas 21c")
+    import trimesh
+    from pipeline import step7_scheduling as s7
+    from tests.test_step7_scheduling import (
+        _lateral_color_map, _pipeline_through_step6, _two_tone_color_map,
+    )
+    mesh = trimesh.creation.box(extents=[10, 10, 10]).subdivide().subdivide()
+    mesh_data, tet_mesh, regions, field, layers = _pipeline_through_step6(mesh, platform_z=-5.0)
+    params = s7.Step7Params()
+    color_map = None
+    if case == "two_tone":
+        color_map = _two_tone_color_map(mesh_data)
+    elif case == "lateral":
+        color_map = _lateral_color_map(mesh_data, split_x=0.7)
+    elif case == "lateral_merge":
+        color_map = _lateral_color_map(mesh_data, split_x=0.7, merge_tolerance=3.0)
+    elif case == "cheap_holes":
+        color_map = _lateral_color_map(mesh_data, split_x=0.7)
+        params = s7.Step7Params(
+            hole_cost_model=s7.HoleCostModel(reheat_penalty=0.0, adhesion_risk_weight=0.0),
+            purge_cost_model=s7.PurgeCostModel(volume_per_purge=1000.0, time_per_purge=1000.0),
+            max_open_holes=100,
+        )
+    _cpp.set_enabled(False)
+    ref = s7.run(layers, mesh_data, tet_mesh, color_map, regions, field, params)
+    _cpp.set_enabled(True)
+    assert s7._native_schedule(layers, mesh_data, tet_mesh, color_map, field, params) is not None
+    nat = s7.run(layers, mesh_data, tet_mesh, color_map, regions, field, params)
+    sig_ref, sig_nat = _schedule_signature(*ref), _schedule_signature(*nat)
+    assert sig_ref[1] == sig_nat[1]
+    assert len(sig_ref[0]) == len(sig_nat[0])
+    for (pa, ca, da), (pb, cb, db) in zip(sig_ref[0], sig_nat[0]):
+        assert ca == cb and da == db and len(pa) == len(pb)
+        for a, b in zip(pa, pb):
+            assert np.array_equal(np.asarray(a), np.asarray(b))
+    if case == "cheap_holes":
+        assert any(p.is_hole_fill for p in nat[1].passes), "la branche trou doit etre exercee"
+
+
+def test_past_material_batch_matches_single_calls():
+    """Requete par lots, en parallele : identique AU BIT aux appels unitaires."""
+    core = _cpp.module()
+    if not hasattr(core.PastMaterialIndex, "min_past_distance_batch"):
+        pytest.skip("module natif anterieur au lot parallele")
+    rng = np.random.default_rng(19)
+    pts = rng.uniform(0, 20, (5000, 3))
+    owners = rng.integers(0, 400, 5000).astype(np.int64)
+    index = core.PastMaterialIndex(pts, owners)
+    poses = rng.uniform(0, 20, (300, 40, 3))
+    limits = rng.integers(0, 400, 300).astype(np.int64)
+    batch = index.min_past_distance_batch(poses, limits, 1.5, 4)
+    single = np.array([index.min_past_distance(np.ascontiguousarray(poses[k]), int(limits[k]), 1.5)
+                       for k in range(300)])
+    assert np.array_equal(batch, single)
+    assert np.isfinite(batch).sum() > 30, "des poses doivent toucher de la matiere"

@@ -1,0 +1,1451 @@
+{
+ "$defs": {
+  "AABB": {
+   "additionalProperties": false,
+   "description": "Boîte englobante alignée sur les axes.",
+   "properties": {
+    "max_corner": {
+     "items": {
+      "type": "number"
+     },
+     "type": "array"
+    },
+    "min_corner": {
+     "items": {
+      "type": "number"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "min_corner",
+    "max_corner"
+   ],
+   "type": "object"
+  },
+  "CollisionOrderParams": {
+   "additionalProperties": false,
+   "description": "CollisionOrderParams(pose_spacing: 'float' = 3.0, material_spacing: 'float' = 1.5, head_sample_spacing: 'float' = 6.0, margin: 'float' = 1.0, nozzle_contact_clearance: 'float' = 3.0, neighbours: 'int' = 4, support_depth: 'Optional[float]' = 0.3, support_radius: 'float' = 0.6)",
+   "properties": {
+    "head_sample_spacing": {
+     "default": 6.0,
+     "type": "number"
+    },
+    "margin": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "material_spacing": {
+     "default": 1.5,
+     "type": "number"
+    },
+    "neighbours": {
+     "default": 4,
+     "type": "integer"
+    },
+    "nozzle_contact_clearance": {
+     "default": 3.0,
+     "type": "number"
+    },
+    "pose_spacing": {
+     "default": 3.0,
+     "type": "number"
+    },
+    "support_depth": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": 0.3
+    },
+    "support_radius": {
+     "default": 0.6,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "CollisionSimParams": {
+   "additionalProperties": false,
+   "description": "CollisionSimParams(path_sampling_step: 'float', safety_margin: 'float', max_adjustment_iterations: 'int' = 3, grid_cell_size_multiplier: 'float' = 4.0, toolhead_sample_spacing: 'float' = 5.0, nozzle_contact_clearance: 'float' = 3.0, fast_kdtree: 'bool' = False, fast_densify_step: 'float' = 0.25)",
+   "properties": {
+    "fast_densify_step": {
+     "type": "number"
+    },
+    "fast_kdtree": {
+     "type": "boolean"
+    },
+    "grid_cell_size_multiplier": {
+     "type": "number"
+    },
+    "max_adjustment_iterations": {
+     "type": "integer"
+    },
+    "nozzle_contact_clearance": {
+     "type": "number"
+    },
+    "path_sampling_step": {
+     "type": "number"
+    },
+    "safety_margin": {
+     "type": "number"
+    },
+    "toolhead_sample_spacing": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "path_sampling_step",
+    "safety_margin"
+   ],
+   "type": "object"
+  },
+  "ColorMap": {
+   "additionalProperties": false,
+   "description": "Carte de couleur peinte par l'utilisateur sur le mesh source.",
+   "properties": {
+    "merge_tolerance": {
+     "type": "number"
+    },
+    "per_face_color": {
+     "additionalProperties": {
+      "type": "integer"
+     },
+     "type": "object"
+    }
+   },
+   "required": [
+    "per_face_color"
+   ],
+   "type": "object"
+  },
+  "Constraint": {
+   "additionalProperties": false,
+   "description": "Contrainte injectée dans le solveur de champ scalaire (étape 4). Envoyée dynamiquement depuis l'UI TypeScript, une par point d'attache ou par zone esthétique/structurelle.",
+   "properties": {
+    "falloff": {
+     "enum": [
+      "linear",
+      "gaussian",
+      "cubic"
+     ],
+     "type": "string"
+    },
+    "influence_radius": {
+     "type": "number"
+    },
+    "position": {
+     "items": {
+      "type": "number"
+     },
+     "type": "array"
+    },
+    "target_field_value": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "target_normal": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "number"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "type": {
+     "enum": [
+      "attach_point",
+      "aesthetic",
+      "structural"
+     ],
+     "type": "string"
+    },
+    "weight": {
+     "type": "number"
+    }
+   },
+   "required": [
+    "type",
+    "position"
+   ],
+   "type": "object"
+  },
+  "FieldSolverParams": {
+   "additionalProperties": false,
+   "description": "FieldSolverParams(laplacian_smoothness_weight: 'float' = 1.0, gradient_overhang_weight: 'float' = 5.0, resolution: 'float' = 1.5, max_solver_iterations: 'int' = 2000, convergence_tolerance: 'float' = 1e-08, gradient_baseline_weight: 'float' = 1.0, overhang_influence_depth: 'int' = 1, enable_platform_anchor: 'bool' = True, platform_anchor_weight: 'float' = 1000000.0, platform_anchor_value: 'float' = 0.0, up_vector: 'Optional[np.ndarray]' = None, direct_solve_node_threshold: 'int' = 30000, use_ilu",
+   "properties": {
+    "convergence_tolerance": {
+     "default": 1e-08,
+     "type": "number"
+    },
+    "direct_solve_node_threshold": {
+     "default": 30000,
+     "type": "integer"
+    },
+    "direction_blend_min_norm": {
+     "default": 0.1,
+     "type": "number"
+    },
+    "direction_blend_power": {
+     "default": 2.0,
+     "type": "number"
+    },
+    "direction_blend_radius": {
+     "default": 0.0,
+     "type": "number"
+    },
+    "enable_platform_anchor": {
+     "default": true,
+     "type": "boolean"
+    },
+    "enforce_upward_growth": {
+     "default": false,
+     "type": "boolean"
+    },
+    "geodesic_saddle_threshold_deg": {
+     "default": 100.0,
+     "type": "number"
+    },
+    "geodesic_smoothing_iterations": {
+     "default": 0,
+     "type": "integer"
+    },
+    "geodesic_smoothing_step": {
+     "default": 0.5,
+     "type": "number"
+    },
+    "geodesic_source_weight": {
+     "default": 0.0,
+     "type": "number"
+    },
+    "gradient_baseline_weight": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "gradient_overhang_weight": {
+     "default": 5.0,
+     "type": "number"
+    },
+    "heat_method_time_factor": {
+     "default": 100.0,
+     "type": "number"
+    },
+    "laplacian_smoothness_weight": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "max_downward_growth_angle_deg": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "max_solver_iterations": {
+     "default": 2000,
+     "type": "integer"
+    },
+    "overhang_influence_depth": {
+     "default": 1,
+     "type": "integer"
+    },
+    "platform_anchor_value": {
+     "default": 0.0,
+     "type": "number"
+    },
+    "platform_anchor_weight": {
+     "default": 1000000.0,
+     "type": "number"
+    },
+    "radial_tilt_origin": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "number"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "resolution": {
+     "default": 1.5,
+     "type": "number"
+    },
+    "smoothness_modulation_floor": {
+     "default": 0.02,
+     "type": "number"
+    },
+    "smoothness_modulation_strength": {
+     "default": 0.0,
+     "type": "number"
+    },
+    "support_feedback_iterations": {
+     "default": 0,
+     "type": "integer"
+    },
+    "support_feedback_min_improvement": {
+     "default": 0.02,
+     "type": "number"
+    },
+    "support_feedback_threshold_deg": {
+     "default": 45.0,
+     "type": "number"
+    },
+    "support_feedback_use_geodesic_target": {
+     "default": false,
+     "type": "boolean"
+    },
+    "support_feedback_weight": {
+     "default": 4.0,
+     "type": "number"
+    },
+    "transition_distance_mm": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "up_vector": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "number"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": [
+      0.0,
+      0.0,
+      1.0
+     ]
+    },
+    "upward_growth_epsilon": {
+     "default": 1e-09,
+     "type": "number"
+    },
+    "use_geodesic_directions": {
+     "default": false,
+     "type": "boolean"
+    },
+    "use_heat_geodesic_field": {
+     "default": false,
+     "type": "boolean"
+    },
+    "use_ilu_preconditioner": {
+     "default": false,
+     "type": "boolean"
+    }
+   },
+   "type": "object"
+  },
+  "GcodeParams": {
+   "additionalProperties": false,
+   "description": "GcodeParams(nozzle_temp: 'float' = 195.0, filament_diameter: 'float' = 1.75, layer_height: 'float' = 0.2, skin_thickness: 'float' = 0.2, line_width: 'float' = 0.4, flow: 'float' = 1.0, print_speed: 'float' = 25.0, travel_speed: 'float' = 80.0, rotation_feed: 'float' = 3000.0, max_feed: 'float' = 12000.0, retract_length: 'float' = 0.8, retract_speed: 'float' = 35.0, retract_min_travel: 'float' = 2.0, travel_clearance: 'float' = 1.0, pivot_to_tip: 'float' = 45.0, tilt_sign: 'float' = 1.0, z_refere",
+   "properties": {
+    "decimals": {
+     "default": 4,
+     "type": "integer"
+    },
+    "filament_diameter": {
+     "default": 1.75,
+     "type": "number"
+    },
+    "flow": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "layer_height": {
+     "default": 0.2,
+     "type": "number"
+    },
+    "line_width": {
+     "default": 0.4,
+     "type": "number"
+    },
+    "max_feed": {
+     "default": 12000.0,
+     "type": "number"
+    },
+    "nozzle_temp": {
+     "default": 195.0,
+     "type": "number"
+    },
+    "pivot_to_tip": {
+     "default": 45.0,
+     "type": "number"
+    },
+    "platform_margin": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "print_speed": {
+     "default": 25.0,
+     "type": "number"
+    },
+    "retract_length": {
+     "default": 0.8,
+     "type": "number"
+    },
+    "retract_min_travel": {
+     "default": 2.0,
+     "type": "number"
+    },
+    "retract_speed": {
+     "default": 35.0,
+     "type": "number"
+    },
+    "rotation_feed": {
+     "default": 3000.0,
+     "type": "number"
+    },
+    "singularity_radius": {
+     "default": 1e-06,
+     "type": "number"
+    },
+    "skin_thickness": {
+     "default": 0.2,
+     "type": "number"
+    },
+    "strict": {
+     "default": false,
+     "type": "boolean"
+    },
+    "tilt_sign": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "tip_at_bead_top": {
+     "default": true,
+     "type": "boolean"
+    },
+    "travel_clearance": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "travel_speed": {
+     "default": 80.0,
+     "type": "number"
+    },
+    "z_reference": {
+     "default": "tip",
+     "type": "string"
+    }
+   },
+   "title": "GcodeParams",
+   "type": "object"
+  },
+  "HoleCostModel": {
+   "additionalProperties": false,
+   "description": "Cout d'un trou temporaire (contrat UI : SchedulingParams.hole_cost_model).",
+   "properties": {
+    "adhesion_risk_weight": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "reheat_penalty": {
+     "default": 1.0,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "LayerParams": {
+   "additionalProperties": false,
+   "description": "LayerParams(layer_height_base: 'float' = 0.2, weld_tolerance_factor: 'float' = 1e-06, split_disjoint_clusters: 'Optional[float]' = None, support_driven_order: 'Optional[float]' = None, geodesic_order: 'bool' = False, frontier_order: 'bool' = False, nozzle_width: 'Optional[float]' = None, support_horizontal_radius_factor: 'float' = 2.5, support_vertical_height_factor: 'float' = 7.5, platform_contact_tolerance_factor: 'float' = 2.5, support_rotation_axes: 'Optional[list[RotationAxisSpec]]' = None,",
+   "properties": {
+    "frontier_order": {
+     "default": false,
+     "type": "boolean"
+    },
+    "geodesic_order": {
+     "default": false,
+     "type": "boolean"
+    },
+    "layer_height_base": {
+     "default": 0.2,
+     "type": "number"
+    },
+    "nozzle_width": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "platform_contact_tolerance_factor": {
+     "default": 2.5,
+     "type": "number"
+    },
+    "split_disjoint_clusters": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "support_direction_candidate_count": {
+     "default": 26,
+     "type": "integer"
+    },
+    "support_driven_order": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "support_horizontal_radius_factor": {
+     "default": 2.5,
+     "type": "number"
+    },
+    "support_rotation_axes": {
+     "anyOf": [
+      {
+       "items": {
+        "$ref": "#/$defs/RotationAxisSpec"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "support_vertical_height_factor": {
+     "default": 7.5,
+     "type": "number"
+    },
+    "weld_tolerance_factor": {
+     "default": 1e-06,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "MachineProfile": {
+   "additionalProperties": false,
+   "description": "Cinématique de la machine, décrite comme une liste ORDONNÉE et PARAMÉTRABLE d'axes de rotation — PAS un modèle figé sur une seule machine. La machine actuelle (plateau C + tête B∈[0°,180°]) n'est qu'UN cas d'usage à valider parmi d'autres cinématiques futures (un seul DOF, deux DOF différemment agencés, plus de deux DOF) ; voir CLAUDE.md limite de conception #18. - liste vide : orientation libre (5 axes), aucune contrainte de rotation. - 1 élément, plage `(0,360)` : machine 4 axes classique à 1 ",
+   "properties": {
+    "build_volume": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/AABB"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "max_angular_acceleration": {
+     "default": 0.0,
+     "type": "number"
+    },
+    "max_angular_velocity": {
+     "default": 0.0,
+     "type": "number"
+    },
+    "nozzle_diameter": {
+     "default": 0.4,
+     "type": "number"
+    },
+    "nozzle_model": {
+     "x-runtime-only": true
+    },
+    "platform_origin": {
+     "default": null,
+     "items": {
+      "type": "number"
+     },
+     "type": "array"
+    },
+    "platform_radius": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "position_coupled_axes": {
+     "default": [],
+     "items": {
+      "type": "integer"
+     },
+     "type": "array"
+    },
+    "radial_direction": {
+     "anyOf": [
+      {
+       "items": {
+        "type": "number"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "rotation_axes": {
+     "default": [],
+     "items": {
+      "$ref": "#/$defs/RotationAxisSpec"
+     },
+     "type": "array"
+    },
+    "z_clearance_min": {
+     "default": 0.0,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "OverhangParams": {
+   "additionalProperties": false,
+   "description": "OverhangParams(overhang_angle_threshold_deg: 'float' = 45.0, bridge_detection_ray_density: 'int' = 4, bridge_support_ratio_threshold: 'float' = 0.7, bridge_max_gap_distance: 'float' = 2.0, bridge_horizontal_angle_tolerance_deg: 'float' = 10.0, up_vector: 'np.ndarray' = None)",
+   "properties": {
+    "bridge_detection_ray_density": {
+     "default": 4,
+     "type": "integer"
+    },
+    "bridge_horizontal_angle_tolerance_deg": {
+     "default": 10.0,
+     "type": "number"
+    },
+    "bridge_max_gap_distance": {
+     "default": 2.0,
+     "type": "number"
+    },
+    "bridge_support_ratio_threshold": {
+     "default": 0.7,
+     "type": "number"
+    },
+    "overhang_angle_threshold_deg": {
+     "default": 45.0,
+     "type": "number"
+    },
+    "up_vector": {
+     "default": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "items": {
+      "type": "number"
+     },
+     "type": "array"
+    }
+   },
+   "type": "object"
+  },
+  "PipelineParams": {
+   "additionalProperties": false,
+   "description": "Un champ par etape. Chaque valeur par defaut est celle DEJA ACTEE dans le `Params` de l'etape correspondante - ce fichier ne reinvente aucun defaut, il les expose juste au niveau orchestrateur/CLI.",
+   "properties": {
+    "adjustment": {
+     "$ref": "#/$defs/Step10Params",
+     "default": {
+      "excluded_range_half_width_deg": 15.0,
+      "max_adjustment_iterations": 3,
+      "max_direction_deviation_deg": 45.0,
+      "rate_limit_neighbor_margin": 1,
+      "reorientation_samples_per_axis": 12
+     }
+    },
+    "allow_multi_mesh": {
+     "default": false,
+     "type": "boolean"
+    },
+    "collision": {
+     "$ref": "#/$defs/CollisionSimParams",
+     "default": {
+      "fast_densify_step": 0.25,
+      "fast_kdtree": true,
+      "grid_cell_size_multiplier": 4.0,
+      "max_adjustment_iterations": 3,
+      "nozzle_contact_clearance": 3.0,
+      "path_sampling_step": 2.0,
+      "safety_margin": 1.0,
+      "toolhead_sample_spacing": 5.0
+     }
+    },
+    "collision_order": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/CollisionOrderParams"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": {
+      "head_sample_spacing": 6.0,
+      "margin": 1.0,
+      "material_spacing": 1.5,
+      "neighbours": 4,
+      "nozzle_contact_clearance": 3.0,
+      "pose_spacing": 3.0,
+      "support_depth": 0.3,
+      "support_radius": 0.6
+     }
+    },
+    "color_map": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/ColorMap"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "constraints": {
+     "anyOf": [
+      {
+       "items": {
+        "$ref": "#/$defs/Constraint"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "coupled_reorientation_rounds": {
+     "default": 3,
+     "type": "integer"
+    },
+    "coupled_reorientation_tiers": {
+     "anyOf": [
+      {
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "field_solver": {
+     "$ref": "#/$defs/FieldSolverParams",
+     "default": {
+      "convergence_tolerance": 1e-08,
+      "direct_solve_node_threshold": 30000,
+      "direction_blend_min_norm": 0.1,
+      "direction_blend_power": 2.0,
+      "direction_blend_radius": 10.0,
+      "enable_platform_anchor": true,
+      "enforce_upward_growth": true,
+      "geodesic_saddle_threshold_deg": 100.0,
+      "geodesic_smoothing_iterations": 0,
+      "geodesic_smoothing_step": 0.5,
+      "geodesic_source_weight": 0.0,
+      "gradient_baseline_weight": 1.0,
+      "gradient_overhang_weight": 5.0,
+      "heat_method_time_factor": 100.0,
+      "laplacian_smoothness_weight": 1.0,
+      "max_downward_growth_angle_deg": null,
+      "max_solver_iterations": 2000,
+      "overhang_influence_depth": 1,
+      "platform_anchor_value": 0.0,
+      "platform_anchor_weight": 1000000.0,
+      "radial_tilt_origin": null,
+      "resolution": 1.5,
+      "smoothness_modulation_floor": 0.02,
+      "smoothness_modulation_strength": 0.0,
+      "support_feedback_iterations": 0,
+      "support_feedback_min_improvement": 0.02,
+      "support_feedback_threshold_deg": 45.0,
+      "support_feedback_use_geodesic_target": false,
+      "support_feedback_weight": 4.0,
+      "transition_distance_mm": null,
+      "up_vector": [
+       0.0,
+       0.0,
+       1.0
+      ],
+      "upward_growth_epsilon": 1e-09,
+      "use_geodesic_directions": false,
+      "use_heat_geodesic_field": false,
+      "use_ilu_preconditioner": false
+     }
+    },
+    "height_clamp": {
+     "default": false,
+     "type": "boolean"
+    },
+    "junction_refinement_angle_deg": {
+     "default": 30.0,
+     "type": "number"
+    },
+    "junction_refinement_margin": {
+     "default": 3.0,
+     "type": "number"
+    },
+    "junction_refinement_resolution": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "layers": {
+     "$ref": "#/$defs/LayerParams",
+     "default": {
+      "frontier_order": false,
+      "geodesic_order": false,
+      "layer_height_base": 0.2,
+      "nozzle_width": null,
+      "platform_contact_tolerance_factor": 2.5,
+      "split_disjoint_clusters": null,
+      "support_direction_candidate_count": 26,
+      "support_driven_order": null,
+      "support_horizontal_radius_factor": 2.5,
+      "support_rotation_axes": null,
+      "support_vertical_height_factor": 7.5,
+      "weld_tolerance_factor": 1e-06
+     }
+    },
+    "machine_profile": {
+     "$ref": "#/$defs/MachineProfile",
+     "default": {
+      "build_volume": null,
+      "max_angular_acceleration": 5.235987755982989,
+      "max_angular_velocity": 13.08996938995747,
+      "nozzle_diameter": 0.4,
+      "platform_origin": [
+       0.0,
+       0.0,
+       0.0
+      ],
+      "platform_radius": 150.0,
+      "position_coupled_axes": [
+       0
+      ],
+      "radial_direction": [
+       0.0,
+       -1.0,
+       0.0
+      ],
+      "rotation_axes": [
+       {
+        "angle_range_deg": [
+         0.0,
+         360.0
+        ],
+        "axis": [
+         0.0,
+         0.0,
+         1.0
+        ]
+       },
+       {
+        "angle_range_deg": [
+         0.0,
+         185.0
+        ],
+        "axis": [
+         1.0,
+         0.0,
+         0.0
+        ]
+       }
+      ],
+      "z_clearance_min": 0.0
+     }
+    },
+    "machine_toolpath": {
+     "$ref": "#/$defs/Step8Params",
+     "default": {
+      "clamp_angle_rates": false,
+      "default_feedrate": 1000.0,
+      "free_axis_median_window": 0,
+      "ik_refine_iterations": 8,
+      "ik_refine_step_multiplier": 0.5,
+      "ik_samples_per_axis": 10,
+      "max_unreachable_angular_error_deg": 5.0,
+      "per_point_normal": false,
+      "per_point_normal_nodal": false,
+      "singularity_radius_epsilon": 0.001,
+      "travel_feedrate": 0.0
+     }
+    },
+    "near_platform_margin": {
+     "default": 5.0,
+     "type": "number"
+    },
+    "near_platform_resolution": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": 0.5
+    },
+    "overhang": {
+     "$ref": "#/$defs/OverhangParams",
+     "default": {
+      "bridge_detection_ray_density": 4,
+      "bridge_horizontal_angle_tolerance_deg": 10.0,
+      "bridge_max_gap_distance": 2.0,
+      "bridge_support_ratio_threshold": 0.7,
+      "overhang_angle_threshold_deg": 45.0,
+      "up_vector": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "reachable_tilt_from_machine": {
+     "default": true,
+     "type": "boolean"
+    },
+    "resolution": {
+     "default": 1.5,
+     "type": "number"
+    },
+    "scheduling": {
+     "$ref": "#/$defs/Step7Params",
+     "default": {
+      "deadline_ray_samples": 24,
+      "escape_direction_count": 16,
+      "hole_cost_model": {
+       "adhesion_risk_weight": 1.0,
+       "reheat_penalty": 1.0
+      },
+      "max_open_holes": 4,
+      "purge_cost_model": {
+       "time_per_purge": 1.0,
+       "volume_per_purge": 1.0
+      },
+      "rotation_axes": null,
+      "surface_color_distance": 0.5
+     }
+    },
+    "segmentation": {
+     "$ref": "#/$defs/SegmentationParams",
+     "default": {
+      "anchor_growth_weight": null,
+      "branch_cut_threshold": null,
+      "direction_candidate_count": 26,
+      "max_angle_from_direction_deg": 45.0,
+      "max_region_merge_angle_deg": null,
+      "platform_contact_tolerance": 0.5,
+      "platform_z": null,
+      "rotation_axes": null,
+      "up_vector": [
+       0.0,
+       0.0,
+       1.0
+      ]
+     }
+    },
+    "support_check": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/SupportCheckParams"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "toolpath2d": {
+     "$ref": "#/$defs/Step6Params",
+     "default": {
+      "bridge_anchor_extra_walls": 2,
+      "bridge_contour_ratio_threshold": 0.05,
+      "continuous_rings": true,
+      "degenerate_area_ratio": 1e-06,
+      "infill_density": 0.2,
+      "infill_pattern": "crossed_zigzag",
+      "nozzle_width": 0.4,
+      "out_of_plane_interpolation_power": 2.0,
+      "split_open_polylines": false,
+      "split_rings_into_runs": true,
+      "wall_count": 2
+     }
+    },
+    "travel_routing": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/TravelRoutingParams"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    }
+   },
+   "title": "PipelineParams",
+   "type": "object"
+  },
+  "PurgeCostModel": {
+   "additionalProperties": false,
+   "description": "Cout d'une purge classique (contrat UI : SchedulingParams.purge_cost_model).",
+   "properties": {
+    "time_per_purge": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "volume_per_purge": {
+     "default": 1.0,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "RotationAxisSpec": {
+   "additionalProperties": false,
+   "description": "Un DOF de rotation : axe + plage angulaire, exprimé dans le repère du DOF parent (le repère déjà tourné par tous les axes précédents de la liste — même convention que l'ordre d'application matricielle). `angle_range_deg` peut être `(0, 360)` pour un tour complet, une plage restreinte (ex: `(0, 180)` pour la tête de la machine actuelle), ou `(v, v)` pour un DOF figé à une seule valeur — dégénérescence utile qui permet de décrire un axe verrouillé sans le retirer de la liste.",
+   "properties": {
+    "angle_range_deg": {
+     "maxItems": 2,
+     "minItems": 2,
+     "prefixItems": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "number"
+      }
+     ],
+     "type": "array"
+    },
+    "axis": {
+     "items": {
+      "type": "number"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "axis",
+    "angle_range_deg"
+   ],
+   "type": "object"
+  },
+  "SegmentationParams": {
+   "additionalProperties": false,
+   "description": "SegmentationParams(direction_candidate_count: 'int' = 26, max_angle_from_direction_deg: 'float' = 45.0, max_region_merge_angle_deg: 'Optional[float]' = None, platform_z: 'Optional[float]' = None, platform_contact_tolerance: 'float' = 0.5, rotation_axes: 'Optional[list[RotationAxisSpec]]' = None, up_vector: 'np.ndarray' = None, anchor_growth_weight: 'Optional[float]' = None, branch_cut_threshold: 'Optional[float]' = None)",
+   "properties": {
+    "anchor_growth_weight": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "branch_cut_threshold": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "direction_candidate_count": {
+     "default": 26,
+     "type": "integer"
+    },
+    "max_angle_from_direction_deg": {
+     "default": 45.0,
+     "type": "number"
+    },
+    "max_region_merge_angle_deg": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "platform_contact_tolerance": {
+     "default": 0.5,
+     "type": "number"
+    },
+    "platform_z": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "rotation_axes": {
+     "anyOf": [
+      {
+       "items": {
+        "$ref": "#/$defs/RotationAxisSpec"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "up_vector": {
+     "default": [
+      0.0,
+      0.0,
+      1.0
+     ],
+     "items": {
+      "type": "number"
+     },
+     "type": "array"
+    }
+   },
+   "type": "object"
+  },
+  "Step10Params": {
+   "additionalProperties": false,
+   "description": "Step10Params(max_adjustment_iterations: 'int' = 3, reorientation_samples_per_axis: 'int' = 12, max_direction_deviation_deg: 'float' = 45.0, excluded_range_half_width_deg: 'float' = 15.0, rate_limit_neighbor_margin: 'int' = 1)",
+   "properties": {
+    "excluded_range_half_width_deg": {
+     "default": 15.0,
+     "type": "number"
+    },
+    "max_adjustment_iterations": {
+     "default": 3,
+     "type": "integer"
+    },
+    "max_direction_deviation_deg": {
+     "default": 45.0,
+     "type": "number"
+    },
+    "rate_limit_neighbor_margin": {
+     "default": 1,
+     "type": "integer"
+    },
+    "reorientation_samples_per_axis": {
+     "default": 12,
+     "type": "integer"
+    }
+   },
+   "type": "object"
+  },
+  "Step6Params": {
+   "additionalProperties": false,
+   "description": "Step6Params(nozzle_width: 'float' = 0.4, wall_count: 'int' = 2, infill_density: 'float' = 0.2, infill_pattern: 'InfillPattern' = <InfillPattern.CROSSED_ZIGZAG: 'crossed_zigzag'>, bridge_contour_ratio_threshold: 'float' = 0.05, bridge_anchor_extra_walls: 'int' = 2, degenerate_area_ratio: 'float' = 1e-06, out_of_plane_interpolation_power: 'float | None' = None, split_rings_into_runs: 'bool' = False, split_open_polylines: 'bool' = False, continuous_rings: 'bool' = False)",
+   "properties": {
+    "bridge_anchor_extra_walls": {
+     "default": 2,
+     "type": "integer"
+    },
+    "bridge_contour_ratio_threshold": {
+     "default": 0.05,
+     "type": "number"
+    },
+    "continuous_rings": {
+     "default": false,
+     "type": "boolean"
+    },
+    "degenerate_area_ratio": {
+     "default": 1e-06,
+     "type": "number"
+    },
+    "infill_density": {
+     "default": 0.2,
+     "type": "number"
+    },
+    "infill_pattern": {
+     "default": "crossed_zigzag",
+     "enum": [
+      "lines",
+      "grid",
+      "crossed_zigzag"
+     ],
+     "type": "string"
+    },
+    "nozzle_width": {
+     "default": 0.4,
+     "type": "number"
+    },
+    "out_of_plane_interpolation_power": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "split_open_polylines": {
+     "default": false,
+     "type": "boolean"
+    },
+    "split_rings_into_runs": {
+     "default": false,
+     "type": "boolean"
+    },
+    "wall_count": {
+     "default": 2,
+     "type": "integer"
+    }
+   },
+   "type": "object"
+  },
+  "Step7Params": {
+   "additionalProperties": false,
+   "description": "Step7Params(surface_color_distance: 'float' = 0.5, hole_cost_model: 'HoleCostModel' = <factory>, purge_cost_model: 'PurgeCostModel' = <factory>, max_open_holes: 'int' = 4, escape_direction_count: 'int' = 16, rotation_axes: 'Optional[list[RotationAxisSpec]]' = None, deadline_ray_samples: 'int' = 24)",
+   "properties": {
+    "deadline_ray_samples": {
+     "default": 24,
+     "type": "integer"
+    },
+    "escape_direction_count": {
+     "default": 16,
+     "type": "integer"
+    },
+    "hole_cost_model": {
+     "$ref": "#/$defs/HoleCostModel",
+     "default": {
+      "adhesion_risk_weight": 1.0,
+      "reheat_penalty": 1.0
+     }
+    },
+    "max_open_holes": {
+     "default": 4,
+     "type": "integer"
+    },
+    "purge_cost_model": {
+     "$ref": "#/$defs/PurgeCostModel",
+     "default": {
+      "time_per_purge": 1.0,
+      "volume_per_purge": 1.0
+     }
+    },
+    "rotation_axes": {
+     "anyOf": [
+      {
+       "items": {
+        "$ref": "#/$defs/RotationAxisSpec"
+       },
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "surface_color_distance": {
+     "default": 0.5,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "Step8Params": {
+   "additionalProperties": false,
+   "description": "Step8Params(ik_samples_per_axis: 'int' = 10, ik_refine_iterations: 'int' = 8, ik_refine_step_multiplier: 'float' = 0.5, singularity_radius_epsilon: 'float' = 0.001, travel_feedrate: 'float' = 0.0, default_feedrate: 'float' = 1000.0, max_unreachable_angular_error_deg: 'float' = 5.0, clamp_angle_rates: 'bool' = False, free_axis_median_window: 'int' = 0, per_point_normal: 'bool' = False, per_point_normal_nodal: 'bool' = False)",
+   "properties": {
+    "clamp_angle_rates": {
+     "default": false,
+     "type": "boolean"
+    },
+    "default_feedrate": {
+     "default": 1000.0,
+     "type": "number"
+    },
+    "free_axis_median_window": {
+     "default": 0,
+     "type": "integer"
+    },
+    "ik_refine_iterations": {
+     "default": 8,
+     "type": "integer"
+    },
+    "ik_refine_step_multiplier": {
+     "default": 0.5,
+     "type": "number"
+    },
+    "ik_samples_per_axis": {
+     "default": 10,
+     "type": "integer"
+    },
+    "max_unreachable_angular_error_deg": {
+     "default": 5.0,
+     "type": "number"
+    },
+    "per_point_normal": {
+     "default": false,
+     "type": "boolean"
+    },
+    "per_point_normal_nodal": {
+     "default": false,
+     "type": "boolean"
+    },
+    "singularity_radius_epsilon": {
+     "default": 0.001,
+     "type": "number"
+    },
+    "travel_feedrate": {
+     "default": 0.0,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "SupportCheckParams": {
+   "additionalProperties": false,
+   "description": "Les rayons/hauteurs de recherche sont exprimes en MULTIPLES de grandeurs physiques reelles (diametre de buse, hauteur de couche), jamais en constantes absolues : une constante universelle serait soit aberrante sur un modele de 5 mm, soit aveugle sur un modele de 500 mm. Meme discipline que `bridge_max_gap_distance` (step2), calibre relativement a `layer_height_base`.",
+   "properties": {
+    "direction_candidate_count": {
+     "default": 26,
+     "type": "integer"
+    },
+    "grid_cell_size_multiplier": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "horizontal_search_radius_factor": {
+     "default": 2.5,
+     "type": "number"
+    },
+    "locate_supporting_point": {
+     "default": false,
+     "type": "boolean"
+    },
+    "path_sampling_step": {
+     "default": 0.0,
+     "type": "number"
+    },
+    "platform_contact_tolerance_factor": {
+     "default": 2.5,
+     "type": "number"
+    },
+    "vertical_search_height_factor": {
+     "default": 7.5,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
+  "TravelRoutingParams": {
+   "additionalProperties": false,
+   "description": "TravelRoutingParams(length_threshold: 'float' = 5.0, lift_height: 'float' = 3.0, max_lift_multiplier: 'float' = 4.0, traverse_samples: 'int' = 1, routing_toolhead_sample_spacing: 'float' = 15.0, routing_grid_cell_size_multiplier: 'float' = 40.0)",
+   "properties": {
+    "length_threshold": {
+     "default": 5.0,
+     "type": "number"
+    },
+    "lift_height": {
+     "default": 3.0,
+     "type": "number"
+    },
+    "max_lift_multiplier": {
+     "default": 4.0,
+     "type": "number"
+    },
+    "routing_grid_cell_size_multiplier": {
+     "default": 40.0,
+     "type": "number"
+    },
+    "routing_toolhead_sample_spacing": {
+     "default": 15.0,
+     "type": "number"
+    },
+    "traverse_samples": {
+     "default": 1,
+     "type": "integer"
+    }
+   },
+   "type": "object"
+  }
+ },
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "additionalProperties": false,
+ "description": "Genere par scripts/gen_params.py depuis les dataclasses Python. NE PAS EDITER.",
+ "properties": {
+  "GcodeParams": {
+   "$ref": "#/$defs/GcodeParams"
+  },
+  "PipelineParams": {
+   "$ref": "#/$defs/PipelineParams"
+  }
+ },
+ "title": "Apex engine parameters",
+ "type": "object"
+}

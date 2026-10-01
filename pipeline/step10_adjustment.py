@@ -48,6 +48,7 @@ from pipeline.step9_collision_sim import (
     CollisionSimParams,
     _evaluate_point,
     _grow_printed_index_to,
+    _filter_nozzle_contact_zone,
     _PrintedGeometryIndex,
     _surface_sample_points,
     run as collision_run,
@@ -312,7 +313,18 @@ def _collisions_at_points(
     # blocage (17734 points de test par appel au lieu de ~1540, mesure
     # concretement sur aetheris-4.glb), simplement deplace de l'etape 9 a
     # l'etape 10 plutot qu'elimine.
-    samples = _surface_sample_points(nozzle_model, sim_params.toolhead_sample_spacing)
+    if sim_params.fast_kdtree:
+        checker = _fast_checker(toolpath, machine_profile, sim_params)
+        return [e for i in sorted(set(point_indices)) if i < len(toolpath.points)
+                for e in _fast_events(checker, i, toolpath.points[i])]
+
+    # Zone de contact de la buse retiree, EXACTEMENT comme step9 : sans ce
+    # filtre (oublie ici jusqu'au 2026-10-01), la pointe touche toujours le
+    # cordon qu'elle depose et tout point re-teste etait declare en collision.
+    samples = _filter_nozzle_contact_zone(
+        _surface_sample_points(nozzle_model, sim_params.toolhead_sample_spacing),
+        sim_params.nozzle_contact_clearance,
+    )
     printed_index = _PrintedGeometryIndex(
         machine_profile.nozzle_diameter, sim_params.grid_cell_size_multiplier
     )
@@ -414,6 +426,11 @@ class _ReorientationContext:
     toolhead_samples: Optional[np.ndarray]
     printed_index: Optional[_PrintedGeometryIndex]
     last_grown_idx: int = 0
+    # Mode rapide de step9 (`CollisionSimParams.fast_kdtree`) : la
+    # re-verification utilise le MEME controleur que step9, pas l'index exact
+    # par capsules (incoherence corrigee le 2026-10-01 : step10 restait sur
+    # l'exact, des heures sur death.stl et ses 24 789 collisions).
+    fast_checker: Optional[object] = None
 
     def grow_to(self, points: list[ToolpathPoint], point_idx: int) -> None:
         if self.printed_index is None:
@@ -439,12 +456,52 @@ def _build_reorientation_context(
 
     # toolhead_sample_spacing (echelle de la TETE), jamais nozzle_diameter
     # (echelle du CORDON) - meme distinction que step9 (CLAUDE.md limite #26).
-    toolhead_samples = _surface_sample_points(nozzle_model, sim_params.toolhead_sample_spacing)
+    # meme filtre de la zone de contact que step9 (voir _collisions_at_points)
+    toolhead_samples = _filter_nozzle_contact_zone(
+        _surface_sample_points(nozzle_model, sim_params.toolhead_sample_spacing),
+        sim_params.nozzle_contact_clearance,
+    )
     printed_index = _PrintedGeometryIndex(
         machine_profile.nozzle_diameter, sim_params.grid_cell_size_multiplier
     )
-    return _ReorientationContext(toolhead_samples=toolhead_samples, printed_index=printed_index)
+    fast_checker = _fast_checker(toolpath, machine_profile, sim_params) if sim_params.fast_kdtree else None
+    return _ReorientationContext(toolhead_samples=toolhead_samples, printed_index=printed_index,
+                                 fast_checker=fast_checker)
 
+
+def _fast_checker(toolpath, machine_profile, sim_params):
+    """Controleur rapide de step9, avec les MEMES echantillons de tete que
+    step9 en mode rapide (zone de contact de la buse retiree)."""
+    from pipeline.step9_collision_sim import FastCollisionChecker, _filter_nozzle_contact_zone
+    samples = _filter_nozzle_contact_zone(
+        _surface_sample_points(machine_profile.nozzle_model, sim_params.toolhead_sample_spacing),
+        sim_params.nozzle_contact_clearance,
+    )
+    return FastCollisionChecker(toolpath, machine_profile, sim_params, samples)
+
+
+def _fast_events(checker, point_idx: int, point: ToolpathPoint) -> list[CollisionEvent]:
+    plate, part = checker.penetrations(point_idx, point.position, point.axis_angles)
+    events = []
+    if part is not None:
+        events.append(CollisionEvent(point_index=point_idx, obstacle_type="printed_part", penetration_depth=part))
+    if plate is not None:
+        events.append(CollisionEvent(point_index=point_idx, obstacle_type="platform", penetration_depth=plate))
+    return events
+
+
+
+def _coupled_candidates(axes, current_angles, reference_direction, samples):
+    """Candidats de reorientation quand le premier axe est couple a la
+    position : C fige a sa valeur courante, grille produit sur les axes
+    INTERNES seulement. Rend (directions (K,3), angles (K, len(axes)))."""
+    inner = axes[1:]
+    grids = [np.linspace(spec.angle_range_deg[0], spec.angle_range_deg[1], samples) for spec in inner]
+    mesh = np.meshgrid(*grids, indexing="ij")
+    inner_angles = np.column_stack([m.ravel() for m in mesh])
+    angles = np.column_stack([np.full(len(inner_angles), float(current_angles[0])), inner_angles])
+    directions = np.array([_direction_for_angles(axes, list(a), reference_direction) for a in angles])
+    return directions, angles
 
 def _try_local_reorientation(
     toolpath: ToolpathMachine,
@@ -487,15 +544,24 @@ def _try_local_reorientation(
     reference_direction = np.array([0.0, 0.0, 1.0])
     original_direction = _direction_for_angles(axes, point.axis_angles, reference_direction)
 
-    directions, angles_grid = composed_rotation_angles_and_directions(
-        axes, reference_direction, samples_per_axis=max(params.reorientation_samples_per_axis, 2)
-    )
+    if list(getattr(machine_profile, "position_coupled_axes", None) or []) == [0] and len(axes) >= 2:
+        # Machine ACTUELLE (limite #59) : C est impose par la position du
+        # point, seul B (et les axes internes suivants) peut varier. La grille
+        # produit complete proposait des C inexecutables (corrige le
+        # 2026-10-01). B seul : grille 4x plus fine (un seul degre de liberte).
+        directions, angles_grid = _coupled_candidates(
+            axes, point.axis_angles, reference_direction, max(params.reorientation_samples_per_axis, 2) * 4
+        )
+    else:
+        directions, angles_grid = composed_rotation_angles_and_directions(
+            axes, reference_direction, samples_per_axis=max(params.reorientation_samples_per_axis, 2)
+        )
 
     cosines = np.clip(directions @ original_direction, -1.0, 1.0)
     deviations_deg = np.degrees(np.arccos(cosines))
 
     has_toolhead = context.printed_index is not None
-    if has_toolhead:
+    if has_toolhead and context.fast_checker is None:
         context.grow_to(toolpath.points, point_idx)
     toolhead_samples = context.toolhead_samples
     printed_index = context.printed_index
@@ -517,9 +583,13 @@ def _try_local_reorientation(
             return candidate  # aucun modele de tete : rien a re-verifier, meme garde que _collisions_at_points
 
         candidate_point = replace(point, axis_angles=list(candidate))
-        events = _evaluate_point(
-            point_idx, toolhead_samples, candidate_point, machine_profile, printed_index, sim_params.safety_margin
-        )
+        if context.fast_checker is not None:
+            events = _fast_events(context.fast_checker, point_idx, candidate_point)
+        else:
+            events = _evaluate_point(
+                point_idx, toolhead_samples, candidate_point, machine_profile, printed_index,
+                sim_params.safety_margin
+            )
         if not events:
             return candidate
 

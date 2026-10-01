@@ -735,6 +735,66 @@ def _schedule_passes(
 # Point d'entree principal de l'etape
 # ---------------------------------------------------------------------------
 
+def _native_schedule(layers, mesh_data, tet_mesh, color_map, scalar_field, params):
+    """Pas 21c du portage (cpp/src/core/scheduling.cpp) : toute l'etape en
+    natif. Tolerances aux seules frontieres (distance a la surface, sommes de
+    longueurs : voir apex/scheduling.hpp). None si le noyau natif est inactif
+    ou si les polylignes n'ont pas toutes le meme nombre de colonnes."""
+    from core import _cpp
+    if not _cpp.enabled():
+        return None
+    module = _cpp.module()
+    if module is None or not hasattr(module, "schedule_layers"):
+        return None
+    packed = []
+    for layer in layers:
+        polys = [np.ascontiguousarray(p, dtype=float) for p in (layer.toolpath_2d or [])]
+        columns = {p.shape[1] for p in polys if p.ndim == 2}
+        if len(columns) > 1 or any(p.ndim != 2 for p in polys):
+            return None
+        origin, axis_u, axis_v = layer.local_frame
+        frame = np.concatenate([np.asarray(origin, float), np.asarray(axis_u, float), np.asarray(axis_v, float)])
+        packed.append((int(layer.id), frame, polys, columns.pop() if columns else 2,
+                       [int(r) for r in layer.region_ids],
+                       None if layer.isovalue is None else float(layer.isovalue)))
+    face_count = mesh_data.face_count
+    face_color = np.zeros(0, dtype=np.int64)
+    painted = np.zeros(0, dtype=np.uint8)
+    merge_tolerance = 0.0
+    if color_map is not None and color_map.per_face_color:
+        face_color = np.zeros(face_count, dtype=np.int64)
+        painted = np.zeros(face_count, dtype=np.uint8)
+        for face, color in color_map.per_face_color.items():
+            if 0 <= int(face) < face_count and color is not None:
+                face_color[int(face)] = int(color)
+                painted[int(face)] = 1
+        merge_tolerance = float(color_map.merge_tolerance)
+    out_layers, passes = module.schedule_layers(
+        packed,
+        np.ascontiguousarray(mesh_data.vertices, dtype=float),
+        np.ascontiguousarray(mesh_data.faces, dtype=np.int64),
+        np.ascontiguousarray(mesh_data.face_normals, dtype=float),
+        face_color, painted, merge_tolerance,
+        np.ascontiguousarray(tet_mesh.tet_vertices, dtype=float),
+        np.ascontiguousarray(scalar_field.values, dtype=float),
+        np.ascontiguousarray(_escape_directions(params), dtype=float),
+        float(params.surface_color_distance),
+        float(params.hole_cost_model.reheat_penalty), float(params.hole_cost_model.adhesion_risk_weight),
+        float(params.purge_cost_model.volume_per_purge), float(params.purge_cost_model.time_per_purge),
+        int(params.max_open_holes), int(params.deadline_ray_samples),
+    )
+    colored_layers = [
+        replace(layer, toolpath_2d=list(polys), segment_colors=list(colors), color_id=dominant)
+        for layer, (polys, colors, dominant) in zip(layers, out_layers)
+    ]
+    schedule = PrintSchedule(passes=[
+        PrintPass(segments=[tuple(seg) for seg in segs], color_id=color, is_hole_fill=bool(fill),
+                  layer_range=tuple(rng), deferred_regions=list(deferred))
+        for segs, color, fill, rng, deferred in passes
+    ])
+    return colored_layers, schedule
+
+
 def run(
     layers: list[Layer],
     mesh_data: MeshData,
@@ -779,6 +839,10 @@ def run(
                 f"La couche {layer.id} n'a pas de toolpath_2d - "
                 f"pipeline/step6_toolpath2d.py doit etre execute avant l'etape 7."
             )
+
+    native = _native_schedule(layers, mesh_data, tet_mesh, color_map, scalar_field, params)
+    if native is not None:
+        return native
 
     colored_layers = _apply_colors_to_layers(layers, mesh_data, color_map, params)
     groups_per_layer = _group_segments_by_color(colored_layers)

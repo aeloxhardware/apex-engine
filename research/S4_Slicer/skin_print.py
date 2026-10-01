@@ -32,6 +32,7 @@ Usage (venv d'Apex) :
   APEX_USE_CPP=1 ../../.venv/Scripts/python.exe -u skin_print.py <modele STL> <passe> [variante]
       [--head-tolerance=45] [--sampling=0 (0 = tous les points)] [--margin=1.0] [--feed=25 (mm/s)]
 """
+import safe_io  # noqa: F401 -- ecritures robustes aux verrous transitoires
 import json
 import os
 import pickle

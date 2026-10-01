@@ -1,1 +1,1 @@
-{"excluded_zones": [3, 5, 7, 17, 19], "reason": {"3": {"plateau": 0, "piece": 3, "tolerance": 90}, "5": {"plateau": 0, "piece": 2, "tolerance": 11}, "7": {"plateau": 0, "piece": 0, "tolerance": 151}, "17": {"plateau": 0, "piece": 9, "tolerance": 0}, "19": {"plateau": 0, "piece": 2, "tolerance": 0}}}
+{"excluded_zones": [3, 4, 25]}

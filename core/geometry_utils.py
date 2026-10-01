@@ -871,6 +871,10 @@ def point_in_polygon_2d(point: np.ndarray, polygon: np.ndarray) -> bool:
     winding, contrairement au signe de l'aire projetee (verifie empiriquement
     faux sur un anneau plat synthetique - CLAUDE.md limite #11).
     """
+    from core import _cpp  # import local : core._cpp importe deja ce module indirectement
+    if _cpp.enabled() and hasattr(_cpp.module(), "point_in_polygon_2d"):
+        return bool(_cpp.module().point_in_polygon_2d(float(point[0]), float(point[1]),
+                                                      np.ascontiguousarray(polygon, dtype=float)))
     x, y = point
     inside = False
     n = len(polygon)

@@ -1,14 +1,14 @@
-rognage P5 : 67 points de collision, 82 faces retirees (rayon 2.0 mm, 47.0 mm2)
-micro-zones (distance au bord < 0.60 mm) : 0 rattachees, 2 isolees et 0 a voisines inaccessibles non lissees (3.0 mm2) | 0.1 s
-l_shape_overhang_pin passe 16 : 1120 faces (1120 apres coupe), 147 couches
-  retenue               112 faces   13.1% de la surface
-  inatteignable         648 faces   55.3% de la surface
-  collision plateau     256 faces   21.2% de la surface
-  collision objet        82 faces    7.3% de la surface
-  contact plateau        16 faces    2.5% de la surface
-  zone trop petite        0 faces    0.0% de la surface
-  micro-zone non lissee      6 faces    0.5% de la surface
-  morceaux apres coupe aux aretes (< 150 deg entre faces) : 6 ; bandes (minimum) : 6 ; zones : 4 (moments 118 a 146)
+rognage P5 : 236 points de collision, 1122 faces retirees (rayon 2.0 mm, 712.6 mm2)
+micro-zones (distance au bord < 0.60 mm) : 7 rattachees, 3 isolees et 1 a voisines inaccessibles non lissees (5.3 mm2) | 2.7 s
+dino_pin passe 5 : 14462 faces (14600 apres coupe), 310 couches
+  retenue              4973 faces   34.7% de la surface
+  inatteignable        2079 faces   12.7% de la surface
+  collision plateau    4031 faces   27.7% de la surface
+  collision objet      1541 faces   11.0% de la surface
+  contact plateau      1956 faces   13.8% de la surface
+  zone trop petite        9 faces    0.0% de la surface
+  micro-zone non lissee     11 faces    0.1% de la surface
+  morceaux apres coupe aux aretes (< 150 deg entre faces) : 52 ; bandes (minimum) : 54 ; zones : 37 (moments 69 a 309)
   chaque zone accessible a son moment : True
-  sommets de surface non localises dans un tetraedre : 0
-  temps : surface et phi 0.0 s ; IK couplee a la position (1104 faces, centre + 3 sommets) 0.9 s ; collision (456 faces, 4581 points de tete, cache) 0.0 s ; coupe le long de 0 lignes de niveau 0.0 s ; bandes et zones 0.1 s ; total 1.0 s
+  sommets de surface non localises dans un tetraedre : 9
+  temps : surface et phi 0.1 s ; IK couplee a la position (12506 faces, centre + 3 sommets) 0.1 s ; collision (10427 faces, 4581 points de tete, cache) 0.1 s ; coupe le long de 2 lignes de niveau 0.0 s ; bandes et zones 2.7 s ; total 2.9 s

@@ -339,6 +339,18 @@ class FieldSolverParams:
     # Chaque iteration coute une resolution complete du systeme.
     support_feedback_iterations: int = 0
 
+    # Directions cibles ATTEIGNABLES par la machine actuelle (CLAUDE.md
+    # limite #59, phase 3.1 de la session du 2026-10-01). C est impose par la
+    # position du point : la tete ne peut incliner la normale de couche QUE
+    # dans le plan (radial, vertical) du point, et seulement VERS L'EXTERIEUR
+    # (+R, B >= 0). Toute composante tangentielle est inatteignable sans axe D.
+    # Mesure avant ce mecanisme : `step8_diagnostics` = 95 % des points sur
+    # l_shape, ~ tous sur death.
+    # Renseigne (origine du plateau), chaque direction cible est projetee sur
+    # ce demi-plan : composante tangentielle retiree, composante radiale
+    # negative ramenee a 0. None (defaut) = DESACTIVE, historique inchange.
+    radial_tilt_origin: Optional[np.ndarray] = None
+
     # Critere d'arret dynamique : gain RELATIF minimal d'une iteration a la
     # suivante sur la fraction de volume en surplomb auto-infligee. En dessous,
     # la boucle s'arrete et se declare `stalled` (jamais `converged` - voir
@@ -2274,6 +2286,36 @@ def _solve_linear_system(
 # Decision 6 - Systeme statique (invariant aux contraintes) / resolution
 # ---------------------------------------------------------------------------
 
+
+def _project_to_reachable_radial_tilt(
+    tet_mesh: TetMesh, directions: np.ndarray, origin: np.ndarray, up_vector: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Projette chaque direction sur le demi-plan (+radial, vertical) de son
+    tetraedre : seul degre d'orientation de la machine actuelle quand C est
+    impose par la position (limite #59). Rend (directions, masque des
+    tetraedres modifies de plus de 1e-6). Pres de l'axe (rayon < 1e-6), la
+    radiale est indefinie et C y est libre : direction laissee intacte."""
+    up = np.asarray(up_vector, dtype=float)
+    up = up / np.linalg.norm(up)
+    centers = tet_mesh.tet_vertices[tet_mesh.tetrahedra].mean(axis=1) - np.asarray(origin, dtype=float)
+    radial = centers - np.outer(centers @ up, up)
+    rn = np.linalg.norm(radial, axis=1)
+    ok = rn > 1e-6
+    rhat = np.zeros_like(radial)
+    rhat[ok] = radial[ok] / rn[ok, None]
+    d_r = np.einsum("ij,ij->i", directions, rhat)
+    d_z = directions @ up
+    d_r = np.maximum(d_r, 0.0)
+    projected = d_r[:, None] * rhat + d_z[:, None] * up
+    norm = np.linalg.norm(projected, axis=1)
+    degenerate = norm < 1e-9          # direction purement tangentielle : verticale
+    projected[degenerate] = up
+    norm[degenerate] = 1.0
+    projected /= norm[:, None]
+    result = np.where(ok[:, None], projected, directions)
+    changed = np.linalg.norm(result - directions, axis=1) > 1e-6
+    return result, changed
+
 def build_static_system(
     tet_mesh: TetMesh,
     mesh_data: MeshData,
@@ -2468,6 +2510,12 @@ def build_static_system(
     elif params.enforce_upward_growth:
         tet_directions, upward_flip_mask = _enforce_upward_directions(
             tet_directions, params.up_vector, params.upward_growth_epsilon
+        )
+
+    if params.radial_tilt_origin is not None:
+        tet_directions, _radial_projected = _project_to_reachable_radial_tilt(
+            tet_mesh, tet_directions, params.radial_tilt_origin,
+            params.up_vector if params.up_vector is not None else np.array([0.0, 0.0, 1.0]),
         )
 
     # Boucle de retroaction de surplomb : ferme le circuit ouvert decrit sur

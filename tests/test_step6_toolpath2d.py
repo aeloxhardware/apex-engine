@@ -1219,3 +1219,54 @@ def test_zigzag_does_not_retrace_the_innermost_wall():
     points = np.vstack(chains)
     distances = [zone.exterior.distance(Point(p)) for p in points]
     assert min(distances) >= 0.2 - 1e-9
+
+
+def test_split_ring_shared_vertices_extrude_every_segment():
+    """
+    `continuous_rings` (2026-10-01) : avec des troncons a indices DISJOINTS, le
+    segment qui relie deux troncons n'est jamais extrude (il devient un trajet
+    a vide) - 7,7 % de la longueur perdue sur death.stl. Avec le sommet de
+    jonction partage, chaque segment de l'anneau appartient a un troncon, et
+    chaque troncon reste montant.
+    """
+    ring = _wavy_ring(n=400, radius=25.0, amplitude=2.0, cycles=6)
+    runs = _split_ring_into_runs(ring, share_vertices=True)
+    assert len(runs) > 1
+
+    def edges(poly):
+        keys = set()
+        for a, b in zip(poly[:-1], poly[1:]):
+            keys.add(frozenset((tuple(np.round(a, 9)), tuple(np.round(b, 9)))))
+        return keys
+
+    covered = set().union(*(edges(r) for r in runs))
+    assert edges(ring) <= covered
+    for run in runs:
+        assert run[-1, 2] >= run[0, 2]
+    # sans partage, des segments manquent : le test verifie bien quelque chose
+    disjoint = set().union(*(edges(r) for r in _split_ring_into_runs(ring)))
+    assert not edges(ring) <= disjoint
+
+
+def test_continuous_rings_closes_original_contour(flat_box_layers):
+    """Le contour d'origine n=0 sort OUVERT de la classification : sans
+    point de fermeture, son dernier segment n'est jamais trace. Avec
+    `continuous_rings`, il est ferme (premier point repete)."""
+    mesh_data, overhang_map, layers = flat_box_layers
+    base = Step6Params(nozzle_width=0.4, wall_count=1, infill_density=0.2)
+    closed = Step6Params(nozzle_width=0.4, wall_count=1, infill_density=0.2, continuous_rings=True)
+
+    def original(result):
+        found = []
+        for layer in result:
+            contour_2d = _project_to_local_2d(layer.contour_3d[0][:-1], layer.local_frame)
+            for polyline in layer.toolpath_2d or []:
+                if len(polyline) >= len(contour_2d) and np.allclose(polyline[: len(contour_2d), :2], contour_2d):
+                    found.append((polyline, len(contour_2d)))
+        return found
+
+    open_ones = original(toolpath_run(layers, mesh_data, overhang_map, base))
+    closed_ones = original(toolpath_run(layers, mesh_data, overhang_map, closed))
+    assert open_ones and closed_ones
+    assert all(len(p) == n for p, n in open_ones)
+    assert all(len(p) == n + 1 and np.allclose(p[0], p[-1]) for p, n in closed_ones)

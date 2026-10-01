@@ -32,6 +32,7 @@ Sortie : output_models/loop_<modele>_deformed_slice_pass<k>.pkl, lisible par
 render_toolpaths.py (toolpath_2d dans le plan de la couche, toolpath_3d et
 contour_3d dans la piece reelle, repere du STL).
 """
+import safe_io  # noqa: F401 -- ecritures robustes aux verrous transitoires
 import os
 import pickle
 import sys
@@ -278,6 +279,7 @@ def main():
 
     # --- verification 2 : remplissage mesure / attendu ------------------------
     ratios, split_pieces, empty_pieces, holes_total, holes_bordered = [], 0, 0, 0, 0
+    ratio_invalid = []
     for L in layers:
         # dans le REPERE LOCAL de la couche, celui de toolpath_2d (origine et
         # axes propres a chaque couche, meme si le plan est horizontal)
@@ -300,6 +302,7 @@ def main():
         expected = max(0.0, area - walls * w) * density / w
         if expected > 20.0:          # couches ou du remplissage est attendu
             ratios.append(infill / expected)
+            ratio_invalid.append(any(not Polygon(c[:, :2]).is_valid for c in L.contour_3d if len(c) >= 3))
         # Couverture (defauts corriges le 2026-09-26 dans _offset_walls) :
         #  - chaque morceau d'une zone coupee en deux par la 1re paroi doit
         #    contenir de la trajectoire ;
@@ -323,6 +326,12 @@ def main():
                     holes_total += 1
                     holes_bordered += (tree.query(hole[:, :2])[0] < 1e-6).mean() >= 0.95
     ratios = np.array(ratios)
+    ratio_invalid = np.array(ratio_invalid, bool)
+    for flag, name in ((False, "valides"), (True, "a contour invalide")):
+        sel = ratios[ratio_invalid == flag] if len(ratios) else ratios
+        if len(sel):
+            print(f"  couches {name} : {len(sel)}, remplissage mesure/attendu mediane {np.median(sel):.2f}, "
+                  f"10e-90e {np.percentile(sel, 10):.2f}-{np.percentile(sel, 90):.2f}")
     if len(ratios):
         print(f"remplissage mesure / attendu, sur {len(ratios)} couches qui en attendent : "
               f"mediane {np.median(ratios):.2f}, 10e-90e centiles {np.percentile(ratios, 10):.2f}-"

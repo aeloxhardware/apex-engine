@@ -44,8 +44,10 @@ from pipeline.step2_overhang import run as overhang_run  # noqa: E402
 from pipeline.step3_segmentation import run as segmentation_run  # noqa: E402
 from pipeline.step4_field_solver import run as field_solver_run  # noqa: E402
 from pipeline.step5_layers import run as layers_run  # noqa: E402
+from pipeline.step5b_collision_order import run as collision_order_run  # noqa: E402
 from pipeline.step6_toolpath2d import run as toolpath2d_run  # noqa: E402
 from pipeline.step7_scheduling import run as scheduling_run  # noqa: E402
+from pipeline.step8_machine_toolpath import gradient_direction_field
 from pipeline.step8_machine_toolpath import run as machine_toolpath_run  # noqa: E402
 from pipeline.step8b_travel_routing import route_long_travels  # noqa: E402
 from pipeline.step9b_support_check import run as support_check_run  # noqa: E402
@@ -69,6 +71,8 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
     fonctionne correctement quand il est reellement exerce).
     """
     t0 = time.time()
+    from main import _effective_field_solver_params, check_model_fits_machine
+    check_model_fits_machine(mesh_path, params.machine_profile)
 
     junction_zones = None
     if params.junction_refinement_resolution is not None:
@@ -116,11 +120,16 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
 
     print("[preview] Etape 4/8 - resolution du champ scalaire")
     scalar_field = field_solver_run(
-        tet_mesh, mesh_data, overhang_map, region_graph, params.constraints, params.field_solver
+        tet_mesh, mesh_data, overhang_map, region_graph, params.constraints,
+        _effective_field_solver_params(params),
     )
 
     print("[preview] Etape 5/8 - extraction des couches courbes")
     layers = layers_run(tet_mesh, mesh_data, scalar_field, region_graph, params.layers)
+    if params.collision_order is not None:
+        layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)
+        print(f"[preview]   ordre contraint par la tete : {order_report.constraints} contrainte(s), "
+              f"{order_report.moved_layers} couche(s) deplacee(s), {order_report.cycle_breaks} violee(s)")
     print(f"[preview]   {len(layers)} couche(s)")
 
     print("[preview] Etape 6/8 - remplissage 2D par couche")
@@ -134,7 +143,10 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
 
     print("[preview] Etape 8/8 - trajectoire machine (resolution IK)")
     toolpath, diagnostics = machine_toolpath_run(
-        colored_layers, schedule, params.machine_profile, params.machine_toolpath
+        colored_layers, schedule, params.machine_profile, params.machine_toolpath,
+        direction_field=(gradient_direction_field(tet_mesh, scalar_field,
+                                                  nodal=params.machine_toolpath.per_point_normal_nodal)
+                         if params.machine_toolpath.per_point_normal else None),
     )
     print(
         f"[preview]   {len(toolpath.points)} point(s) de trajectoire, "

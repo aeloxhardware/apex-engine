@@ -1,0 +1,24 @@
+=== death stable3
+[preview]   ordre contraint par la tete : 26434 contrainte(s), 146 couche(s) deplacee(s), 161 violee(s)
+ "layers": 254,
+ "unsupported_fraction": 0.0022186723464678736,
+ "time_real_h": 1.927,
+ "collision_fraction": 0.0013,
+=== turkish stable3
+[preview]   ordre contraint par la tete : 44787 contrainte(s), 313 couche(s) deplacee(s), 504 violee(s)
+ "layers": 313,
+ "unsupported_fraction": 0.0017238986956888958,
+ "time_real_h": 5.009,
+ "collision_fraction": 0.0013,
+=== l-triple-axis-overhanged-shape stable3
+[preview]   ordre contraint par la tete : 5583 contrainte(s), 0 couche(s) deplacee(s), 4 violee(s)
+ "layers": 166,
+ "unsupported_fraction": 0.026622477966348604,
+ "time_real_h": 0.184,
+ "collision_fraction": 0.0,
+=== l_shape_overhang stable3
+[preview]   ordre contraint par la tete : 6068 contrainte(s), 0 couche(s) deplacee(s), 2 violee(s)
+ "layers": 166,
+ "unsupported_fraction": 0.03140787341530836,
+ "time_real_h": 0.157,
+ "collision_fraction": 0.0,

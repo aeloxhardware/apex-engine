@@ -6,17 +6,266 @@ rendu est dans le commit `2b7edc9`). **Plan approuvé en cours d'exécution :**
 
 CODE SECRET : 7489
 
-## >>> REPRENDRE ICI (session autonome du 2026-09-30) <<<
+## >>> RÉCAPITULATIF DU 2026-10-01 (nuit + journée) — LIRE D'ABORD <<<
 
-**Sauvegardes (fin de session, le poste doit être remplacé)** :
+**Résultats principaux (détail plus bas et dans CLAUDE.md, limites #56 et #59 à #67)** :
+1. **Ordre des couches contraint par la tête** (`pipeline/step5b_collision_order.py`, limite #67,
+   activé) : collisions de la vraie tête death 41,6 → 0,13 %, turkish 53,6 → 0,21 % ; matière sans
+   appui death 0,227 → 0,222 %, turkish 0,70 → 0,17 % ; l_shape et l-triple inchangés. Le pipeline
+   FEM devient imprimable sur death et turkish (au pivot près).
+2. **Parois trouées depuis l'origine** (limite #65) : 7,7 à 15,7 % de la longueur jamais extrudée ;
+   corrigé (`Step6Params.continuous_rings`, activé). Tous les G-code antérieurs sont concernés.
+3. **step10 exact ne pouvait jamais réorienter** (filtre de la zone de buse oublié, limite #66) :
+   corrigé.
+4. **step9 rapide activé par défaut** (contrôlé contre l'exact sur les 4 modèles, 0 erreur) et
+   accéléré 20 → 2,9 s ; **`radial` tranché** par la mesure (gagne partout).
+5. **step3 : tri stable** (la segmentation dépendait de l'implémentation de numpy).
+6. **Portage C++** : pas 11 à 15, 17, 19, 21a-c (step2, step3, step7), 24. Pipeline death complet
+   STL → G-code : **57 → 20,6 s** (dont ~7 s de TetGen). Le reste du portage est architectural ;
+   l'utilisateur a choisi « salon d'abord ».
+7. **Salon** : Benchy et dino re-tranchés par la voie Bird avec tous les correctifs (11 min chacun),
+   G-code produits, rapport ci-dessous (« Après-midi du 2026-10-01 »).
+
+**EN ATTENTE DE L'UTILISATEUR** : convention pivot / pointe contre son prévisualiseur (aucun G-code
+imprimable avant ; régénération : `export_gcode.py ... --tilt-sign= --z-reference=`) ; fichiers
+RRF ; choix de la normale par point (qualité contre temps) ; SDK Vulkan.
+
+**Suite prévue** : traiter les 4 dégagements de trajet à vide en contact (Benchy 3, dino 1) ;
+brancher le step9 rapide d'Apex dans la chaîne Bird (4-6 min → secondes) après le salon ; finir le
+portage (step10, step5, step4, step1, orchestrateur natif) après le salon.
+
+**Suite de tests : 461/461** dans les deux positions de `APEX_USE_CPP`, `cpp/lib` reconstruit.
+
+## >>> SESSION AUTONOME 2026-10-01 (nuit, utilisateur absent) — JOURNAL <<<
+
+Plan : `~/.claude/plans/ok-je-vis-aller-parallel-tiger.md` (phases 0 à 5). Aucun commit ni push
+(l'utilisateur gère git). Décisions prises seul : notées ici, avec leur raison.
+
+**En attente de l'utilisateur (tâches reportées, rien deviné)** :
+- **Modèle pivot / pointe** : où sa prévisualisation place la pointe pour les 4 lignes de test
+  (Benchy lignes 11, 1838, 67452, 227838), ou sa formule. L'export est désormais paramétré
+  (`GcodeParams.tilt_sign`, `z_reference`) : la correction tiendra en une ligne.
+- **Fichiers RRF** (`config.g`, homing) : limites de Y (jusqu'à 35 tours cumulés sur le Benchy),
+  Z < 0 autorisé ou non, vitesses et accélérations par axe.
+- **SDK Vulkan** (droits administrateur) : backend GPU de `MeshDistance`.
+- **Essais d'impression** : aucun G-code n'est à lancer tant que la convention pivot n'est pas
+  tranchée.
+- **Ordre contraint par la tête (step5b, activé)** : rien à arbitrer (aucune dégradation), mais à
+  regarder : GIF `out/death_order_step5b.gif`.
+- **`radial` par défaut** : TRANCHÉ par la mesure (gagne sur les 4 modèles avec le nouvel ordre).
+- **Normale par point** : décision toujours en attente (qualité contre temps d'impression).
+
+### Phase 0 — G-code (FAIT)
+- **Pointe au sommet du cordon** (`GcodeParams.tip_at_bead_top`, activé par défaut). Fait
+  vérifié, pas un réglage : step5 place la première isovaleur à v_min + δ/2
+  (`step5_layers.py:747`), donc les points de trajectoire sont au MILIEU de la couche. La
+  pointe est relevée de h/2 le long de l'axe de la tête (h = 0,2 pour le corps comme pour le
+  lissage). Première couche : pointe à 0,2 au lieu de 0,04-0,11.
+- **Modèle de tête paramétré** : `tilt_sign` (sens du déport radial du pivot) et `z_reference`
+  (`"tip"` = référence d'origine, `"pivot"` = Z firmware = hauteur du pivot). Défauts =
+  comportement d'origine.
+- **Garde-fous dans `GcodeReport`** : `tip_z_min`, `head_z_min`, `tip_below_plate`,
+  `head_below_margin`, étendues X/Y/Z firmware, `written`. `GcodeParams.strict` refuse
+  d'écrire un fichier dont la pointe passe sous le plateau.
+- **Outil** `scripts/gcode_tilt_profile.py <gcode> [--png=]` : tables par tranche de B sous
+  4 conventions (apex, pivot-z, sign-, raw). Sur l_shape : la convention « raw » (X/Z lus comme la
+  pointe) met 34 % des mouvements sous le plateau, dès B > 45° ; « pivot-z » les y met tous.
+- Tests : 12/12 dans `tests/test_gcode_export.py` (3 nouveaux).
+
+### Phase 1 — mesures (en cours, `out/run_matrix.sh`, résultats `out/measure_matrix.jsonl`)
+- Script `scripts/measure_matrix.py <stl> <variante>` : une ligne JSON par mesure (step9b,
+  épaisseur de couche réelle mesurée, diagnostics step8, sauts de B, trajets).
+- **Découverte** : `step8_diagnostics` (orientations inatteignables) est ÉNORME avec la
+  cinématique couplée : 19 325 / 20 405 points sur l_shape, 289 020 sur death. Le champ FEM
+  demande des inclinaisons vers le centre que B ne sait pas faire (limite #59). À traiter en
+  phase 3.1.
+
+### Phase 2 — portage C++ (en cours)
+- Pas 11 (schéma des paramètres + `params.hpp`), 13 (marching tetrahedra), 14 (tracé de bord) :
+  FAITS, au bit près ; détail dans CLAUDE.md limite #56. step5 sur death : 2,56 → 1,14 s.
+- Clipper2 2.0.1 vendoré (`cpp/third_party/clipper2`, BSL-1.0 vérifiée) pour le pas 15 (step6).
+- Module de développement : `scripts/build_cpp.py --dev` + `APEX_CPP_LIB_DIR=cpp/build_dev/lib`.
+  `cpp/lib` n'est pas reconstruit tant que la matrice de mesure tourne : **à reconstruire en fin
+  de session** (`scripts/build_cpp.py`).
+
+- Pas 17 (IK couplée native), pas 12 (`point_in_polygon_2d`), TetGen spéculatif (step1), step6
+  parallèle + indices de contours : tous identiques au bit ou à 1e-14 près. **death @ 0,8 : 105 s →
+  18 s profilé** ; turkish step6 8,0 → 3,5 s.
+- Pas 19 (step9 rapide natif, death 233 → 14 s) et pas 24 (export G-code natif, Benchy 20,9 →
+  0,8 s, texte identique ligne à ligne) : FAITS. step1 : TetGen en parallèle de sa sonde, et
+  réutilisation de la sonde (death 13,8 → 7,7 s, turkish 20,2 → 12,8 s), identique au bit.
+- Piège rencontré : comparer à une version rechargée depuis git exige de partager ses CLASSES
+  (enums) avec le module courant, sinon faux écart (`scripts/check_against_git.py` corrigé).
+
+### Phase 3 — fiabilisation
+- 3.2 : `MachineProfile.platform_radius` (150 mm pour la machine actuelle), utilisé par step9.
+  Refus des modèles impossibles à placer (`ModelTooLargeError`, plus petit cercle englobant de
+  l'empreinte, indépendant du placement) dans `main` et `export_slicing_preview`.
+- 3.1 : **inclinaisons atteignables ACTIVÉES par défaut** (limite #64 de CLAUDE.md : mesurées sur
+  les 4 modèles, matière sans appui en baisse partout, écart tête / normale 16-49° → 3-6°).
+- **À DÉCIDER PAR L'UTILISATEUR** : normale par point (`Step8Params.per_point_normal(_nodal)`),
+  meilleure orientation (écart divisé par 2) contre +38 à +130 % de temps d'impression.
+- `feedback3` : améliore 3 modèles sur 4, dégrade turkish de 6 % → reste opt-in.
+- **Collisions (step9 rapide, désormais natif : death 233 → 14 s)** : avec `radial`, l-triple
+  10,5 % → 0 %, turkish 61 % → 54 %, **death 31 % → 41 % (dégrade)**. `radial` maintenu par défaut
+  (métrique step9b meilleure partout) mais **À VALIDER PAR L'UTILISATEUR**. Surtout : le pipeline
+  FEM par défaut n'est PAS imprimable sur death/turkish (défaut d'ordre : la tête touche de la
+  matière déposée bien plus tôt, ~9 mm plus haut). La voie Bird reste la voie d'impression.
+
+- **step10 corrigé** (limite #59) : en machine couplée, la réorientation ne propose plus que des
+  candidats à C figé ; en mode step9 rapide, step10 revérifie avec le même contrôleur rapide.
+  Pipeline complet death @ 0,8 (step1→step10, step9 rapide) : **57 s**, 24 789 collisions,
+  `converged=True` mais **24 772 en support de secours** et 17 seulement résolues par
+  réorientation. « Convergé » ne veut donc PAS dire imprimable : la réorientation (B seul, C
+  imposé) ne peut presque rien contre le défaut d'ordre.
+- **step9 rapide contre exact** (`scripts/compare_step9_modes.py`) : l-triple 680 événements
+  communs sur 681 (le seul manquant à 0,000 mm de pénétration), écart de pénétration ≤ 0,072 mm
+  (borne théorique 0,125), **1 s contre 552 s**. Les 3 autres modèles : `out/compare_step9_3models.log`.
+
+### DÉFAUT MAJEUR CORRIGÉ : parois trouées (limite #65 de CLAUDE.md)
+Le découpage en tronçons monotones (actif par défaut) ne traçait jamais le segment entre deux
+tronçons : **7,7 % de la longueur perdue sur death, 15,7 % sur l_shape**. Le contour n=0 n'était
+pas refermé non plus. `Step6Params.continuous_rings` corrige les deux et est **activé par défaut**
+(mesuré sur les 4 modèles : death −15 %, turkish −2,6 %, l-triple +0,8 %, l_shape +3 % de matière
+sans appui ; longueur extrudée +8 à +20 %). **Tous les G-code produits avant ce correctif ont des
+parois trouées** sur la voie FEM. Voie Bird (recherche) : ses couches sont exactement planes dans
+l'espace déformé (écart 2e-16 mm), donc un seul tronçon par anneau ; seul le segment de fermeture du
+contour n=0 y manquait (≈ 0,1-0,9 % de la longueur), corrigé aussi dès le prochain tranchage.
+
+### Bug step10 corrigé (limite #66)
+En mode exact, step10 oubliait le filtre de la zone de contact de la buse : chaque point testé
+était en collision avec son propre cordon, donc aucune réorientation possible. Corrigé + test.
+
+### step8 en tableaux (au bit) : death 1,92 → 0,82 s.
+
+### Après-midi du 2026-10-01 — « salon d'abord » (décision de l'utilisateur)
+Chaîne Bird refaite avec les correctifs du jour (`out/run_bird_chain.sh`, journal `out/bird_chain.log`) :
+
+| | Benchy (passe 4) | dino (passe 5) |
+|---|---:|---:|
+| durée totale (déformation déjà faite → G-code) | **11 min 9 s** | **11 min 5 s** |
+| dont boucle de lissage (P2/P4/P5 ×3, P3 final) | 384 s | 285 s |
+| dont étapes 8+9 (step9 de recherche, Python) | 259 s | 363 s |
+| zones de lissage retirées (collision) | 5 | 3 |
+| collisions tête restantes | 12 points du corps, pénétration ≤ 0,38 mm DANS la marge de 1 mm | **0** |
+| points du corps à > 45° de la normale | 1,6 % | 0,1 % |
+| dégagements de trajet à vide en contact franc | 3 | 1 |
+| filament | 4,53 m | 6,26 m |
+| temps d'impression (limites de B) | **3,28 h** | **4,08 h** |
+
+Sur ce PC, P2 prend 3-16 s et P3 43-57 s (340-510 s sur l'ancien) : la refonte 3D de P3 n'est plus
+prioritaire. Incident : P4 a échoué une fois sur un verrou transitoire de Windows en réécrivant son
+.pkl → `research/S4_Slicer/safe_io.py` (réessai des écritures jusqu'à 5 s), importé par les 7
+scripts de la chaîne. `export_gcode.py` accepte `--tilt-sign`, `--z-reference`,
+`--no-tip-at-bead-top`, `--strict` : régénération en une commande une fois la convention pivot
+tranchée. G-code produits : `output_models/loop_*_pin_pass{4,5}.gcode` (NON imprimables avant).
+
+### Matinée du 2026-10-01 (utilisateur présent)
+- `radial` TRANCHÉ par la mesure (gagne sur les 4 modèles avec le nouvel ordre).
+- Portage : pas 21a (step2), 21b (step3, chemin par défaut), 21c (step7 entier), tous IDENTIQUES au
+  Python sur les modèles réels ; MeshDistance rend l'indice du triangle le plus proche.
+- step3 : tri des arêtes rendu STABLE (le résultat dépendait de numpy : 11 ou 24 régions sur
+  turkish) ; mesuré neutre ou meilleur (turkish 0,198 → 0,172 %).
+- step9 rapide 20 → 2,9 s ; step5b 6 → 3 s. **Pipeline complet death : 57 → 20 s.** Suite 461/461.
+- Non fait, et pourquoi : reste de step5 (≈ 0,6 s, repères locaux dont les sommes diffèrent entre
+  numpy et C++ : le porter casserait l'équivalence aval pour un gain minime).
+
+### RÉSULTAT MAJEUR : step5b, ordre des couches contraint par la tête (limite #67), ACTIVÉ
+Si la tête posée sur la couche L touche la couche M, alors L avant M (tri topologique stable).
+Avec les contraintes d'appui (M sous L ⇒ M avant L), défaut retenu : collisions de la vraie tête
+**death 41,6 → 0,13 %, turkish 53,6 → 0,21 %** ; matière sans appui **death 0,227 → 0,222 %,
+turkish 0,70 → 0,198 %** ; l_shape et l-triple inchangés. Aucun modèle ne se dégrade. Suite 450/450.
+Pipeline complet step1→10 : death 35 s / 88 points en collision (27 855 avant) ; turkish 75 s /
+322 points (~76 000 avant).
+
+### step9 rapide ACTIVÉ par défaut (main.PipelineParams)
+Contre l'exact : l-triple et l_shape entiers, turkish (2 000 points) et death (600 points) par
+échantillon : 0 faux positif, 0 faux négatif, écart ≤ 0,087 mm. Suite : **445/445** dans les deux
+positions, `cpp/lib` reconstruit.
+
+### Mesures diverses (fin de nuit)
+- `enforce_upward_growth=False` avec radial : death 0,23 → **11,4 %**, turkish 0,70 → 3,55 % de
+  matière sans appui → le redressement reste indispensable (piste « flip conditionnel » close).
+- Remplissage : couverture réelle conforme (death 22 % pour 20 % visés) ; pas de défaut.
+- Solveur step4 : Jacobi CG (1,25 s) reste le meilleur disponible (SuperLU 110 s, ILU scipy ne
+  converge pas).
+- Contrôles physiques ajoutés : `scripts/check_wall_coverage.py`, `scripts/compare_step9_sampled.py`,
+  `scripts/check_step8_arrays.py`, `scripts/check_native_fill.py`.
+
+### Pas 15 — step6 natif (Clipper2), opt-in
+`apex::fill_region` (`cpp/src/core/toolpath2d.cpp`) : parois par offset Clipper2 + remplissage
+LINES / GRID / CROSSED_ZIGZAG. Option `APEX_NATIVE_FILL=1`. Écart par couche ≤ 1e-4 sur l_shape et
+l-triple ; death : 12 couches > 1 %, dues aux onglets (GEOS prolonge une fente fine en pointe de
+4 mm qui ronge la paroi, Clipper2 coupe en carré : le natif est plus juste). step6 sur death
+1,81 → 0,51 s. Mesure step9b : `out/measure_native_fill.log`.
+`_lift_to_3d` : `np.cross` remplacé par un produit vectoriel scalaire, au bit (0,8 s sur death).
+
+### Phase 1.3 — contours « invalides » des tranches Bird (mesure)
+La conclusion du 30/09 (« recouvrements bénins de la projection XY ») était **fausse**. Les couches
+Bird sont tranchées dans l'espace DÉFORMÉ, où elles sont planes (`tet_vertices = pk`, champ z
+déformé) : les contours invalides y sont de vraies auto-intersections, reçues telles quelles par
+step6.
+| modèle (passe) | couches touchées | auto-intersections | part de l'aire |
+|---|---:|---:|---:|
+| death_repaired_pin (3) | 104/217 | 163 | 53,5 % |
+| Squirtle (8) | 111/218 | 132 | 27,0 % |
+| Benchy (4) | 26/313 | 27 | 4,6 % |
+- **Propre à Bird** : sur le pipeline FEM par défaut, AUCUN contour invalide (death 0/581 groupes,
+  l_shape 0/166, l-triple 0/170 ; `scripts/check_contour_validity.py`).
+- Effet sur step6 (remplissage mesuré / attendu, `bird_slice_deformed.py`, attendu calculé sur
+  les polygones réparés) : death valides 1,22 / invalides **1,55** ; Squirtle 1,20 / **1,34**.
+  Les couches invalides reçoivent 13-27 % de remplissage en plus. **Pas conclu** : dans un pli, la
+  zone recouverte de l'espace déformé correspond à DEUX endroits réels distincts, donc un
+  remplissage « en double » y est peut-être juste. Décider exige de mesurer après retour à la
+  pièce réelle (doublons de cordons à < w/2 l'un de l'autre). Reporté à la phase 4 (Bird dans
+  Apex) ; aucune correction appliquée.
+
+## >>> NOUVEAU POSTE (fin du 2026-09-30) — LIRE D'ABORD <<<
+
+**Migration** : le projet est maintenant dans `R:\APEX_NEW_VERSION\slicer_alg` (utilisateur
+`prazl`), et non plus dans `slicer_engine`. Les chemins `C:\Users\test_\…` cités plus bas sont
+périmés : les plans sont dans `~/.claude/plans/` (restaurés depuis `claude_context/`), la mémoire
+dans `~/.claude/projects/r--APEX-NEW-VERSION-slicer-alg/memory/`. **Il n'y a PAS de disque H:**
+sur ce poste : les mentions de sauvegarde et d'archive sur H: ci-dessous ne s'appliquent plus.
+- Dépôt : `origin` = `aeloxhardware/apex-dev` (instantané complet : recherche, `.venv`, sorties,
+  `claude_context/`). Commits faits par l'utilisateur ; ne pas commiter sans demande.
+- `.venv/pyvenv.cfg` repointé vers `C:\Users\prazl\…\Python314` (même 3.14.7).
+- Module C++ reconstruit sur ce poste (VS 2022 via `scripts/build_cpp.py`) ; l'ancien cache
+  CMake (chemins `slicer_engine`) est mis de côté dans `cpp/build_old_slicer_engine/`, l'ancien
+  module dans `cpp/lib/*.pyd.bak1001`.
+- GPU de ce poste : **GTX 1050 Ti** (la RTX 3090 citée plus bas était sur l'ancien). Runtime
+  Vulkan présent, **SDK Vulkan absent** ; CUDA 12.9 installé.
+
+**Réponses de l'utilisateur (2026-09-30)** :
+- zéro Z du firmware = buse qui touche le plateau → pas de décalage de 45 mm, l'export est juste ;
+- vitesses validées : 25 mm/s, trajets à vide 80 mm/s, 195 °C ;
+- GPU : **Vulkan** (portage prévu sous macOS et cartes AMD/Intel) ;
+- archive H: : sans objet (pas de disque H:).
+
+**Reste à faire** (liste tenue avec l'utilisateur) :
+- *Avant Maker Faire* : 1) premiers essais d'impression Benchy et dino (plus d'obstacle
+  logiciel) ; 2) vérifier les ~100 points par modèle à plus de 45° de la normale ;
+  3) real_overhang (127 contacts) : imprimable ou retiré de la démo ; 4) confirmer que les
+  « contours invalides » des couches courbes sont bénins.
+- *Fiabilisation Apex* : mesurer sur les 4 modèles les mécanismes opt-in du 30/09 ; remesurer
+  step9b ; porter la chaîne Bird (en option) ; cinématique couplée dans step3/7/10 ; alternance
+  parfaite de B ; rayon du plateau + refus des modèles trop grands.
+- *Après le salon* : axe D / axe linéaire ; interface (ne pas centrer, sélecteurs d'angle) ;
+  performances (P3 en 3D, **backend Vulkan de `MeshDistance` à écrire** après installation du
+  SDK, portage C++ step5-7, parallélisation) ; config/schema, hook step10, path-planning, GIF P6,
+  ironing ; chantier de fond « matière sans appui ».
+
+## >>> (précédent) session autonome du 2026-09-30, sur l'ancien poste <<<
+
+**Sauvegardes (fin de session, le poste doit être remplacé)** — PÉRIMÉ, voir ci-dessus :
 - GitHub `aeloxhardware/apex`, branche main : tout le code versionné et la documentation.
 - NON poussé sur GitHub (envoi vers `apex-dev` bloqué par le contrôle de sécurité du mode Auto) :
   `research/S4_Slicer` (dont `DECISIONS_2026-09-30.md` et les scripts du jour), les sorties,
   `.venv` et `build`. Copie complète locale seulement : `H:\apex_backup_2026-09-30\slicer_engine`
-  (27 061 fichiers, 2,35 Go), sur le même ordinateur.
+  (27 061 fichiers, 2,35 Go), sur l'ancien ordinateur.
 
 Plan : `~/.claude/plans/snug-yawning-lovelace.md` (T1 à T9). Décisions prises seul et chiffres :
-`research/S4_Slicer/DECISIONS_2026-09-30.md`. Rien n'est commité.
+`research/S4_Slicer/DECISIONS_2026-09-30.md`.
 
 **Fait :**
 - **T1 — P5** : tous les points sont testés, y compris contre les lignes de la zone en cours.
@@ -74,7 +323,7 @@ Plan : `~/.claude/plans/snug-yawning-lovelace.md` (T1 à T9). Décisions prises 
   projection XY de couches COURBES dans la pièce réelle, qui peut se recouvrir légitimement.
   Déjà présent avant (Benchy 65/284). Probablement sans gravité, à confirmer.
 
-**Questions pour l'utilisateur :**
+**Questions pour l'utilisateur** (toutes répondues depuis, voir la section « NOUVEAU POSTE ») :
 - **apex-dev** : la poussée de tout le répertoire a été bloquée par le contrôle de sécurité ; le
   dépôt privé est vide. Trois options : ajouter une règle d'autorisation, faire l'envoi vous-même,
   ou réduire le périmètre.

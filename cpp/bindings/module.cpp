@@ -9,6 +9,7 @@
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <stdexcept>
@@ -16,15 +17,24 @@
 
 #include "apex/bvh.hpp"
 #include "apex/field_solver.hpp"
+#include "apex/gcode_export.hpp"
+#include "apex/geometry2d.hpp"
 #include "apex/kdtree.hpp"
 #include "apex/kinematics.hpp"
 #include "apex/interpolate.hpp"
+#include "apex/isosurface.hpp"
 #include "apex/mesh_distance.hpp"
 #include "apex/mesh_intersect.hpp"
 #include "apex/mesh_repair.hpp"
+#include "apex/overhang.hpp"
+#include "apex/params.hpp"
+#include "apex/past_material.hpp"
+#include "apex/segmentation.hpp"
 #include "apex/printed_index.hpp"
+#include "apex/scheduling.hpp"
 #include "apex/support.hpp"
 #include "apex/tet_topology.hpp"
+#include "apex/toolpath2d.hpp"
 #include "apex/types.hpp"
 
 namespace py = pybind11;
@@ -913,4 +923,405 @@ PYBIND11_MODULE(apex_core, m) {
         py::arg("triangles"), py::arg("faces"),
         "Indices (tries) des triangles impliques dans au moins une auto-intersection reelle. "
         "L'appelant Python les convertit en set (insensible a l'ordre).");
+
+    // Pas 11 : sonde de l'en-tete genere apex/params.hpp (scripts/gen_params.py).
+    // Prouve qu'il compile et que ses valeurs par defaut sont celles des
+    // dataclasses Python (tests/test_config_schema.py compare).
+    m.def("params_defaults_probe", []() {
+        apex::params::PipelineParams p;
+        apex::params::GcodeParams g;
+        py::dict d;
+        d["resolution"] = p.resolution;
+        d["near_platform_resolution"] = p.near_platform_resolution.value_or(-1.0);
+        d["layer_height_base"] = p.layers.layer_height_base;
+        d["out_of_plane_interpolation_power"] = p.toolpath2d.out_of_plane_interpolation_power.value_or(-1.0);
+        d["split_rings_into_runs"] = p.toolpath2d.split_rings_into_runs;
+        d["infill_pattern"] = std::string(apex::params::to_string(p.toolpath2d.infill_pattern));
+        d["direction_blend_radius"] = p.field_solver.direction_blend_radius;
+        d["enforce_upward_growth"] = p.field_solver.enforce_upward_growth;
+        d["rotation_axes_count"] = static_cast<int>(p.machine_profile.rotation_axes.size());
+        d["b_max_deg"] = p.machine_profile.rotation_axes.size() > 1 ? p.machine_profile.rotation_axes[1].angle_range_deg[1] : -1.0;
+        d["position_coupled_axes"] = p.machine_profile.position_coupled_axes;
+        d["pivot_to_tip"] = g.pivot_to_tip;
+        d["tip_at_bead_top"] = g.tip_at_bead_top;
+        d["z_reference"] = g.z_reference;
+        return d;
+    });
+
+    // Pas 13 : marching tetrahedra + soudure (step5), equivalence au bit.
+    py::class_<apex::IsosurfaceExtractor>(m, "IsosurfaceExtractor")
+        .def(py::init([](const DoubleArray& tet_vertices, const IntArray& tetrahedra, const DoubleArray& values) {
+                 if (tet_vertices.ndim() != 2 || tet_vertices.shape(1) != 3) {
+                     throw std::invalid_argument("tet_vertices doit etre de forme (N,3)");
+                 }
+                 if (tetrahedra.ndim() != 2 || tetrahedra.shape(1) != 4) {
+                     throw std::invalid_argument("tetrahedra doit etre de forme (T,4)");
+                 }
+                 if (values.ndim() != 1 || values.shape(0) != tet_vertices.shape(0)) {
+                     throw std::invalid_argument("values doit etre de forme (N,), aligne sur tet_vertices");
+                 }
+                 const auto n = static_cast<std::int64_t>(tet_vertices.shape(0));
+                 const std::int64_t* q = tetrahedra.data();
+                 const auto t = static_cast<std::int64_t>(tetrahedra.shape(0));
+                 for (std::int64_t i = 0; i < t * 4; ++i) {
+                     if (q[i] < 0 || q[i] >= n) {
+                         throw std::invalid_argument("indice de tetraedre hors bornes");
+                     }
+                 }
+                 return new apex::IsosurfaceExtractor(tet_vertices.data(), n, q, t, values.data());
+             }),
+             py::arg("tet_vertices"), py::arg("tetrahedra"), py::arg("values"))
+        .def("extract",
+             [](const apex::IsosurfaceExtractor& self, double isovalue, double weld_tolerance) {
+                 apex::IsosurfaceResult r;
+                 {
+                     py::gil_scoped_release release;
+                     r = self.extract(isovalue, weld_tolerance);
+                 }
+                 const auto nv = static_cast<py::ssize_t>(r.vertices.size() / 3);
+                 const auto nf = static_cast<py::ssize_t>(r.source_tets.size());
+                 py::array_t<double> verts({nv, static_cast<py::ssize_t>(3)});
+                 std::copy(r.vertices.begin(), r.vertices.end(), verts.mutable_data());
+                 py::array_t<std::int64_t> faces({nf, static_cast<py::ssize_t>(3)});
+                 std::copy(r.faces.begin(), r.faces.end(), faces.mutable_data());
+                 py::array_t<std::int64_t> src(nf);
+                 std::copy(r.source_tets.begin(), r.source_tets.end(), src.mutable_data());
+                 return py::make_tuple(verts, faces, src);
+             },
+             py::arg("isovalue"), py::arg("weld_tolerance"),
+             "(vertices soudes (V,3), faces (F,3), tetraedre source (F,)) - "
+             "_extract_isosurface_triangles puis _weld_vertices de step5.")
+        .def_property_readonly("tet_count", &apex::IsosurfaceExtractor::tet_count);
+
+    // Pas 14 : trace de bord (outline) natif, None = repli trimesh.
+    m.def(
+        "boundary_loops",
+        [](const IntArray& faces, std::int64_t vertex_count) -> py::object {
+            if (faces.ndim() != 2 || faces.shape(1) != 3) {
+                throw std::invalid_argument("faces doit etre de forme (F,3)");
+            }
+            const std::int64_t* f = faces.data();
+            const auto n = static_cast<std::int64_t>(faces.shape(0));
+            for (std::int64_t i = 0; i < n * 3; ++i) {
+                if (f[i] < 0 || f[i] >= vertex_count) {
+                    throw std::invalid_argument("indice de face hors bornes");
+                }
+            }
+            apex::BoundaryLoops r;
+            {
+                py::gil_scoped_release release;
+                r = apex::boundary_loops(f, n, vertex_count);
+            }
+            if (!r.ok) {
+                return py::none();
+            }
+            py::list loops;
+            for (const auto& loop : r.loops) {
+                py::array_t<std::int64_t> a(static_cast<py::ssize_t>(loop.size()));
+                std::copy(loop.begin(), loop.end(), a.mutable_data());
+                loops.append(a);
+            }
+            return loops;
+        },
+        py::arg("faces"), py::arg("vertex_count"),
+        "Boucles de bord (indices, fermees) dans l'ordre de trimesh.outline(), "
+        "ou None si le bord n'est pas fait de boucles simples (repli trimesh).");
+
+    // Pas 12 : lancer de rayon 2D (core/geometry_utils.point_in_polygon_2d), au bit.
+    m.def(
+        "point_in_polygon_2d",
+        [](double x, double y, const DoubleArray& polygon) {
+            if (polygon.ndim() != 2 || polygon.shape(1) != 2) {
+                throw std::invalid_argument("polygon doit etre de forme (N,2)");
+            }
+            return apex::point_in_polygon_2d(x, y, polygon.data(), static_cast<std::int64_t>(polygon.shape(0)));
+        },
+        py::arg("x"), py::arg("y"), py::arg("polygon"));
+
+    // Pas 19 : matiere deja deposee (step9 rapide), minimum exact au bit.
+    py::class_<apex::PastMaterialIndex>(m, "PastMaterialIndex")
+        .def(py::init([](const DoubleArray& points, const IntArray& owners) {
+                 if (points.ndim() != 2 || points.shape(1) != 3) {
+                     throw std::invalid_argument("points doit etre de forme (N,3)");
+                 }
+                 if (owners.ndim() != 1 || owners.shape(0) != points.shape(0)) {
+                     throw std::invalid_argument("owners doit etre de forme (N,)");
+                 }
+                 return new apex::PastMaterialIndex(points.data(), owners.data(),
+                                                    static_cast<std::int64_t>(points.shape(0)));
+             }),
+             py::arg("points"), py::arg("owners"))
+        .def("min_past_distance",
+             [](const apex::PastMaterialIndex& self, const DoubleArray& queries, std::int64_t limit,
+                double reach) {
+                 if (queries.ndim() != 2 || queries.shape(1) != 3) {
+                     throw std::invalid_argument("queries doit etre de forme (Q,3)");
+                 }
+                 py::gil_scoped_release release;
+                 return self.min_past_distance(queries.data(), static_cast<std::int64_t>(queries.shape(0)),
+                                               limit, reach);
+             },
+             py::arg("queries"), py::arg("limit"), py::arg("reach"))
+        .def("min_past_distance_batch",
+             [](const apex::PastMaterialIndex& self, const DoubleArray& queries, const IntArray& limits,
+                double reach, int threads) {
+                 if (queries.ndim() != 3 || queries.shape(2) != 3 || limits.shape(0) != queries.shape(0)) {
+                     throw std::invalid_argument("queries (P,S,3) et limits (P,) attendus");
+                 }
+                 const auto P = static_cast<std::int64_t>(queries.shape(0));
+                 py::array_t<double> out(P);
+                 {
+                     py::gil_scoped_release release;
+                     self.min_past_distance_batch(queries.data(), P, static_cast<std::int64_t>(queries.shape(1)),
+                                                  limits.data(), reach, out.mutable_data(), threads);
+                 }
+                 return out;
+             },
+             py::arg("queries"), py::arg("limits"), py::arg("reach"), py::arg("threads") = 0)
+        .def_property_readonly("size", &apex::PastMaterialIndex::size);
+
+    // Pas 24 : corps de l'export G-code, texte identique ligne a ligne.
+    m.def(
+        "export_gcode_body",
+        [](const DoubleArray& positions, const DoubleArray& angles, const DoubleArray& extrusion,
+           const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& skin,
+           const DoubleArray& slow, const DoubleArray& zlow_grid, const DoubleArray& zlow_values,
+           const py::dict& p) {
+            const auto n = static_cast<std::int64_t>(positions.shape(0));
+            if (positions.ndim() != 2 || positions.shape(1) != 3 || angles.ndim() != 2 || angles.shape(1) != 2 ||
+                angles.shape(0) != n || extrusion.shape(0) != n || skin.shape(0) != n ||
+                (n > 0 && slow.shape(0) != n - 1) || zlow_grid.shape(0) != zlow_values.shape(0)) {
+                throw std::invalid_argument("formes incoherentes pour export_gcode_body");
+            }
+            apex::GcodeExportParams P{};
+            P.layer_height = p["layer_height"].cast<double>();
+            P.skin_thickness = p["skin_thickness"].cast<double>();
+            P.line_width = p["line_width"].cast<double>();
+            P.flow = p["flow"].cast<double>();
+            P.print_speed = p["print_speed"].cast<double>();
+            P.travel_speed = p["travel_speed"].cast<double>();
+            P.rotation_feed = p["rotation_feed"].cast<double>();
+            P.max_feed = p["max_feed"].cast<double>();
+            P.retract_length = p["retract_length"].cast<double>();
+            P.retract_speed = p["retract_speed"].cast<double>();
+            P.retract_min_travel = p["retract_min_travel"].cast<double>();
+            P.travel_clearance = p["travel_clearance"].cast<double>();
+            P.pivot_to_tip = p["pivot_to_tip"].cast<double>();
+            P.platform_margin = p["platform_margin"].cast<double>();
+            P.singularity_radius = p["singularity_radius"].cast<double>();
+            P.tilt_sign = p["tilt_sign"].cast<double>();
+            P.z_reference_tip = p["z_reference"].cast<std::string>() == "tip";
+            P.decimals = p["decimals"].cast<int>();
+            P.fil_area = p["fil_area"].cast<double>();
+            std::vector<double> zg(zlow_grid.data(), zlow_grid.data() + zlow_grid.shape(0));
+            std::vector<double> zv(zlow_values.data(), zlow_values.data() + zlow_values.shape(0));
+            apex::GcodeExportStats st;
+            std::string body;
+            {
+                py::gil_scoped_release release;
+                body = apex::export_gcode_body(positions.data(), angles.data(), extrusion.data(), skin.data(),
+                                               slow.data(), n, zg, zv, P, st);
+            }
+            py::dict s;
+            s["moves"] = st.moves; s["travels"] = st.travels; s["retractions"] = st.retractions;
+            s["clearance_Z"] = st.clearance_z; s["clearance_R"] = st.clearance_r; s["clearance_none"] = st.clearance_none;
+            s["filament_mm"] = st.filament_mm; s["c_mismatch_deg"] = st.c_mismatch_deg;
+            s["tip_z_min"] = st.tip_z_min; s["head_z_min"] = st.head_z_min;
+            s["tip_below_plate"] = st.tip_below_plate; s["head_below_margin"] = st.head_below_margin;
+            s["any"] = st.any;
+            s["x"] = py::make_tuple(st.x_min, st.x_max); s["y"] = py::make_tuple(st.y_min, st.y_max);
+            s["z"] = py::make_tuple(st.z_min, st.z_max);
+            return py::make_tuple(py::str(body), s);
+        },
+        py::arg("positions"), py::arg("angles"), py::arg("extrusion"), py::arg("skin"), py::arg("slow"),
+        py::arg("zlow_grid"), py::arg("zlow_values"), py::arg("params"));
+
+    m.def(
+        "feed_plan_caps",
+        [](const DoubleArray& d, double vmax, double amax) {
+            py::array_t<double> cap(d.shape(0));
+            apex::feed_plan_caps(d.data(), static_cast<std::int64_t>(d.shape(0)), vmax, amax, cap.mutable_data());
+            return cap;
+        },
+        py::arg("d"), py::arg("max_velocity_deg"), py::arg("max_accel_deg"));
+
+    // Pas 15 : remplissage 2D d'une zone (step6), parois par Clipper2.
+    m.def(
+        "fill_region",
+        [](const DoubleArray& outer, const std::vector<DoubleArray>& holes, double nozzle_width, int wall_count,
+           double degenerate_area_ratio, double infill_density, int pattern, double sweep_angle_rad) {
+            auto to_ring = [](const DoubleArray& a) {
+                if (a.ndim() != 2 || a.shape(1) < 2) throw std::invalid_argument("anneau de forme (K,2) attendu");
+                apex::Ring2 r(static_cast<std::size_t>(a.shape(0)));
+                const auto cols = a.shape(1);
+                for (py::ssize_t i = 0; i < a.shape(0); ++i) r[i] = {a.data()[i * cols], a.data()[i * cols + 1]};
+                return r;
+            };
+            const apex::Ring2 o = to_ring(outer);
+            std::vector<apex::Ring2> hs;
+            for (const auto& h : holes) hs.push_back(to_ring(h));
+            apex::FillRegionParams P;
+            P.nozzle_width = nozzle_width;
+            P.wall_count = wall_count;
+            P.degenerate_area_ratio = degenerate_area_ratio;
+            P.infill_density = infill_density;
+            P.pattern = static_cast<apex::InfillKind>(pattern);
+            P.sweep_angle_rad = sweep_angle_rad;
+            apex::FillRegionResult res;
+            {
+                py::gil_scoped_release release;
+                res = apex::fill_region(o, hs, P);
+            }
+            auto to_list = [](const std::vector<apex::Ring2>& rings) {
+                py::list out;
+                for (const auto& r : rings) {
+                    py::array_t<double> a({static_cast<py::ssize_t>(r.size()), static_cast<py::ssize_t>(2)});
+                    double* d = a.mutable_data();
+                    for (std::size_t i = 0; i < r.size(); ++i) { d[2 * i] = r[i][0]; d[2 * i + 1] = r[i][1]; }
+                    out.append(a);
+                }
+                return out;
+            };
+            return py::make_tuple(res.base_valid, to_list(res.infill), to_list(res.walls));
+        },
+        py::arg("outer"), py::arg("holes"), py::arg("nozzle_width"), py::arg("wall_count"),
+        py::arg("degenerate_area_ratio"), py::arg("infill_density"), py::arg("pattern"),
+        py::arg("sweep_angle_rad"));
+
+    // Pas 21a : etape 2 entiere (surplombs, risque, ponts, portee).
+    m.def(
+        "overhang_map",
+        [](const DoubleArray& vertices, const IntArray& faces, const DoubleArray& normals,
+           double threshold_deg, int ray_density, double support_ratio, double max_gap,
+           double horizontal_tol_deg, const DoubleArray& up) {
+            apex::OverhangParams P;
+            P.overhang_angle_threshold_deg = threshold_deg;
+            P.bridge_detection_ray_density = ray_density;
+            P.bridge_support_ratio_threshold = support_ratio;
+            P.bridge_max_gap_distance = max_gap;
+            P.bridge_horizontal_angle_tolerance_deg = horizontal_tol_deg;
+            for (int k = 0; k < 3; ++k) P.up[k] = up.data()[k];
+            const auto F = static_cast<std::int64_t>(faces.shape(0));
+            apex::OverhangResult r;
+            {
+                py::gil_scoped_release release;
+                r = apex::compute_overhang_map(vertices.data(), static_cast<std::int64_t>(vertices.shape(0)),
+                                               faces.data(), normals.data(), F, P);
+            }
+            py::array_t<double> risk(F), span({F, static_cast<std::int64_t>(3)});
+            py::array_t<bool> over(F), bridge(F);
+            std::copy(r.risk_score.begin(), r.risk_score.end(), risk.mutable_data());
+            std::copy(r.span_direction.begin(), r.span_direction.end(), span.mutable_data());
+            for (std::int64_t f = 0; f < F; ++f) {
+                over.mutable_data()[f] = r.is_overhang[f] != 0;
+                bridge.mutable_data()[f] = r.is_bridge[f] != 0;
+            }
+            return py::make_tuple(risk, over, bridge, span);
+        },
+        py::arg("vertices"), py::arg("faces"), py::arg("normals"), py::arg("threshold_deg"),
+        py::arg("ray_density"), py::arg("support_ratio"), py::arg("max_gap"), py::arg("horizontal_tol_deg"),
+        py::arg("up"));
+
+    // Pas 21b : etape 3, chemin par defaut.
+    m.def(
+        "segment_default",
+        [](const DoubleArray& vertices, const IntArray& faces, const DoubleArray& normals, const DoubleArray& risk,
+           const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& platform,
+           const DoubleArray& directions, double max_angle_deg, double merge_angle_deg, const DoubleArray& up) {
+            apex::SegmentationInput in{};
+            in.vertices = vertices.data();
+            in.faces = faces.data();
+            in.face_normals = normals.data();
+            in.risk = risk.data();
+            in.platform = platform.data();
+            in.face_count = static_cast<std::int64_t>(faces.shape(0));
+            in.directions = directions.data();
+            in.direction_count = static_cast<std::int64_t>(directions.shape(0));
+            in.max_angle_deg = max_angle_deg;
+            in.merge_angle_deg = merge_angle_deg;
+            for (int k = 0; k < 3; ++k) in.up[k] = up.data()[k];
+            apex::SegmentationResult r;
+            {
+                py::gil_scoped_release release;
+                r = apex::segment_default(in);
+            }
+            auto vec = [](const std::vector<std::int64_t>& v) {
+                py::array_t<std::int64_t> a(static_cast<py::ssize_t>(v.size()));
+                std::copy(v.begin(), v.end(), a.mutable_data());
+                return a;
+            };
+            return py::make_tuple(vec(r.labels), vec(r.direction_index), vec(r.depth), vec(r.dependencies));
+        },
+        py::arg("vertices"), py::arg("faces"), py::arg("normals"), py::arg("risk"), py::arg("platform"),
+        py::arg("directions"), py::arg("max_angle_deg"), py::arg("merge_angle_deg"), py::arg("up"));
+
+    // Pas 21c : etape 7 (couleur, trous temporaires, ordonnancement).
+    // `layers` : liste de tuples (id, frame(9), [polylignes (K,C)], C, [regions], isovaleur ou None).
+    // `face_color` : int64 par face, `painted` : bool par face (False = non peinte).
+    m.def(
+        "schedule_layers",
+        [](const py::list& layers, const DoubleArray& vertices, const IntArray& faces, const DoubleArray& normals,
+           const IntArray& face_color, const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& painted,
+           double merge_tolerance, const DoubleArray& tet_vertices, const DoubleArray& field_values,
+           const DoubleArray& escape_directions, double surface_color_distance, double reheat, double adhesion,
+           double volume, double time_per, std::int64_t max_open_holes, std::int64_t ray_samples) {
+            std::vector<apex::ScheduleLayer> L;
+            for (const auto& item : layers) {
+                const auto t = item.cast<py::tuple>();
+                apex::ScheduleLayer layer;
+                layer.id = t[0].cast<std::int64_t>();
+                const auto frame = t[1].cast<DoubleArray>();
+                std::copy(frame.data(), frame.data() + 9, layer.frame);
+                layer.columns = t[3].cast<std::int64_t>();
+                for (const auto& poly : t[2].cast<py::list>()) {
+                    const auto a = poly.cast<DoubleArray>();
+                    layer.toolpath.emplace_back(a.data(), a.data() + a.size());
+                }
+                layer.region_ids = t[4].cast<std::vector<std::int64_t>>();
+                if (!t[5].is_none()) layer.isovalue = t[5].cast<double>();
+                L.push_back(std::move(layer));
+            }
+            apex::ScheduleInput in;
+            in.vertices = vertices.data(); in.vertex_count = static_cast<std::int64_t>(vertices.shape(0));
+            in.faces = faces.data(); in.face_normals = normals.data(); in.face_count = static_cast<std::int64_t>(faces.shape(0));
+            if (face_color.size() > 0) {
+                in.face_color.resize(face_color.size());
+                for (py::ssize_t f = 0; f < face_color.size(); ++f)
+                    if (painted.data()[f]) in.face_color[f] = face_color.data()[f];
+            }
+            in.merge_tolerance = merge_tolerance;
+            in.tet_vertices = tet_vertices.data(); in.tet_vertex_count = static_cast<std::int64_t>(tet_vertices.shape(0));
+            in.field_values = field_values.data();
+            in.escape_directions.assign(escape_directions.data(), escape_directions.data() + escape_directions.size());
+            in.params.surface_color_distance = surface_color_distance;
+            in.params.reheat_penalty = reheat; in.params.adhesion_risk_weight = adhesion;
+            in.params.volume_per_purge = volume; in.params.time_per_purge = time_per;
+            in.params.max_open_holes = max_open_holes; in.params.deadline_ray_samples = ray_samples;
+            apex::ScheduleResult r;
+            {
+                py::gil_scoped_release release;
+                r = apex::schedule_layers(L, in);
+            }
+            auto color = [](const apex::Color& c) -> py::object { return c ? py::object(py::int_(*c)) : py::none(); };
+            py::list out_layers;
+            for (std::size_t li = 0; li < L.size(); ++li) {
+                py::list polys, colors;
+                const auto C = static_cast<py::ssize_t>(L[li].columns);
+                for (const auto& poly : r.toolpath[li]) {
+                    py::array_t<double> a({static_cast<py::ssize_t>(poly.size()) / C, C});
+                    std::copy(poly.begin(), poly.end(), a.mutable_data());
+                    polys.append(a);
+                }
+                for (const auto& c : r.segment_colors[li]) colors.append(color(c));
+                out_layers.append(py::make_tuple(polys, colors, color(r.dominant_color[li])));
+            }
+            py::list passes;
+            for (const auto& p : r.passes) {
+                py::list segs;
+                for (const auto& s : p.segments) segs.append(py::make_tuple(s.first, s.second));
+                passes.append(py::make_tuple(segs, color(p.color), p.is_hole_fill,
+                                             py::make_tuple(p.layer_min, p.layer_max), p.deferred_regions));
+            }
+            return py::make_tuple(out_layers, passes);
+        });
 }

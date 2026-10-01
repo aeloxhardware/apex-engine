@@ -49,6 +49,7 @@ Sortie : output_models/loop_<modele><variante>_skin_pass<k>.npz (maillage de
 surface COUPE aux frontieres de bandes) + _skin_map_pass<k>.ply (statut) +
 _skin_zones_pass<k>.ply (un morceau par couleur).
 """
+import safe_io  # noqa: F401 -- ecritures robustes aux verrous transitoires
 import os
 import pickle
 import sys

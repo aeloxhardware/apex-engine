@@ -116,10 +116,17 @@ def _sample_point_indices(points: list[ToolpathPoint], path_sampling_step: float
     if path_sampling_step <= 0:
         return list(range(len(points)))
 
+    # longueurs de segments vectorisees (2026-10-01 : 400 000 appels a
+    # np.linalg.norm prenaient 1 s sur death). `norm(axis=1)` peut differer
+    # d'un ULP de l'appel unitaire (BLAS ddot) : un seuil franchi pile a un
+    # ULP pres peut deplacer un echantillon, sans consequence pour un
+    # echantillonnage tous les `path_sampling_step` mm.
+    positions = np.array([p.position for p in points], dtype=float)
+    lengths = np.linalg.norm(np.diff(positions, axis=0), axis=1).tolist()
     indices = [0]
     accumulated = 0.0
     for i in range(1, len(points)):
-        accumulated += float(np.linalg.norm(points[i].position - points[i - 1].position))
+        accumulated += lengths[i - 1]
         if accumulated >= path_sampling_step:
             indices.append(i)
             accumulated = 0.0
@@ -162,6 +169,30 @@ def _positioned_toolhead_vertices(
         axis = axis / np.linalg.norm(axis)
         vertices = _rodrigues_rotate(vertices, axis, np.full(len(vertices), np.radians(angle_deg)))
     return vertices + np.asarray(position, dtype=float)
+
+
+def _positioned_toolhead_vertices_batch(
+    base_vertices: np.ndarray, positions: np.ndarray, axis_angles: np.ndarray,
+    rotation_axes: list[RotationAxisSpec],
+) -> np.ndarray:
+    """(P,S,3) : `_positioned_toolhead_vertices` pour P poses d'un coup, par
+    matrices de rotation composees dans le MEME ordre (axe le plus interne en
+    premier). Ecart a la version pose par pose : quelques ULP (produit
+    matriciel au lieu de Rodrigues), sans consequence pour un controle de
+    distance a 0,125 mm pres. Cree pour step9 rapide, ou le positionnement
+    pose par pose prenait 14,5 s sur 20 (death @ 0,8)."""
+    positions = np.asarray(positions, dtype=float)
+    count = len(positions)
+    total = np.broadcast_to(np.eye(3), (count, 3, 3)).copy()
+    angles = np.asarray(axis_angles, dtype=float).reshape(count, len(rotation_axes))
+    for k, spec in enumerate(rotation_axes):
+        axis = np.asarray(spec.axis, dtype=float)
+        axis = axis / np.linalg.norm(axis)
+        theta = np.radians(angles[:, k])
+        c, s_ = np.cos(theta)[:, None, None], np.sin(theta)[:, None, None]
+        cross = np.array([[0.0, -axis[2], axis[1]], [axis[2], 0.0, -axis[0]], [-axis[1], axis[0], 0.0]])
+        total = total @ (c * np.eye(3) + s_ * cross + (1.0 - c) * np.outer(axis, axis))
+    return np.matmul(base_vertices[None, :, :], total.transpose(0, 2, 1)) + positions[:, None, :]
 
 
 def _surface_sample_points(mesh: trimesh.Trimesh, sample_spacing: float) -> np.ndarray:
@@ -561,6 +592,7 @@ def _check_platform_disc(
     toolhead_vertices: np.ndarray,
     platform_origin: Optional[np.ndarray],
     safety_margin: float,
+    platform_radius: Optional[float] = None,
 ) -> Optional[float]:
     """
     Penetration contre le plateau, calculee en FORME FERMEE (distance
@@ -594,7 +626,8 @@ def _check_platform_disc(
     radial = np.hypot(local[:, 0], local[:, 1])
     # Distance a un cylindre plein : ecart radial hors du rayon, ecart axial
     # hors de la demi-epaisseur, combines - nulle a l'interieur (penetration).
-    dr = np.maximum(radial - PLATFORM_RADIUS, 0.0)
+    radius = PLATFORM_RADIUS if platform_radius is None else float(platform_radius)
+    dr = np.maximum(radial - radius, 0.0)
     dz = np.maximum(np.abs(local[:, 2]) - PLATFORM_HALF_HEIGHT, 0.0)
     min_distance = float(np.hypot(dr, dz).min())
 
@@ -659,7 +692,8 @@ def _evaluate_point(
     platform_penetration = None
     if machine_profile.platform_origin is not None and machine_profile.rotation_axes:
         platform_penetration = _check_platform_disc(
-            toolhead_samples, machine_profile.platform_origin, safety_margin
+            toolhead_samples, machine_profile.platform_origin, safety_margin,
+            getattr(machine_profile, "platform_radius", None),
         )
     if platform_penetration is not None:
         events.append(
@@ -689,7 +723,9 @@ def _densified_printed_material(points: list[ToolpathPoint], step: float) -> tup
     a, b = pos[ends - 1], pos[ends]
     counts = np.maximum(1, np.ceil(np.linalg.norm(b - a, axis=1) / step).astype(int))
     seg = np.repeat(np.arange(len(ends)), counts + 1)
-    t = np.concatenate([np.arange(c + 1) / c for c in counts])
+    # meme t que np.arange(c + 1) / c par segment, sans boucle Python
+    offset = np.arange(len(seg)) - np.repeat(np.cumsum(counts + 1) - (counts + 1), counts + 1)
+    t = offset / np.repeat(counts, counts + 1)
     dense = a[seg] + t[:, None] * (b[seg] - a[seg])
     return dense, ends[seg]
 
@@ -718,12 +754,25 @@ class FastCollisionChecker:
         self.dense, self.owner = _densified_printed_material(toolpath.points, params.fast_densify_step)
         self.tree = cKDTree(self.dense) if len(self.dense) else None
         self.owner_pad = np.r_[self.owner, np.iinfo(np.int64).max]   # indice "absent" de cKDTree
+        # Pas 19 du portage C++ : meme minimum exact, en natif, avec elagage
+        # des sous-arbres entierement futurs (CLAUDE.md limite #56).
+        self.native = None
+        if len(self.dense) and _cpp.enabled() and hasattr(_cpp.module(), "PastMaterialIndex"):
+            self.native = _cpp.module().PastMaterialIndex(
+                np.ascontiguousarray(self.dense, dtype=float), np.ascontiguousarray(self.owner, dtype=np.int64))
 
-    def penetrations(self, point_idx: int, position: np.ndarray, axis_angles: list[float]):
-        """(penetration plateau ou None, penetration piece ou None)."""
-        verts = _positioned_toolhead_vertices(self.samples, position, axis_angles, self.machine.rotation_axes)
+    def penetrations(self, point_idx: int, position: np.ndarray, axis_angles: list[float], verts=None):
+        """(penetration plateau ou None, penetration piece ou None). `verts` :
+        tete deja positionnee (calcul par lots de `_run_fast_kdtree`)."""
+        if verts is None:
+            verts = _positioned_toolhead_vertices(self.samples, position, axis_angles, self.machine.rotation_axes)
         part = None
-        if self.tree is not None:
+        if self.native is not None:
+            best = self.native.min_past_distance(np.ascontiguousarray(verts, dtype=float), int(point_idx),
+                                                 float(self.reach))
+            if best < self.reach:
+                part = self.reach - best
+        elif self.tree is not None:
             k = min(self.K_NEAR, len(self.dense))
             dist, idx = self.tree.query(verts, k=k, distance_upper_bound=self.reach)
             dist, idx = dist.reshape(len(verts), k), idx.reshape(len(verts), k)
@@ -740,8 +789,38 @@ class FastCollisionChecker:
                 part = self.reach - best
         plate = None
         if self.machine.platform_origin is not None and self.machine.rotation_axes:
-            plate = _check_platform_disc(verts, self.machine.platform_origin, self.params.safety_margin)
+            plate = _check_platform_disc(verts, self.machine.platform_origin, self.params.safety_margin,
+                                         getattr(self.machine, "platform_radius", None))
         return plate, part
+
+
+def _platform_disc_batch(verts_block: np.ndarray, machine_profile: MachineProfile,
+                         params: CollisionSimParams) -> list:
+    """`_check_platform_disc` pour un bloc de poses (P,S,3) : memes operations
+    element par element, minimum par pose - memes valeurs que l'appel unitaire."""
+    if machine_profile.platform_origin is None or not machine_profile.rotation_axes:
+        return [None] * len(verts_block)
+    margin = params.safety_margin
+    origin = np.asarray(machine_profile.platform_origin, dtype=float)
+    # Raccourci EXACT : distance >= ecart axial ; une pose dont tous les points
+    # sont a plus de `margin` au-dessus (ou au-dessous) de l'epaisseur du
+    # plateau ne peut pas le toucher. Seules les autres paient le calcul
+    # complet (2 s sur 2 sur death sans ce tri : 86 M d'hypot).
+    dz_all = np.maximum(np.abs(verts_block[..., 2] - origin[2]) - PLATFORM_HALF_HEIGHT, 0.0)
+    near = np.flatnonzero(dz_all.min(axis=1) < margin)
+    result: list = [None] * len(verts_block)
+    if len(near) == 0:
+        return result
+    local = verts_block[near] - origin
+    radial = np.hypot(local[..., 0], local[..., 1])
+    radius_value = getattr(machine_profile, "platform_radius", None)
+    radius = PLATFORM_RADIUS if radius_value is None else float(radius_value)
+    dr = np.maximum(radial - radius, 0.0)
+    dz = np.maximum(np.abs(local[..., 2]) - PLATFORM_HALF_HEIGHT, 0.0)
+    minimum = np.hypot(dr, dz).min(axis=1)
+    for k, m in zip(near, minimum):
+        result[k] = None if float(m) >= margin else margin - float(m)
+    return result
 
 
 def _run_fast_kdtree(
@@ -754,15 +833,38 @@ def _run_fast_kdtree(
     """Variante rapide de la boucle de `run` (voir FastCollisionChecker)."""
     checker = FastCollisionChecker(toolpath, machine_profile, params, toolhead_base_samples)
     events: list[CollisionEvent] = []
-    for point_idx in sample_indices:
-        point = toolpath.points[point_idx]
-        plate, part = checker.penetrations(point_idx, point.position, point.axis_angles)
-        if part is not None:
-            events.append(CollisionEvent(point_index=point_idx, obstacle_type="printed_part",
-                                         penetration_depth=part))
-        if plate is not None:
-            events.append(CollisionEvent(point_index=point_idx, obstacle_type="platform",
-                                         penetration_depth=plate))
+    axes = machine_profile.rotation_axes or []
+    chunk = 1000
+    for start in range(0, len(sample_indices), chunk):
+        block = sample_indices[start:start + chunk]
+        pts = [toolpath.points[i] for i in block]
+        verts_block = _positioned_toolhead_vertices_batch(
+            toolhead_base_samples, np.array([p.position for p in pts], dtype=float),
+            np.array([p.axis_angles for p in pts], dtype=float), axes,
+        ) if axes else None
+        batch = None
+        if verts_block is not None and checker.native is not None and hasattr(checker.native, "min_past_distance_batch"):
+            # tout le bloc d'un coup, en parallele cote natif : meme calcul pose
+            # par pose que `penetrations`, donc memes evenements au bit
+            best = checker.native.min_past_distance_batch(
+                np.ascontiguousarray(verts_block, dtype=float), np.asarray(block, dtype=np.int64), float(checker.reach))
+            plates = _platform_disc_batch(verts_block, machine_profile, params)
+            batch = (best, plates)
+        for k, point_idx in enumerate(block):
+            point = pts[k]
+            verts = verts_block[k] if verts_block is not None else None
+            if batch is not None:
+                best_k = float(batch[0][k])
+                part = checker.reach - best_k if best_k < checker.reach else None
+                plate = batch[1][k]
+            else:
+                plate, part = checker.penetrations(point_idx, point.position, point.axis_angles, verts)
+            if part is not None:
+                events.append(CollisionEvent(point_index=point_idx, obstacle_type="printed_part",
+                                             penetration_depth=part))
+            if plate is not None:
+                events.append(CollisionEvent(point_index=point_idx, obstacle_type="platform",
+                                             penetration_depth=plate))
     return events
 
 

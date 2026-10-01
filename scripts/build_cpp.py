@@ -83,7 +83,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--clean", action="store_true", help="Supprime cpp/build avant de configurer")
     parser.add_argument("--debug", action="store_true", help="Compile en Debug plutot qu'en Release")
+    parser.add_argument("--dev-name", default="build_dev",
+                        help="Nom du repertoire de --dev sous cpp/ (un second permet de construire pendant que "
+                             "le premier est verrouille)")
+    parser.add_argument("--dev", action="store_true",
+                        help="Construit dans cpp/build_dev/ (module dans cpp/build_dev/lib) sans toucher "
+                             "cpp/lib, verrouille par un calcul en cours ; charger avec "
+                             "APEX_CPP_LIB_DIR=cpp/build_dev/lib")
     args = parser.parse_args(argv)
+    global BUILD_DIR, LIB_DIR
+    if args.dev:
+        BUILD_DIR = CPP_DIR / args.dev_name
+        LIB_DIR = BUILD_DIR / "lib"
 
     if args.clean and BUILD_DIR.exists():
         print(f"[build_cpp] suppression de {BUILD_DIR}")
@@ -122,6 +133,7 @@ def main(argv: list[str] | None = None) -> int:
         f"-DCMAKE_BUILD_TYPE={build_type}",
         f"-DPython_EXECUTABLE={sys.executable}",
         f"-Dpybind11_DIR={pybind11.get_cmake_dir()}",
+        f"-DAPEX_LIB_DIR={LIB_DIR.as_posix()}",
     ]
     print("[build_cpp] configuration...")
     if subprocess.run(configure, env=env).returncode != 0:

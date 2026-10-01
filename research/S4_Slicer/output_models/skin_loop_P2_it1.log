@@ -1,13 +1,13 @@
-micro-zones (distance au bord < 0.60 mm) : 0 rattachees, 0 isolees et 0 a voisines inaccessibles non lissees (0.0 mm2) | 0.1 s
-l_shape_overhang_pin passe 16 : 1120 faces (1120 apres coupe), 147 couches
-  retenue               200 faces   20.9% de la surface
-  inatteignable         648 faces   55.3% de la surface
-  collision plateau     256 faces   21.2% de la surface
-  collision objet         0 faces    0.0% de la surface
-  contact plateau        16 faces    2.5% de la surface
-  zone trop petite        0 faces    0.0% de la surface
-  micro-zone non lissee      0 faces    0.0% de la surface
-  morceaux apres coupe aux aretes (< 150 deg entre faces) : 5 ; bandes (minimum) : 5 ; zones : 5 (moments 111 a 146)
+micro-zones (distance au bord < 0.60 mm) : 26 rattachees, 9 isolees et 17 a voisines inaccessibles non lissees (90.4 mm2) | 3.4 s
+dino_pin passe 5 : 14462 faces (18398 apres coupe), 310 couches
+  retenue              9062 faces   41.7% de la surface
+  inatteignable        2079 faces   12.7% de la surface
+  collision plateau    4031 faces   27.7% de la surface
+  collision objet       419 faces    3.0% de la surface
+  contact plateau      1956 faces   13.8% de la surface
+  zone trop petite       67 faces    0.1% de la surface
+  micro-zone non lissee    784 faces    1.0% de la surface
+  morceaux apres coupe aux aretes (< 150 deg entre faces) : 58 ; bandes (minimum) : 102 ; zones : 70 (moments 55 a 309)
   chaque zone accessible a son moment : True
-  sommets de surface non localises dans un tetraedre : 0
-  temps : surface et phi 0.0 s ; IK couplee a la position (1104 faces, centre + 3 sommets) 0.9 s ; collision (456 faces, 4581 points de tete, calcule) 0.3 s ; coupe le long de 0 lignes de niveau 0.0 s ; bandes et zones 0.1 s ; total 1.4 s
+  sommets de surface non localises dans un tetraedre : 9
+  temps : surface et phi 0.1 s ; IK couplee a la position (12506 faces, centre + 3 sommets) 0.1 s ; collision (10427 faces, 4581 points de tete, calcule) 10.8 s ; coupe le long de 33 lignes de niveau 0.0 s ; bandes et zones 3.4 s ; total 14.4 s

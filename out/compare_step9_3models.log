@@ -1,0 +1,38 @@
+=== l_shape_overhang
+[preview] Etape 1/8 - ingestion : res/test_models/l_shape_overhang.stl
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire
+[preview] Etape 5/8 - extraction des couches courbes
+[preview]   166 couche(s)
+[preview] Etape 6/8 - remplissage 2D par couche
+[preview] Etape 7/8 - couleur + ordonnancement
+[preview]   166 passe(s) d'impression
+[preview] Etape 8/8 - trajectoire machine (resolution IK)
+[preview]   21495 point(s) de trajectoire, 13600 orientation(s) inatteignable(s)
+[preview] step1->step8 termine en 1.0s
+[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)
+rapide : 0 evenements en 1 s
+exact  : 0 evenements en 54 s
+communs 0, rapide seul 0, exact seul 0
+exact seul, plus profondes : []
+=== turkish
+[preview] Etape 1/8 - ingestion : res/test_models/turkish.stl
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire
+[preview] Etape 5/8 - extraction des couches courbes
+[preview]   346 couche(s)
+[preview] Etape 6/8 - remplissage 2D par couche
+[preview] Etape 7/8 - couleur + ordonnancement
+[preview]   346 passe(s) d'impression
+[preview] Etape 8/8 - trajectoire machine (resolution IK)
+[preview]   680379 point(s) de trajectoire, 0 orientation(s) inatteignable(s)
+[preview] step1->step8 termine en 25.7s
+[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)
+rapide : 76168 evenements en 37 s
+=== death
+[preview] Etape 1/8 - ingestion : res/test_models/death.stl
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire

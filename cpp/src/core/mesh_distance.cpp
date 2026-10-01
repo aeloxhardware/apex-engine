@@ -139,9 +139,10 @@ std::int32_t MeshDistanceIndex::build(std::int32_t lo, std::int32_t hi) {
     return index;
 }
 
-double MeshDistanceIndex::query(const Vec3& p, Vec3* best_point) const {
+double MeshDistanceIndex::query(const Vec3& p, Vec3* best_point, std::int64_t* best_face) const {
     double best = kInf;
     Vec3 best_q{};
+    std::int64_t best_f = -1;
     if (root_ < 0) return kInf;
     // descente en profondeur, enfant le plus proche d'abord, elagage par la
     // distance a la boite (borne inferieure exacte)
@@ -159,6 +160,7 @@ double MeshDistanceIndex::query(const Vec3& p, Vec3* best_point) const {
                 if (d < best) {
                     best = d;
                     best_q = q;
+                    best_f = order_[n.first + i];
                 }
             }
             continue;
@@ -171,15 +173,16 @@ double MeshDistanceIndex::query(const Vec3& p, Vec3* best_point) const {
         if (first >= 0) stack.push_back(first);
     }
     if (best_point) *best_point = best_q;
+    if (best_face) *best_face = best_f;
     return std::sqrt(best);
 }
 
 void MeshDistanceIndex::run_range(const double* points, std::size_t begin, std::size_t end, double* out,
-                                  double* closest) const {
+                                  double* closest, std::int64_t* face_ids) const {
     for (std::size_t i = begin; i < end; ++i) {
         const Vec3 p{points[3 * i], points[3 * i + 1], points[3 * i + 2]};
         Vec3 q;
-        out[i] = query(p, &q);
+        out[i] = query(p, &q, face_ids ? face_ids + i : nullptr);
         if (closest) {
             closest[3 * i] = q.x;
             closest[3 * i + 1] = q.y;
@@ -198,10 +201,10 @@ DistanceBackend MeshDistanceIndex::resolve_backend(DistanceBackend requested, st
 }
 
 void MeshDistanceIndex::distances(const double* points, std::size_t n, double* out, double* closest,
-                                  DistanceBackend backend, int threads) const {
+                                  DistanceBackend backend, int threads, std::int64_t* face_ids) const {
     backend = resolve_backend(backend);
     if (backend == DistanceBackend::CpuSerial || n < 2048) {
-        run_range(points, 0, n, out, closest);
+        run_range(points, 0, n, out, closest, face_ids);
         return;
     }
     unsigned count = threads > 0 ? static_cast<unsigned>(threads) : std::max(1u, std::thread::hardware_concurrency());
@@ -211,7 +214,7 @@ void MeshDistanceIndex::distances(const double* points, std::size_t n, double* o
     for (unsigned t = 0; t < count; ++t) {
         const std::size_t b = t * chunk, e = std::min(n, b + chunk);
         if (b >= e) break;
-        pool.emplace_back([=, this] { run_range(points, b, e, out, closest); });
+        pool.emplace_back([=, this] { run_range(points, b, e, out, closest, face_ids); });
     }
     for (auto& th : pool) th.join();
 }

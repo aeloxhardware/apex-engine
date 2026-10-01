@@ -30,6 +30,11 @@ from pathlib import Path
 from typing import Any, Optional
 
 _LIB_DIR = Path(__file__).resolve().parent.parent / "cpp" / "lib"
+# Surcharge (ex. cpp/build_dev/lib, voir scripts/build_cpp.py --dev) : permet de
+# tester un module fraichement construit pendant qu'un calcul long tient celui
+# de cpp/lib verrouille.
+if os.environ.get("APEX_CPP_LIB_DIR"):
+    _LIB_DIR = Path(os.environ["APEX_CPP_LIB_DIR"]).resolve()
 
 _module: Optional[Any] = None
 _load_error: Optional[str] = None

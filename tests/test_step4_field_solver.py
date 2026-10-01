@@ -1456,3 +1456,25 @@ def test_no_probe_when_upward_growth_diagnostic_is_disabled(l_shape_data):
 
     field = solve_with_constraints(static_system, None, params)
     assert field.values.shape == (tet_mesh.node_count,)
+
+
+def test_radial_tilt_projection_keeps_only_reachable_component():
+    """Phase 3.1 : sur la machine actuelle, la normale ne peut pencher que dans
+    le plan (radial, vertical) du point, vers l'exterieur (limite #59)."""
+    import numpy as np
+    from core.mesh_types import TetMesh
+    from pipeline.step4_field_solver import _project_to_reachable_radial_tilt
+    base = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
+    # deux tetraedres : l'un centre vers +X (radiale +X), l'autre sur l'axe
+    verts = np.vstack([base + [20, 0, 0], base - 0.25])
+    tm = TetMesh(tet_vertices=verts, tetrahedra=np.array([[0, 1, 2, 3], [4, 5, 6, 7]]), tet_adjacency=None)
+    d = np.array([[0.3, 0.5, 0.8], [0.6, 0.6, 0.5]])
+    d /= np.linalg.norm(d, axis=1)[:, None]
+    out, changed = _project_to_reachable_radial_tilt(tm, d, np.zeros(3), np.array([0.0, 0.0, 1.0]))
+    rhat = np.array([20.25, 0.25, 0.0]) / np.hypot(20.25, 0.25)
+    tang = np.cross([0, 0, 1.0], rhat)
+    assert abs(out[0] @ tang) < 1e-12 and out[0] @ rhat >= 0 and abs(np.linalg.norm(out[0]) - 1) < 1e-12
+    assert changed[0] and not changed[1]            # sur l'axe : intacte
+    inward = -0.8 * rhat + 0.6 * np.array([0, 0, 1.0])
+    out, _ = _project_to_reachable_radial_tilt(tm, np.vstack([inward, d[1]]), np.zeros(3), np.array([0.0, 0.0, 1.0]))
+    assert np.allclose(out[0], [0, 0, 1])           # penche vers le centre : ramenee a la verticale

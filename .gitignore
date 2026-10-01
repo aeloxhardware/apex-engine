@@ -21,6 +21,8 @@ tetgen-tmpfile_skipped.*
 # Python (ex: apex_core.cp314-win_amd64.pyd).
 cpp/build/
 cpp/lib/
+cpp/build_dev*/
+cpp/build_old_*/
 
 # Espace de recherche externe : clones de projets tiers (S3-Slicer,
 # S4-Slicer) etudies pour le chantier "dependance sans surplomb" (voir

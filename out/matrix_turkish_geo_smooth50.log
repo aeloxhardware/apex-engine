@@ -1,0 +1,41 @@
+[preview] Etape 1/8 - ingestion : res/test_models/turkish.stl
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire
+[preview] Etape 5/8 - extraction des couches courbes
+[preview]   167 couche(s)
+[preview] Etape 6/8 - remplissage 2D par couche
+[preview] Etape 7/8 - couleur + ordonnancement
+[preview]   167 passe(s) d'impression
+[preview] Etape 8/8 - trajectoire machine (resolution IK)
+[preview]   587216 point(s) de trajectoire, 313951 orientation(s) inatteignable(s)
+[preview] Etape 8c/8 - verification du support de depot
+[preview]   4074 depot(s) sans support (0.78% de la matiere extrudee) : 3143 defaut(s) d'ordre, 0 surplomb(s) reel(s)
+[preview] step1->step8 termine en 146.7s
+[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)
+{
+ "model": "turkish.stl",
+ "variant": "geo_smooth50",
+ "resolution": 0.8,
+ "layer_height_base": 0.2,
+ "apex_use_cpp": "1",
+ "seconds": 146.7,
+ "layers": 167,
+ "points": 587216,
+ "layer_thickness_measured": 0.2872,
+ "tested": 523138,
+ "unsupported": 4074,
+ "unsupported_fraction": 0.007787620092595071,
+ "ordering_defects": 3143,
+ "tilt_resolved": 931,
+ "true_overhang": 0,
+ "travel_total_mm": 319507.9,
+ "travel_max_mm": 134.15,
+ "step8_diagnostics": 313951,
+ "b_jumps_gt10": 45,
+ "dev_median": 31.19,
+ "dev_p95": 75.08,
+ "dev_gt15_pct": 74.72,
+ "dev_gt45_pct": 30.36,
+ "time": "2026-09-30 21:43:45"
+}

@@ -3,7 +3,7 @@ import pytest
 
 import main
 from file_io.gcode_export import (GcodeParams, clearance_move, export_gcode, feed_plan, firmware_to_machine,
-                                  machine_to_firmware, parse_gcode)
+                                  head_axis_vectors, machine_to_firmware, parse_gcode)
 from pipeline.step8_machine_toolpath import coupled_axis_angle
 from pipeline.step9_collision_sim import _positioned_toolhead_vertices
 
@@ -102,11 +102,14 @@ def test_export_extrusion_and_retraction(machine):
 
 def test_parse_round_trip_positions(machine):
     tp = _toolpath(machine)
-    lines, _ = export_gcode(tp, machine, GcodeParams(decimals=6))
+    params = GcodeParams(decimals=6)
+    lines, _ = export_gcode(tp, machine, params)
     moves = parse_gcode(lines)
     tips = np.array([firmware_to_machine(x, y, z, b, 45.0) for x, y, z, b, _ in moves])
-    for p in tp["position"]:
-        assert np.min(np.linalg.norm(tips - p, axis=1)) < 1e-5
+    # la pointe est au SOMMET du cordon : point de trajectoire (milieu de couche) + h/2 selon l'axe de tete
+    half = np.where(tp["is_skin"], params.skin_thickness, params.layer_height) / 2
+    for p, h in zip(tp["position"], half):
+        assert np.min(np.linalg.norm(tips - (p + [0, 0, h]), axis=1)) < 1e-5
     extruded = [m for m in moves if m[4]]
     assert len(extruded) == 3
 
@@ -119,3 +122,45 @@ def test_feed_plan_slows_fast_b_changes():
     angles[:, 1] = 0.0
     t_nom, t_real, factor = feed_plan(pts, angles, 750.0, 300.0, [0], 25.0)
     assert t_real == pytest.approx(t_nom)
+
+
+def test_tip_at_bead_top_along_head_axis(machine):
+    """Couche plate a z = h/2 (milieu de couche, step5) -> pointe emise a z = h ;
+    tete inclinee -> decalage de h/2 le long de l'axe de la tete, pas en Z seul."""
+    pos = np.array([[20.0, 0.0, 0.1], [30.0, 0.0, 0.1]])
+    ang = np.array([[_c(machine, p), 0.0] for p in pos])
+    tp = {"position": pos, "axis_angles": ang, "extrusion": np.array([0.0, 1.0])}
+    lines, rep = export_gcode(tp, machine, GcodeParams(decimals=6))
+    tips = np.array([firmware_to_machine(x, y, z, b, 45.0) for x, y, z, b, _ in parse_gcode(lines)])
+    assert tips[:, 2].min() == pytest.approx(0.2, abs=1e-9)
+    assert rep.tip_z_min == pytest.approx(0.2, abs=1e-9)
+    lines, rep = export_gcode(tp, machine, GcodeParams(decimals=6, tip_at_bead_top=False))
+    assert rep.tip_z_min == pytest.approx(0.1, abs=1e-9)
+    v = head_axis_vectors(np.array([[10.0, 0.0, 5.0]]), 90.0)[0]
+    assert v == pytest.approx([1.0, 0.0, 0.0], abs=1e-12)
+
+
+def test_head_geometry_variants_round_trip():
+    rng = np.random.default_rng(2)
+    for sign in (1.0, -1.0):
+        for ref in ("tip", "pivot"):
+            for p, b in zip(rng.uniform(-100, 100, (20, 3)), rng.uniform(0, 185, 20)):
+                fw = machine_to_firmware(p, b, 45.0, tilt_sign=sign, z_reference=ref)
+                assert firmware_to_machine(*fw, 45.0, tilt_sign=sign, z_reference=ref) == pytest.approx(p, abs=1e-9)
+    assert machine_to_firmware(np.array([10.0, 0.0, 5.0]), 0.0, 45.0, z_reference="pivot")[2] == pytest.approx(50.0)
+    with pytest.raises(ValueError):
+        machine_to_firmware(np.array([10.0, 0.0, 5.0]), 0.0, 45.0, z_reference="autre")
+
+
+def test_guards_and_strict(machine, tmp_path):
+    pos = np.array([[20.0, 0.0, 1.0], [30.0, 0.0, -0.5], [40.0, 0.0, 1.0]])
+    ang = np.array([[_c(machine, p), 0.0] for p in pos])
+    tp = {"position": pos, "axis_angles": ang, "extrusion": np.array([0.0, 1.0, 1.0])}
+    out = tmp_path / "x.gcode"
+    _, rep = export_gcode(tp, machine, GcodeParams(), str(out), head_zlow=lambda b: -2.0)
+    assert rep.tip_below_plate == 1 and rep.tip_z_min == pytest.approx(-0.4)
+    assert rep.head_z_min == pytest.approx(-2.4) and rep.head_below_margin >= 1
+    assert rep.fw_x_range[0] <= 20.0 and rep.fw_x_range[1] >= 40.0 and rep.written and out.exists()
+    out2 = tmp_path / "y.gcode"
+    _, rep = export_gcode(tp, machine, GcodeParams(strict=True), str(out2))
+    assert not rep.written and not out2.exists()

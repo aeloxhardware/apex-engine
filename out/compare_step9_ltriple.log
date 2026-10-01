@@ -1,0 +1,18 @@
+[preview] Etape 1/8 - ingestion : res/test_models/l-triple-axis-overhanged-shape.stl
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire
+[preview] Etape 5/8 - extraction des couches courbes
+[preview]   142 couche(s)
+[preview] Etape 6/8 - remplissage 2D par couche
+[preview] Etape 7/8 - couleur + ordonnancement
+[preview]   142 passe(s) d'impression
+[preview] Etape 8/8 - trajectoire machine (resolution IK)
+[preview]   27539 point(s) de trajectoire, 27184 orientation(s) inatteignable(s)
+[preview] step1->step8 termine en 1.1s
+[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)
+rapide : 680 evenements en 1 s
+exact  : 681 evenements en 552 s
+communs 680, rapide seul 0, exact seul 1
+penetration exact - rapide : min 0.000 max 0.072 mm
+exact seul, plus profondes : [((13021, 'printed_part'), 0.0)]

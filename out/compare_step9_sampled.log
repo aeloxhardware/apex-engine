@@ -1,0 +1,3 @@
+turkish.stl : rapide 83686 points signales sur 156209 echantillonnes (41 s)
+  exact sur 1000 signales + 1000 non signales (6684 s) : faux positifs 0, faux negatifs 0
+  penetration exact - rapide : min 0.000 max 0.087 mm ; faux positifs, profondeur rapide max 0.000 mm ; faux negatifs, profondeur exacte max 0.000 mm

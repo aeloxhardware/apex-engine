@@ -696,3 +696,75 @@ def test_free_axis_median_filter_removes_b_oscillation_only():
     assert np.all(b[12:] == 30.0)
     assert all(a[0] == 90.0 for a in out)
     assert residual[12] == pytest.approx(np.radians(30.0), abs=1e-9)
+
+
+# ---------------------------------------------------------------------------
+# Normale PAR POINT (Step8Params.per_point_normal, phase 3.1 du 2026-10-01)
+# ---------------------------------------------------------------------------
+
+def _ring_layer():
+    """Couche plate en anneau autour de l'axe du plateau (normale de couche +Z)."""
+    ang = np.linspace(0, 2 * np.pi, 13)[:-1]
+    ring = np.column_stack([20 * np.cos(ang), 20 * np.sin(ang)])
+    frame = (np.array([0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
+    return _make_layer(0, frame, [ring])
+
+
+def _outward_field(tilt_deg):
+    def field(points):
+        p = np.asarray(points, dtype=float)
+        r = p[:, :2] / np.linalg.norm(p[:, :2], axis=1)[:, None]
+        a = np.radians(tilt_deg)
+        return np.column_stack([np.sin(a) * r, np.full(len(p), np.cos(a))])
+    return field
+
+
+def test_per_point_normal_follows_local_field_on_coupled_machine():
+    """Couche en anneau dont la normale LOCALE penche vers l'exterieur : avec
+    une seule normale de couche (+Z), la tete reste verticale partout ; avec
+    la normale par point, B vaut l'inclinaison locale en chaque point, sans
+    aucun diagnostic (chaque normale est dans le plan radial de son point)."""
+    machine = _coupled_machine()
+    layer = _ring_layer()
+    schedule = PrintSchedule(passes=[PrintPass(segments=[(0, 0)], color_id=None)])
+    tp_ref, _ = step8_run([layer], schedule, machine, Step8Params())
+    assert all(abs(p.axis_angles[1]) < 1e-6 for p in tp_ref.points)
+    tp, diags = step8_run([layer], schedule, machine, Step8Params(per_point_normal=True),
+                          direction_field=_outward_field(20.0))
+    assert all(p.axis_angles[1] == pytest.approx(20.0, abs=1e-3) for p in tp.points)
+    assert diags == []
+
+
+def test_per_point_normal_ignored_without_field_and_keeps_layer_normal_when_opposed():
+    machine = _coupled_machine()
+    layer = _ring_layer()
+    schedule = PrintSchedule(passes=[PrintPass(segments=[(0, 0)], color_id=None)])
+    tp, _ = step8_run([layer], schedule, machine, Step8Params(per_point_normal=True))
+    assert all(abs(p.axis_angles[1]) < 1e-6 for p in tp.points)
+    flipped = lambda pts: -_outward_field(20.0)(pts)   # noqa: E731 - oppose a la normale de couche
+    tp, _ = step8_run([layer], schedule, machine, Step8Params(per_point_normal=True), direction_field=flipped)
+    assert all(abs(p.axis_angles[1]) < 1e-6 for p in tp.points)
+
+
+def test_nodal_direction_field_is_exact_on_linear_field_and_continuous():
+    """Normale continue (per_point_normal_nodal) : sur un champ LINEAIRE (gradient
+    constant), elle rend exactement ce gradient partout ; elle ne saute pas d'un
+    tetraedre voisin a l'autre (contrairement au plus proche centroide)."""
+    from scipy.spatial import Delaunay
+    from core.mesh_types import ScalarField, TetMesh
+    from pipeline.step8_machine_toolpath import gradient_direction_field
+    rng = np.random.default_rng(4)
+    pts = rng.uniform(0, 10, (300, 3))
+    tets = Delaunay(pts).simplices.astype(np.int64)
+    g = np.array([0.2, -0.1, 1.0])
+    tm = TetMesh(tet_vertices=pts, tetrahedra=tets, tet_adjacency=None)
+    sf = ScalarField(values=pts @ g, gradient=np.tile(g, (len(tets), 1)))
+    field = gradient_direction_field(tm, sf, nodal=True)
+    q = rng.uniform(2, 8, (200, 3))
+    assert np.allclose(field(q), g / np.linalg.norm(g), atol=1e-12)
+    # gradient bruite par tetraedre : la variante nodale varie moins entre points voisins
+    noisy = g + rng.normal(0, 0.3, (len(tets), 3))
+    sf2 = ScalarField(values=pts @ g, gradient=noisy)
+    line = np.column_stack([np.linspace(2, 8, 400), np.full(400, 5.0), np.full(400, 5.0)])
+    jump = lambda d: np.degrees(np.arccos(np.clip(np.einsum("ij,ij->i", d[1:], d[:-1]), -1, 1))).mean()  # noqa: E731
+    assert jump(gradient_direction_field(tm, sf2, nodal=True)(line)) < jump(gradient_direction_field(tm, sf2)(line))

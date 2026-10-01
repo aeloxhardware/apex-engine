@@ -16,6 +16,7 @@ Usage (venv d'Apex) :
   APEX_USE_CPP=1 ../../.venv/Scripts/python.exe -u full_step89.py <modele> <passe> <variante>
       [--eval-every=1] [--max-seconds=0] [--limit-points=0]
 """
+import safe_io  # noqa: F401 -- ecritures robustes aux verrous transitoires
 import os
 import pickle
 import sys

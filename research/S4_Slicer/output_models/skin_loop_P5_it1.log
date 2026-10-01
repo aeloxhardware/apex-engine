@@ -1,12 +1,49 @@
-l_shape_overhang passe 16 : 147 couches de corps (rangs croissants), 5 zones de lissage inserees
-vitesse de depot 25 mm/s ; tete B limitee a 750 deg/s et 300 deg/s2 : temps des passes de lissage 0.3 min -> 0.3 min (x1.00)
-angles de tete (C impose par la position) : 0.9 s ; zones avec des points au-dela de 45 deg : 2
-collisions : 216 points de lissage testes en 0.5 s
+dino passe 5 : 310 couches de corps (rangs croissants), 70 zones de lissage inserees
+vitesse de depot 25 mm/s ; tete B limitee a 750 deg/s et 300 deg/s2 : temps des passes de lissage 7.1 min -> 15.3 min (x2.16)
+angles de tete (C impose par la position) : 0.4 s ; zones avec des points au-dela de 45 deg : 1
+collisions : 5803 points de lissage testes en 16.8 s
 
-zones en collision (RETIREES) : 2/5 (22 mm2 sur 134)
-  zone   3 moment 111    11.0 mm2 : plateau 0, piece 0, au-dela de 45 deg 33 (penetration max 0.00 mm), ecart tete max 46 deg
-  zone   4 moment 112    11.0 mm2 : plateau 0, piece 0, au-dela de 45 deg 34 (penetration max 0.00 mm), ecart tete max 46 deg
-zones gardees : 3, ecart tete / normale max par zone : mediane 11 deg, max 11 deg
-points de collision (rognage) : 67 sur 216
-1 s au total
-R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_l_shape_overhang_pin_print_order_pass16.pkl
+zones en collision (RETIREES) : 39/70 (1652 mm2 sur 3730)
+  zone   0 moment  66   290.6 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.37 mm), ecart tete max 45 deg
+  zone   2 moment 112    10.4 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.10 mm), ecart tete max 19 deg
+  zone   3 moment 251    12.7 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.54 mm), ecart tete max 34 deg
+  zone   4 moment 130    42.3 mm2 : plateau 0, piece 6, au-dela de 45 deg 0 (penetration max 1.09 mm), ecart tete max 23 deg
+  zone   5 moment 102    94.0 mm2 : plateau 0, piece 16, au-dela de 45 deg 0 (penetration max 1.14 mm), ecart tete max 39 deg
+  zone   6 moment 139   230.0 mm2 : plateau 0, piece 0, au-dela de 45 deg 15 (penetration max 0.00 mm), ecart tete max 45 deg
+  zone   7 moment 151    51.9 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 1.15 mm), ecart tete max 44 deg
+  zone  10 moment 132    25.7 mm2 : plateau 0, piece 6, au-dela de 45 deg 0 (penetration max 0.28 mm), ecart tete max 18 deg
+  zone  11 moment 217    20.9 mm2 : plateau 0, piece 2, au-dela de 45 deg 0 (penetration max 0.18 mm), ecart tete max 45 deg
+  zone  12 moment 247     4.2 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.16 mm), ecart tete max 38 deg
+  zone  15 moment 161     2.8 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.99 mm), ecart tete max 16 deg
+  zone  18 moment 101    29.1 mm2 : plateau 0, piece 16, au-dela de 45 deg 0 (penetration max 1.14 mm), ecart tete max 23 deg
+  zone  23 moment 104   225.9 mm2 : plateau 0, piece 11, au-dela de 45 deg 0 (penetration max 1.10 mm), ecart tete max 45 deg
+  zone  24 moment 143    12.9 mm2 : plateau 0, piece 10, au-dela de 45 deg 0 (penetration max 0.99 mm), ecart tete max 29 deg
+  zone  33 moment 258     9.3 mm2 : plateau 0, piece 3, au-dela de 45 deg 0 (penetration max 0.74 mm), ecart tete max 26 deg
+  zone  34 moment 251     6.2 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.31 mm), ecart tete max 38 deg
+  zone  35 moment 143    51.1 mm2 : plateau 0, piece 6, au-dela de 45 deg 0 (penetration max 1.03 mm), ecart tete max 37 deg
+  zone  39 moment 242     6.1 mm2 : plateau 0, piece 7, au-dela de 45 deg 0 (penetration max 0.74 mm), ecart tete max 13 deg
+  zone  40 moment 129   115.3 mm2 : plateau 0, piece 13, au-dela de 45 deg 0 (penetration max 0.60 mm), ecart tete max 24 deg
+  zone  41 moment  63    15.4 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.56 mm), ecart tete max 32 deg
+  zone  43 moment 244     4.0 mm2 : plateau 0, piece 5, au-dela de 45 deg 0 (penetration max 0.53 mm), ecart tete max 25 deg
+  zone  44 moment  55    11.9 mm2 : plateau 0, piece 5, au-dela de 45 deg 0 (penetration max 0.84 mm), ecart tete max 38 deg
+  zone  48 moment  81    59.2 mm2 : plateau 0, piece 11, au-dela de 45 deg 0 (penetration max 0.47 mm), ecart tete max 33 deg
+  zone  49 moment 257    10.0 mm2 : plateau 0, piece 7, au-dela de 45 deg 0 (penetration max 0.70 mm), ecart tete max 14 deg
+  zone  50 moment  62    12.1 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.50 mm), ecart tete max 45 deg
+  zone  51 moment 149    27.0 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.64 mm), ecart tete max 39 deg
+  zone  52 moment 172    13.9 mm2 : plateau 0, piece 6, au-dela de 45 deg 0 (penetration max 1.07 mm), ecart tete max 34 deg
+  zone  53 moment 179     5.2 mm2 : plateau 0, piece 5, au-dela de 45 deg 0 (penetration max 1.12 mm), ecart tete max 13 deg
+  zone  54 moment 129    17.3 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 1.12 mm), ecart tete max 12 deg
+  zone  56 moment  62    19.6 mm2 : plateau 0, piece 6, au-dela de 45 deg 0 (penetration max 0.98 mm), ecart tete max 38 deg
+  zone  57 moment  69    10.1 mm2 : plateau 0, piece 3, au-dela de 45 deg 0 (penetration max 0.68 mm), ecart tete max 13 deg
+  zone  58 moment  83   108.3 mm2 : plateau 0, piece 13, au-dela de 45 deg 0 (penetration max 0.98 mm), ecart tete max 44 deg
+  zone  59 moment  73    21.7 mm2 : plateau 0, piece 3, au-dela de 45 deg 0 (penetration max 0.60 mm), ecart tete max 38 deg
+  zone  60 moment  69    13.3 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.84 mm), ecart tete max 28 deg
+  zone  61 moment  75    10.1 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.48 mm), ecart tete max 15 deg
+  zone  62 moment  87    17.2 mm2 : plateau 0, piece 10, au-dela de 45 deg 0 (penetration max 0.66 mm), ecart tete max 15 deg
+  zone  63 moment 105    12.1 mm2 : plateau 0, piece 7, au-dela de 45 deg 0 (penetration max 0.54 mm), ecart tete max 23 deg
+  zone  64 moment 247    16.7 mm2 : plateau 0, piece 3, au-dela de 45 deg 0 (penetration max 0.33 mm), ecart tete max 44 deg
+  zone  66 moment 249     5.2 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.25 mm), ecart tete max 45 deg
+zones gardees : 31, ecart tete / normale max par zone : mediane 30 deg, max 45 deg
+points de collision (rognage) : 236 sur 5803
+17 s au total
+R:\APEX_NEW_VERSION\slicer_alg\research\S4_Slicer\output_models\loop_dino_pin_print_order_pass5.pkl

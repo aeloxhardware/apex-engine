@@ -1,9 +1,74 @@
-l_shape_overhang_pin passe 16 : 5 zones, motif general rectilinear, angle 45.0 deg, recouvrement 0.2, epaisseur 0.2, cordons de bord 1
-  zone   0 moment 118    16.0 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture 100.0% | 0.0 s
-  zone   1 moment 146    80.0 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  99.3% | 0.2 s
-  zone   2 moment 146    16.0 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture 100.0% | 0.0 s
-  zone   3 moment 111    11.0 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  97.7% | 0.0 s
-  zone   4 moment 112    11.0 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.6% | 0.0 s
+dino_pin passe 5 : 70 zones, motif general rectilinear, angle 45.0 deg, recouvrement 0.2, epaisseur 0.2, cordons de bord 1
+  zone   0 moment  66   290.6 mm2 rectilinear            14 passes, profondeur ok 100.0%, couverture  99.6% | 0.7 s
+  zone   1 moment 112    26.9 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.5% | 0.1 s
+  zone   2 moment 112    10.4 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  95.7% | 0.0 s
+  zone   3 moment 251    12.7 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  98.4% | 0.0 s
+  zone   4 moment 130    42.3 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  99.3% | 0.1 s
+  zone   5 moment 102    94.0 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  99.4% | 0.2 s
+  zone   6 moment 139   230.0 mm2 rectilinear            13 passes, profondeur ok 100.0%, couverture  99.0% | 0.5 s
+  zone   7 moment 151    51.9 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  98.9% | 0.1 s
+  zone   8 moment 244  1157.2 mm2 rectilinear            25 passes, profondeur ok 100.0%, couverture  99.7% | 2.5 s
+  zone   9 moment 137     7.5 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  98.5% | 0.0 s
+  zone  10 moment 132    25.7 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.8% | 0.1 s
+  zone  11 moment 217    20.9 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  95.5% | 0.0 s
+  zone  12 moment 247     4.2 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.5% | 0.0 s
+  zone  13 moment 264    48.6 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  99.8% | 0.1 s
+  zone  14 moment 109    13.8 mm2 rectilinear             7 passes, profondeur ok 100.0%, couverture  97.1% | 0.0 s
+  zone  15 moment 161     2.8 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  86.0% | 0.0 s
+  zone  16 moment 215     6.9 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  96.0% | 0.0 s
+  zone  17 moment 244     5.0 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.5% | 0.0 s
+  zone  18 moment 101    29.1 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  99.0% | 0.1 s
+  zone  19 moment 105    13.8 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  96.7% | 0.0 s
+  zone  20 moment 109     4.7 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  96.5% | 0.0 s
+  zone  21 moment 105     5.6 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  99.0% | 0.0 s
+  zone  22 moment 107     5.1 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.0% | 0.0 s
+  zone  23 moment 104   225.9 mm2 rectilinear            24 passes, profondeur ok 100.0%, couverture  98.6% | 0.5 s
+  zone  24 moment 143    12.9 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  94.2% | 0.0 s
+  zone  25 moment 264    12.9 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  98.4% | 0.0 s
+  zone  26 moment 264    11.0 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  94.5% | 0.0 s
+  zone  27 moment 249    73.0 mm2 rectilinear             8 passes, profondeur ok 100.0%, couverture  98.4% | 0.2 s
+  zone  28 moment 223     2.2 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  90.5% | 0.0 s
+  zone  29 moment 255    47.8 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  99.1% | 0.1 s
+  zone  30 moment 309   451.9 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  99.8% | 0.9 s
+  zone  31 moment 104     3.6 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  95.0% | 0.0 s
+  zone  32 moment 105     4.2 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  99.5% | 0.0 s
+  zone  33 moment 258     9.3 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  96.0% | 0.0 s
+  zone  34 moment 251     6.2 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  96.5% | 0.0 s
+  zone  35 moment 143    51.1 mm2 rectilinear             9 passes, profondeur ok 100.0%, couverture  96.9% | 0.1 s
+  zone  36 moment 264    34.5 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  96.4% | 0.1 s
+  zone  37 moment 136     8.3 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  96.5% | 0.0 s
+  zone  38 moment 112    22.5 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  98.4% | 0.0 s
+  zone  39 moment 242     6.1 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  88.0% | 0.0 s
+  zone  40 moment 129   115.3 mm2 rectilinear             8 passes, profondeur ok 100.0%, couverture  98.8% | 0.2 s
+  zone  41 moment  63    15.4 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  96.4% | 0.0 s
+  zone  42 moment 264     7.9 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  97.0% | 0.0 s
+  zone  43 moment 244     4.0 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  88.0% | 0.0 s
+  zone  44 moment  55    11.9 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  92.8% | 0.0 s
+  zone  45 moment  69     4.4 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  92.5% | 0.0 s
+  zone  46 moment 104     5.2 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  95.0% | 0.0 s
+  zone  47 moment 255    21.2 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  99.8% | 0.1 s
+  zone  48 moment  81    59.2 mm2 rectilinear            16 passes, profondeur ok 100.0%, couverture  97.4% | 0.1 s
+  zone  49 moment 257    10.0 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  97.5% | 0.0 s
+  zone  50 moment  62    12.1 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  97.1% | 0.0 s
+  zone  51 moment 149    27.0 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  97.2% | 0.0 s
+  zone  52 moment 172    13.9 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  98.2% | 0.0 s
+  zone  53 moment 179     5.2 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  96.0% | 0.0 s
+  zone  54 moment 129    17.3 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  97.7% | 0.0 s
+  zone  55 moment 264     6.6 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  94.5% | 0.0 s
+  zone  56 moment  62    19.6 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  97.4% | 0.0 s
+  zone  57 moment  69    10.1 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  98.5% | 0.0 s
+  zone  58 moment  83   108.3 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  98.9% | 0.3 s
+  zone  59 moment  73    21.7 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  98.4% | 0.1 s
+  zone  60 moment  69    13.3 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  96.2% | 0.0 s
+  zone  61 moment  75    10.1 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  97.5% | 0.0 s
+  zone  62 moment  87    17.2 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  99.7% | 0.1 s
+  zone  63 moment 105    12.1 mm2 rectilinear             2 passes, profondeur ok 100.0%, couverture  99.6% | 0.0 s
+  zone  64 moment 247    16.7 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  99.7% | 0.0 s
+  zone  65 moment 251    11.6 mm2 rectilinear             5 passes, profondeur ok 100.0%, couverture  96.1% | 0.0 s
+  zone  66 moment 249     5.2 mm2 rectilinear             3 passes, profondeur ok 100.0%, couverture  93.0% | 0.0 s
+  zone  67 moment 251    27.9 mm2 rectilinear             4 passes, profondeur ok 100.0%, couverture  99.1% | 0.1 s
+  zone  68 moment 251    19.0 mm2 rectilinear             7 passes, profondeur ok 100.0%, couverture  95.3% | 0.1 s
+  zone  69 moment 255     7.7 mm2 rectilinear             6 passes, profondeur ok 100.0%, couverture  95.0% | 0.0 s
 
-5/5 zones tracees ; couverture ponderee 99.3% ; profondeur ok ponderee 100.0% ; 0 s au total
-R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_l_shape_overhang_pin_skin_paths_pass16.pkl
+70/70 zones tracees ; couverture ponderee 98.9% ; profondeur ok ponderee 100.0% ; 8 s au total
+R:\APEX_NEW_VERSION\slicer_alg\research\S4_Slicer\output_models\loop_dino_pin_skin_paths_pass5.pkl

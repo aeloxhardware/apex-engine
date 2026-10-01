@@ -545,6 +545,10 @@ class MachineProfile:
     max_angular_acceleration: float = 0.0
     build_volume: Optional["AABB"] = None
     z_clearance_min: float = 0.0
+    # Rayon du plateau (mm). Machine actuelle : 300 mm de diametre
+    # (utilisateur, 2026-09-29). None = inconnu : step9 retombe sur son disque
+    # par defaut et aucun refus de taille n'est applique.
+    platform_radius: Optional[float] = None
     # Axes dont l'angle est IMPOSÉ PAR LA POSITION du point (limite #59) :
     # quand la tête ne se déplace que dans un demi-plan (machine actuelle : R et
     # Z seulement, pas d'axe Y), le plateau doit tourner pour amener le point

@@ -32,8 +32,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum
 
+import os
+
 import numpy as np
 import shapely
+
 import shapely.affinity
 from shapely.geometry import LineString, MultiPolygon, Polygon
 
@@ -119,6 +122,19 @@ class Step6Params:
     # que ~5% des paires de la trajectoire. Voir `_split_rings_in_toolpath`.
     split_open_polylines: bool = False
 
+    # Continuite des parois (2026-10-01). Deux segments n'etaient JAMAIS
+    # extrudes, mesure sur le pipeline par defaut :
+    #   - la jonction entre deux troncons monotones (`_split_ring_into_runs`) :
+    #     troncons a indices DISJOINTS, donc le segment qui les relie devient
+    #     un trajet a vide - 7,7 % de la longueur deposee perdue sur death.stl,
+    #     15,7 % sur l_shape_overhang.stl (des trous dans les parois) ;
+    #   - la fermeture du contour d'origine n=0 et de ses trous, emis OUVERTS
+    #     (0,1 % et 0,85 %).
+    # True : chaque troncon reprend le dernier sommet du precedent (la
+    # jonction reste monotone, elle prend le sens du troncon suivant), et les
+    # contours n=0 recoivent leur point de fermeture. False = historique.
+    continuous_rings: bool = False
+
 
 # ---------------------------------------------------------------------------
 # Projection / relevement repere local <-> 3D
@@ -137,6 +153,15 @@ def _project_to_local_2d(
     return np.stack([u, v], axis=1)
 
 
+def _frame_normal(axis_u: np.ndarray, axis_v: np.ndarray) -> np.ndarray:
+    """axis_u x axis_v, au bit pres comme np.cross (memes produits puis
+    differences), sans son cout d'appel (~25 us) : appele une fois par
+    polyligne relevee, soit ~29 000 fois sur death.stl (0,8 s mesurees)."""
+    u0, u1, u2 = float(axis_u[0]), float(axis_u[1]), float(axis_u[2])
+    v0, v1, v2 = float(axis_v[0]), float(axis_v[1]), float(axis_v[2])
+    return np.array([u1 * v2 - u2 * v1, u2 * v0 - u0 * v2, u0 * v1 - u1 * v0])
+
+
 def _out_of_plane_offset(
     points_3d: np.ndarray, local_frame: tuple[np.ndarray, np.ndarray, np.ndarray]
 ) -> np.ndarray:
@@ -150,7 +175,7 @@ def _out_of_plane_offset(
     debordement, CLAUDE.md).
     """
     origin, axis_u, axis_v = local_frame
-    normal = np.cross(axis_u, axis_v)
+    normal = _frame_normal(axis_u, axis_v)
     return (points_3d - origin) @ normal
 
 
@@ -188,7 +213,7 @@ def _lift_to_3d(
     origin, axis_u, axis_v = local_frame
     lifted = origin + points_2d_or_3col[:, 0:1] * axis_u + points_2d_or_3col[:, 1:2] * axis_v
     if points_2d_or_3col.shape[1] >= 3:
-        normal = np.cross(axis_u, axis_v)
+        normal = _frame_normal(axis_u, axis_v)
         lifted = lifted + points_2d_or_3col[:, 2:3] * normal
     return lifted
 
@@ -308,7 +333,22 @@ def _signed_area_2d(polygon: np.ndarray) -> float:
 def _classify_contours(
     contours_2d: list[np.ndarray],
 ) -> list[tuple[np.ndarray, list[np.ndarray]]]:
+    """Forme historique de `_classify_contour_indices` : les boucles OUVERTES
+    plutot que leurs indices (conservee pour les appelants et les tests)."""
+    open_loops, groups = _classify_contour_indices(contours_2d)
+    return [(open_loops[o], [open_loops[h] for h in holes]) for o, holes in groups]
+
+
+def _classify_contour_indices(
+    contours_2d: list[np.ndarray],
+) -> tuple[list[np.ndarray], list[tuple[int, list[int]]]]:
     """
+    Rend (boucles ouvertes, [(indice matiere, [indices trous])]) - les indices
+    sont ceux de `contours_2d`. Permet a `run` d'associer chaque boucle a son
+    groupe SANS comparer toutes les boucles a tous les contours : la version
+    par comparaison (`_loop_matches`) coutait 193 331 appels a np.allclose sur
+    turkish.stl (O(groupes x boucles x trous)).
+
     Classe les boucles projetees en groupes (contour_matiere, [trous]) par
     imbrication geometrique (point_in_polygon_2d), PAS par signe d'aire
     (hypothese refutee empiriquement - cf. CLAUDE.md limite #11).
@@ -325,7 +365,7 @@ def _classify_contours(
     matiere disjoints.
     """
     if not contours_2d:
-        return []
+        return [], []
 
     # une seule boucle sans point de fermeture duplique pour les calculs
     open_loops = [c[:-1] if np.allclose(c[0], c[-1]) else c for c in contours_2d]
@@ -365,10 +405,7 @@ def _classify_contours(
         parent = min(matter_parents, key=lambda p: areas[p])
         groups[parent].append(i)
 
-    return [
-        (open_loops[outer_idx], [open_loops[h] for h in holes])
-        for outer_idx, holes in groups.items()
-    ]
+    return open_loops, [(outer_idx, holes) for outer_idx, holes in groups.items()]
 
 
 # ---------------------------------------------------------------------------
@@ -946,7 +983,7 @@ def _merge_short_runs(
     return merged
 
 
-def _split_ring_into_runs(ring: np.ndarray) -> list[np.ndarray]:
+def _split_ring_into_runs(ring: np.ndarray, share_vertices: bool = False) -> list[np.ndarray]:
     """
     Decoupe un anneau FERME (K,3) (u, v, offset) en troncons monotones, chacun
     stocke dans le sens MONTANT - voir docstring de section pour la cause
@@ -969,7 +1006,12 @@ def _split_ring_into_runs(ring: np.ndarray) -> list[np.ndarray]:
         return [ring]
 
     segments: list[np.ndarray] = []
-    for start, stop in _merge_short_runs(runs, ring[:, 2]):
+    for k, (start, stop) in enumerate(_merge_short_runs(runs, ring[:, 2])):
+        # `share_vertices` : le troncon reprend le dernier sommet du precedent,
+        # pour que le segment de jonction soit extrude (voir
+        # Step6Params.continuous_rings) ; il suit le sens de ce troncon-ci.
+        if share_vertices and k > 0 and start > 0:
+            start -= 1
         segment = ring[start:stop]
         if len(segment) >= 2 and segment[-1, 2] < segment[0, 2]:
             segment = segment[::-1]
@@ -978,7 +1020,7 @@ def _split_ring_into_runs(ring: np.ndarray) -> list[np.ndarray]:
 
 
 def _split_rings_in_toolpath(
-    toolpath: list[np.ndarray], include_open_polylines: bool = False
+    toolpath: list[np.ndarray], include_open_polylines: bool = False, share_vertices: bool = False
 ) -> list[np.ndarray]:
     """
     Applique `_split_ring_into_runs` a chaque polyligne FERMEE de `toolpath`
@@ -1010,7 +1052,7 @@ def _split_rings_in_toolpath(
     result: list[np.ndarray] = []
     for poly in toolpath:
         if _is_closed_ring(poly) or include_open_polylines:
-            result.extend(_split_ring_into_runs(poly))
+            result.extend(_split_ring_into_runs(poly, share_vertices))
         else:
             result.append(poly)
     return result
@@ -1019,6 +1061,26 @@ def _split_rings_in_toolpath(
 # ---------------------------------------------------------------------------
 # Point d'entree principal de l'etape
 # ---------------------------------------------------------------------------
+
+# Nombre de fils de step6 (None = min(8, coeurs)) ; 1 = serie historique.
+_STEP6_THREADS = None
+
+# Pas 15 (limite #56) : parois et remplissage d'une zone par le noyau natif
+# (Clipper2 au lieu de shapely/GEOS). PAS au bit pres - meme offset en
+# onglet, autre arithmetique et autre point de depart d'anneau -, d'ou
+# l'option : APEX_NATIVE_FILL=1 (et APEX_USE_CPP=1), ou cette variable.
+# Les ponts restent en Python.
+_NATIVE_FILL = os.environ.get("APEX_NATIVE_FILL", "0") == "1"
+_NATIVE_PATTERN_CODES = {InfillPattern.LINES: 0, InfillPattern.GRID: 1, InfillPattern.CROSSED_ZIGZAG: 2}
+
+
+def _native_fill_module():
+    if not _NATIVE_FILL:
+        return None
+    from core import _cpp
+    module = _cpp.module() if _cpp.enabled() else None
+    return module if module is not None and hasattr(module, "fill_region") else None
+
 
 def run(
     layers: list[Layer],
@@ -1058,36 +1120,54 @@ def run(
         montant - voir Decision 5 plus haut. Le nombre de polylignes augmente,
         le nombre total de POINTS est inchange.
     """
-    result: list[Layer] = []
     isovalue_rank = {
         value: rank
         for rank, value in enumerate(sorted({l.isovalue for l in layers if l.isovalue is not None}))
     }
 
-    for layer in layers:
+    def one_layer(layer: Layer) -> Layer:
+        return _fill_layer(layer, mesh_data, overhang_map, params, isovalue_rank)
+
+    # Couches INDEPENDANTES (fonction pure par couche) : fils d'execution,
+    # ordre de sortie conserve (`map`), resultat identique par construction.
+    # shapely et le noyau natif relachent le GIL sur leurs calculs.
+    workers = _STEP6_THREADS if _STEP6_THREADS is not None else min(8, os.cpu_count() or 1)
+    if workers > 1 and len(layers) > 1:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            return list(pool.map(one_layer, layers))
+    return [one_layer(layer) for layer in layers]
+
+
+def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, params: Step6Params,
+                isovalue_rank: dict) -> Layer:
+    if True:
         contours_2d = [_project_to_local_2d(c, layer.local_frame) for c in layer.contour_3d]
         # offsets hors-plan REELS de chaque boucle, calcules une fois par
         # couche : ils servent a la fois au contour n=0 (restitution exacte,
         # limite #31) et de source d'interpolation pour les points generes.
         offsets_3d = [_out_of_plane_offset(c, layer.local_frame) for c in layer.contour_3d]
-        groups = _classify_contours(contours_2d)
+        open_loops, index_groups = _classify_contour_indices(contours_2d)
 
         toolpath: list[np.ndarray] = []
 
-        for outer, holes in groups:
+        for outer_idx, hole_idxs in index_groups:
+            outer = open_loops[outer_idx]
+            holes = [open_loops[h] for h in hole_idxs]
+            members = {outer_idx, *hole_idxs}
             bridge_direction = None
             outer_out_of_plane = None
             source_2d_parts: list[np.ndarray] = []
             source_offset_parts: list[np.ndarray] = []
 
-            for contour_3d_loop, loop_2d, loop_offsets in zip(
+            for k, (contour_3d_loop, loop_2d, loop_offsets) in enumerate(zip(
                 layer.contour_3d, contours_2d, offsets_3d
-            ):
-                matches_outer = _loop_matches(loop_2d, outer)
+            )):
                 # les TROUS du groupe portent eux aussi un offset reel connu :
                 # les ignorer degraderait l'interpolation a leur voisinage.
-                if not matches_outer and not any(_loop_matches(loop_2d, h) for h in holes):
+                if k not in members:
                     continue
+                matches_outer = k == outer_idx
 
                 # contour_3d_loop porte toujours un point de fermeture
                 # duplique (premier == dernier, garanti par step5) alors
@@ -1113,6 +1193,19 @@ def run(
 
             if bridge_direction is not None:
                 generated = _reorient_bridge_toolpath(outer, holes, bridge_direction, params)
+            elif _native_fill_module() is not None:
+                sweep_angle = (
+                    _infill_angle_for_layer(layer, isovalue_rank)
+                    if params.infill_pattern is InfillPattern.CROSSED_ZIGZAG
+                    else 0.0
+                )
+                valid, infill, offset_walls = _native_fill_module().fill_region(
+                    outer, holes, params.nozzle_width, params.wall_count, params.degenerate_area_ratio,
+                    params.infill_density, _NATIVE_PATTERN_CODES[params.infill_pattern], sweep_angle,
+                )
+                if not valid:
+                    continue
+                generated = list(infill) + list(offset_walls) + [outer] + list(holes)
             else:
                 walls, innermost = _offset_walls(
                     outer, holes, params.nozzle_width, params.wall_count, params.degenerate_area_ratio
@@ -1130,25 +1223,27 @@ def run(
                 )
                 generated = infill + walls
 
-            toolpath.extend(
-                _to_toolpath_3col(
+            # contours d'origine n=0 (exterieur et trous), emis OUVERTS
+            original_ids = {id(outer), *(id(h) for h in holes)}
+            for poly in generated:
+                arr = _to_toolpath_3col(
                     poly,
                     _out_of_plane_for_polyline(
                         poly, outer, outer_out_of_plane, source_2d, source_offsets,
                         params.out_of_plane_interpolation_power,
                     ),
                 )
-                for poly in generated
-            )
+                if params.continuous_rings and id(poly) in original_ids and len(arr) >= 3                         and not np.array_equal(arr[0, :2], arr[-1, :2]):
+                    arr = np.vstack([arr, arr[:1]])
+                toolpath.append(arr)
 
         if params.split_rings_into_runs:
             toolpath = _split_rings_in_toolpath(
-                toolpath, include_open_polylines=params.split_open_polylines
+                toolpath, include_open_polylines=params.split_open_polylines,
+                share_vertices=params.continuous_rings,
             )
 
-        result.append(replace(layer, toolpath_2d=toolpath))
-
-    return result
+        return replace(layer, toolpath_2d=toolpath)
 
 
 def _loop_matches(loop_2d: np.ndarray, outer_open: np.ndarray) -> bool:

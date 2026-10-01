@@ -44,8 +44,10 @@ public:
 
     // Distance de chaque point au maillage (et, si `closest` non nul, le point
     // le plus proche, (n,3)). `threads` <= 0 : nombre de coeurs.
+    // `face_ids` non nul : indice du triangle le plus proche (premier trouve a
+    // distance minimale), pour la couleur peinte de step7.
     void distances(const double* points, std::size_t n, double* out, double* closest,
-                   DistanceBackend backend, int threads = 0) const;
+                   DistanceBackend backend, int threads = 0, std::int64_t* face_ids = nullptr) const;
 
     std::size_t face_count() const { return tris_.size(); }
 
@@ -59,8 +61,9 @@ private:
         std::int32_t left = -1, right = -1, first = 0, count = 0;
     };
     std::int32_t build(std::int32_t lo, std::int32_t hi);
-    double query(const Vec3& p, Vec3* best_point) const;
-    void run_range(const double* points, std::size_t begin, std::size_t end, double* out, double* closest) const;
+    double query(const Vec3& p, Vec3* best_point, std::int64_t* best_face = nullptr) const;
+    void run_range(const double* points, std::size_t begin, std::size_t end, double* out, double* closest,
+                   std::int64_t* face_ids = nullptr) const;
 
     std::vector<Triangle3> tris_;
     std::vector<AABB> boxes_;

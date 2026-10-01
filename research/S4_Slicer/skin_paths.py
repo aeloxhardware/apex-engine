@@ -21,6 +21,7 @@ Usage (venv d'Apex) :
       [--zone-pattern=12:concentric,40:hilbert] [--line-angle=45] [--zone-angle=12:0]
       [--overlap=0.2] [--thickness=0.2] [--concentric-order=outside_in] [--zones=3,7]
 """
+import safe_io  # noqa: F401 -- ecritures robustes aux verrous transitoires
 import os
 import pickle
 import sys

@@ -18,7 +18,20 @@ releves dans ces scripts, verifies avec l'utilisateur, sont repris :
   firmware sont celles de la pointe (calibration buse verticale), donc
   X = R + L sin B et Z = z + L (cos B - 1) ;
 - le firmware traite Y (degres) et B comme des axes lineaires : F est
-  recalcule par segment pour garder la vitesse de la POINTE constante.
+  recalcule par segment pour garder la vitesse de la POINTE constante ;
+- le firmware (RRF) ne fait AUCUNE cinematique, ni polaire ni pivot
+  (utilisateur, 2026-09-30) : tout est ici.
+
+Modele pivot/pointe PARAMETRE (`tilt_sign`, `z_reference`) : la
+previsualisation UX de l'utilisateur, qui fait reference, place des
+trajectoires sous le plateau la ou ce modele n'en voit aucune. Convention en
+attente de confirmation ; les valeurs par defaut sont celles d'origine.
+
+Les points de trajectoire sont au milieu de la couche (step5) ; la pointe est
+emise au SOMMET du cordon (`tip_at_bead_top`, h/2 le long de l'axe de tete).
+`GcodeReport` porte des garde-fous (pointe et tete les plus basses, etendues
+X/Y/Z firmware) et `strict` refuse d'ecrire un fichier dont la pointe passe
+sous le plateau.
 
 Les limites de vitesse et d'acceleration de B (MachineProfile) ralentissent
 tout le mouvement, le firmware coordonnant les axes (limite #59) :
@@ -62,6 +75,19 @@ class GcodeParams:
     retract_min_travel: float = 2.0      # pas de retraction pour un trajet plus court (mm)
     travel_clearance: float = 1.0        # degagement le long d'un seul axe (mm)
     pivot_to_tip: float = 45.0           # pivot de B -> pointe (mm)
+    # Modele pivot/pointe, parametre en attendant la confirmation de
+    # l'utilisateur (sa previsualisation UX et ce modele divergent, 2026-09-30).
+    # tilt_sign : signe du deport radial du pivot quand B > 0 (+1 = corps vers +R).
+    # z_reference : "tip" = a B = 0 le Z firmware est celui de la pointe
+    # (Z = z + L (cos B - 1)) ; "pivot" = Z firmware est la hauteur du pivot
+    # (Z = z + L cos B).
+    tilt_sign: float = 1.0
+    z_reference: str = "tip"
+    # Les points de trajectoire sont au MILIEU de la couche (step5 : premiere
+    # isovaleur a v_min + delta/2) : la pointe doit etre au SOMMET du cordon,
+    # donc relevee de h/2 le long de l'axe de la tete.
+    tip_at_bead_top: bool = True
+    strict: bool = False                 # refuse d'ecrire si la pointe passe sous le plateau
     platform_margin: float = 1.0         # marge tete / plateau (mm)
     singularity_radius: float = 1e-6     # R sous lequel Y est herite du point precedent
     decimals: int = 4
@@ -79,6 +105,15 @@ class GcodeReport:
     print_time_s: float = 0.0            # avec le ralentissement aux limites de B
     c_mismatch_deg: float = 0.0          # ecart max |Y - (C - 90)|, controle de repere
     travel_collisions: int = 0           # degagements signales par `travel_check`
+    # garde-fous (dans le modele de tete d'Apex)
+    tip_z_min: float = float("inf")      # pointe la plus basse emise (mm)
+    head_z_min: float = float("inf")     # point le plus bas de la vraie tete (si head_zlow)
+    tip_below_plate: int = 0             # mouvements dont la pointe passe sous z = 0
+    head_below_margin: int = 0           # mouvements dont la tete passe sous platform_margin
+    fw_x_range: tuple = (0.0, 0.0)
+    fw_y_range: tuple = (0.0, 0.0)       # Y deroule : etendue en degres (tours cumules)
+    fw_z_range: tuple = (0.0, 0.0)
+    written: bool = False                # faux si `strict` a refuse l'ecriture
 
 
 def toolpath_arrays(toolpath) -> dict:
@@ -96,7 +131,16 @@ def head_body_direction_rz(b_deg):
     return np.sin(b), np.cos(b)
 
 
-def machine_to_firmware(position, b_deg, pivot_to_tip, previous_y=None, singularity_radius=1e-6):
+def _z_offset(cz, z_reference):
+    if z_reference == "tip":
+        return cz - 1.0
+    if z_reference == "pivot":
+        return cz
+    raise ValueError(f"z_reference inconnu : {z_reference!r} (attendu 'tip' ou 'pivot')")
+
+
+def machine_to_firmware(position, b_deg, pivot_to_tip, previous_y=None, singularity_radius=1e-6,
+                        tilt_sign=1.0, z_reference="tip"):
     """Pointe (x, y, z) + B -> (X, Y, Z, B) firmware. Y deroule par rapport a
     `previous_y` (jamais de saut de 360 deg) ; herite sous `singularity_radius`."""
     x, y, z = (float(v) for v in position)
@@ -108,16 +152,31 @@ def machine_to_firmware(position, b_deg, pivot_to_tip, previous_y=None, singular
         if previous_y is not None:
             fy = previous_y + ((fy - previous_y + 180.0) % 360.0 - 180.0)
     sr, cz = head_body_direction_rz(b_deg)
-    return (r + pivot_to_tip * sr, fy, z + pivot_to_tip * (cz - 1.0), float(b_deg))
+    return (r + tilt_sign * pivot_to_tip * sr, fy, z + pivot_to_tip * _z_offset(cz, z_reference), float(b_deg))
 
 
-def firmware_to_machine(fw_x, fw_y, fw_z, fw_b, pivot_to_tip):
+def firmware_to_machine(fw_x, fw_y, fw_z, fw_b, pivot_to_tip, tilt_sign=1.0, z_reference="tip"):
     """Inverse de `machine_to_firmware` (aperçu et controle aller-retour)."""
     sr, cz = head_body_direction_rz(fw_b)
-    r = fw_x - pivot_to_tip * sr
-    z = fw_z - pivot_to_tip * (cz - 1.0)
+    r = fw_x - tilt_sign * pivot_to_tip * sr
+    z = fw_z - pivot_to_tip * _z_offset(cz, z_reference)
     a = np.radians(fw_y)
     return np.array([r * np.cos(a), r * np.sin(a), z])
+
+
+def head_axis_vectors(position, b_deg):
+    """Direction 3D du corps de la tete (pointe -> pivot) en chaque point :
+    sin B selon +R (radiale du point), cos B selon +Z. Au centre (R ~ 0), la
+    radiale est indefinie ; sin B y est negligeable en pratique, +X est pris."""
+    pos = np.atleast_2d(np.asarray(position, dtype=float))
+    b = np.radians(np.atleast_1d(np.asarray(b_deg, dtype=float)))
+    r = np.hypot(pos[:, 0], pos[:, 1])
+    radial = np.zeros_like(pos)
+    ok = r > 1e-9
+    radial[ok, 0] = pos[ok, 0] / r[ok]
+    radial[ok, 1] = pos[ok, 1] / r[ok]
+    radial[~ok, 0] = 1.0
+    return radial * np.sin(b)[:, None] + np.array([0.0, 0.0, 1.0]) * np.cos(b)[:, None]
 
 
 def feed_plan(points, angles, max_velocity_deg, max_accel_deg, coupled_axes, speed):
@@ -137,6 +196,13 @@ def feed_plan(points, angles, max_velocity_deg, max_accel_deg, coupled_axes, spe
                 continue
             d = np.degrees(np.diff(np.unwrap(np.radians(angles[:, ax]))))
             mag = np.abs(d)
+            from core import _cpp
+            if _cpp.enabled() and hasattr(_cpp.module(), "feed_plan_caps"):
+                # pas 24 : memes passes avant/arriere en natif, au bit
+                cap = _cpp.module().feed_plan_caps(np.ascontiguousarray(d), float(max_velocity_deg),
+                                                   float(max_accel_deg))
+                t_real = np.maximum(t_real, mag / np.maximum(cap, 1e-9))
+                continue
             cap = np.full(len(d), float(max_velocity_deg))
             prev = 0.0
             for i in range(len(d)):
@@ -177,6 +243,20 @@ def clearance_move(position, b_deg, params, head_zlow: Optional[Callable[[float]
     return "none", np.asarray(position, dtype=float)
 
 
+def head_zlow_from_table(grid: np.ndarray, values: np.ndarray) -> Callable[[float], float]:
+    """`head_zlow` tabule (valeur au point de grille de B le plus proche,
+    premier en cas d'egalite) ; porte sa table en attribut `.table`, ce qui
+    permet a l'export natif (pas 24) de l'utiliser sans rappel Python."""
+    grid = np.asarray(grid, dtype=float)
+    values = np.asarray(values, dtype=float)
+
+    def head_zlow(b):
+        return float(values[np.abs(grid - b).argmin()])
+
+    head_zlow.table = (grid, values)
+    return head_zlow
+
+
 def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[str] = None,
                  head_zlow: Optional[Callable[[float], float]] = None,
                  travel_check: Optional[Callable[[int, np.ndarray, float], bool]] = None):
@@ -191,6 +271,9 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
     ext = np.asarray(toolpath["extrusion"], dtype=float)
     skin = np.asarray(toolpath.get("is_skin", np.zeros(len(pos), bool)), dtype=bool)
     n = len(pos)
+    if params.tip_at_bead_top and n:
+        half = np.where(skin, params.skin_thickness, params.layer_height) * 0.5
+        pos = pos + head_axis_vectors(pos, ang[:, 1]) * half[:, None]
     rep = GcodeReport()
     fil_area = np.pi * (params.filament_diameter / 2) ** 2
     L, dec = params.pivot_to_tip, params.decimals
@@ -203,14 +286,59 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
            f"; pivot->pointe {L} mm compense ; retraction {params.retract_length} mm a {params.retract_speed} mm/s",
            "G21", "G90", "M82", "G92 E0", f"M109 S{params.nozzle_temp:g}"]
     state = {"fw": None, "e": 0.0, "retracted": False}
+    guard = {"x": [], "y": [], "z": []}
 
     def fmt(v):
         s = f"{v:.{dec}f}".rstrip("0").rstrip(".")
         return "0" if s in ("-0", "") else s
 
+    # Pas 24 du portage C++ : corps du fichier en natif, texte identique ligne
+    # a ligne (tests/test_cpp_equivalence.py). Hors de portee du natif : un
+    # `travel_check` (rappel Python) ou un `head_zlow` sans table.
+    from core import _cpp
+    table = getattr(head_zlow, "table", None) if head_zlow is not None else (np.zeros(0), np.zeros(0))
+    if (_cpp.enabled() and hasattr(_cpp.module(), "export_gcode_body") and travel_check is None
+            and table is not None and n):
+        body, st = _cpp.module().export_gcode_body(
+            np.ascontiguousarray(pos), np.ascontiguousarray(ang[:, :2]), np.ascontiguousarray(ext),
+            np.ascontiguousarray(skin, dtype=np.uint8), np.ascontiguousarray(slow, dtype=float),
+            np.ascontiguousarray(table[0], dtype=float), np.ascontiguousarray(table[1], dtype=float),
+            {"layer_height": params.layer_height, "skin_thickness": params.skin_thickness,
+             "line_width": params.line_width, "flow": params.flow, "print_speed": params.print_speed,
+             "travel_speed": params.travel_speed, "rotation_feed": params.rotation_feed,
+             "max_feed": params.max_feed, "retract_length": params.retract_length,
+             "retract_speed": params.retract_speed, "retract_min_travel": params.retract_min_travel,
+             "travel_clearance": params.travel_clearance, "pivot_to_tip": L,
+             "platform_margin": params.platform_margin, "singularity_radius": params.singularity_radius,
+             "tilt_sign": params.tilt_sign, "z_reference": params.z_reference, "decimals": dec,
+             "fil_area": fil_area})
+        _z_offset(1.0, params.z_reference)   # meme erreur que le chemin Python si z_reference est inconnu
+        out += body.split(chr(10))
+        rep.moves, rep.travels, rep.retractions = st["moves"], st["travels"], st["retractions"]
+        rep.clearance_axes = {"Z": st["clearance_Z"], "R": st["clearance_R"], "none": st["clearance_none"]}
+        rep.filament_mm, rep.c_mismatch_deg = st["filament_mm"], st["c_mismatch_deg"]
+        rep.tip_z_min, rep.head_z_min = st["tip_z_min"], st["head_z_min"]
+        rep.tip_below_plate, rep.head_below_margin = st["tip_below_plate"], st["head_below_margin"]
+        if st["any"]:
+            guard["x"], guard["y"], guard["z"] = list(st["x"]), list(st["y"]), list(st["z"])
+        n_loop = 0
+    else:
+        n_loop = n
+
     def move(point, b, tip_speed, e_add=0.0, comment=""):
         prev = state["fw"]
-        fw = machine_to_firmware(point, b, L, None if prev is None else prev[1], params.singularity_radius)
+        fw = machine_to_firmware(point, b, L, None if prev is None else prev[1], params.singularity_radius,
+                                 params.tilt_sign, params.z_reference)
+        tz = float(point[2])
+        rep.tip_z_min = min(rep.tip_z_min, tz)
+        rep.tip_below_plate += int(tz < 0.0)
+        if head_zlow is not None:
+            hz = tz + head_zlow(b)
+            rep.head_z_min = min(rep.head_z_min, hz)
+            rep.head_below_margin += int(hz < params.platform_margin)
+        guard["x"].append(fw[0])
+        guard["y"].append(fw[1])
+        guard["z"].append(fw[2])
         tip_d = 0.0 if prev is None else float(np.linalg.norm(point - state["tip"]))
         fw_d = 0.0 if prev is None else float(np.linalg.norm(np.subtract(fw, prev)))
         if tip_d > 1e-9:
@@ -232,11 +360,12 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
         state["retracted"] = sign < 0
 
     last_kind = None
-    for i in range(n):
+    for i in range(n_loop):
         kind = "lissage" if skin[i] else "corps"
         b = float(ang[i, 1])
         if i > 0:
-            y_fw = machine_to_firmware(pos[i], b, L, None, params.singularity_radius)[1]
+            y_fw = machine_to_firmware(pos[i], b, L, None, params.singularity_radius,
+                                       params.tilt_sign, params.z_reference)[1]
             if np.hypot(*pos[i, :2]) > 1e-3:
                 rep.c_mismatch_deg = max(rep.c_mismatch_deg,
                                          abs((y_fw - (ang[i, 0] - 90.0) + 180.0) % 360.0 - 180.0))
@@ -275,7 +404,7 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
         rep.filament_mm += e_add
         speed = params.print_speed * (float(slow[i - 1]) if len(slow) >= i else 1.0)
         move(pos[i], b, speed, e_add=e_add)
-    if n:
+    if n_loop:
         retract(-1)
         axis, up = clearance_move(pos[-1], float(ang[-1, 1]), params, head_zlow)
         move(up, float(ang[-1, 1]), params.travel_speed, comment=f"degagement final {axis}")
@@ -288,7 +417,14 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
         rep.print_time_s = float((seg[pr] / (params.print_speed * np.maximum(slow[pr], 1e-9))).sum()
                                  + seg[~pr].sum() / params.travel_speed)
     rep.lines = len(out)
+    if guard["x"]:
+        rep.fw_x_range = (float(min(guard["x"])), float(max(guard["x"])))
+        rep.fw_y_range = (float(min(guard["y"])), float(max(guard["y"])))
+        rep.fw_z_range = (float(min(guard["z"])), float(max(guard["z"])))
+    if params.strict and rep.tip_below_plate:
+        return out, rep
     if path:
+        rep.written = True
         with open(path, "w", newline="\n") as f:
             f.write("\n".join(out) + "\n")
     return out, rep

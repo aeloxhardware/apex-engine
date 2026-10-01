@@ -50,14 +50,17 @@ from core.mesh_types import (
     ToolpathMachine,
     TravelRoutingDiagnostic,
 )
+from pipeline.step1_ingest import check_fits_platform
 from pipeline.step1_ingest import run as ingest_run
 from pipeline.step1b_junction_detection import detect_junction_zones
 from pipeline.step2_overhang import OverhangParams, run as overhang_run
 from pipeline.step3_segmentation import SegmentationParams, run as segmentation_run
 from pipeline.step4_field_solver import FieldSolverParams, run as field_solver_run
 from pipeline.step5_layers import LayerParams, run as layers_run
+from pipeline.step5b_collision_order import CollisionOrderParams, run as collision_order_run
 from pipeline.step6_toolpath2d import Step6Params, run as toolpath2d_run
 from pipeline.step7_scheduling import Step7Params, run as scheduling_run
+from pipeline.step8_machine_toolpath import gradient_direction_field
 from pipeline.step8_machine_toolpath import Step8Params, run as machine_toolpath_run
 from pipeline.step8b_travel_routing import TravelRoutingParams, route_long_travels
 from pipeline.step9b_support_check import SupportCheckParams, run as support_check_run
@@ -65,6 +68,34 @@ from pipeline.step9_collision_sim import CollisionSimParams, run as collision_ru
 from pipeline.step10_adjustment import (AdjustmentReport, Step10Params, clamp_head_height, reorient_coupled_tiers,
                                         run as adjustment_run)
 
+
+
+
+def _effective_field_solver_params(params: "PipelineParams"):
+    """FieldSolverParams effectifs : `radial_tilt_origin` derive de la machine
+    quand `reachable_tilt_from_machine` est actif et que le premier axe est
+    couple a la position. Copie : `params` n'est jamais mute."""
+    from dataclasses import replace as _replace
+    fs = params.field_solver
+    m = params.machine_profile
+    if (params.reachable_tilt_from_machine and fs.radial_tilt_origin is None
+            and list(getattr(m, "position_coupled_axes", None) or []) == [0]
+            and m.platform_origin is not None):
+        return _replace(fs, radial_tilt_origin=np.asarray(m.platform_origin, dtype=float))
+    return fs
+
+def check_model_fits_machine(mesh_path: str, machine_profile: MachineProfile) -> None:
+    """Refus DES L'ENTREE d'un modele qui ne tient sur le plateau dans aucune
+    position (ModelTooLargeError), avant toute tetraedrisation. Placement-
+    independant : la position sur le plateau est decidee par l'interface."""
+    radius = getattr(machine_profile, "platform_radius", None)
+    bv = machine_profile.build_volume
+    max_height = None if bv is None else float(np.asarray(bv.max_corner)[2] - np.asarray(bv.min_corner)[2])
+    if radius is None and max_height is None:
+        return
+    import trimesh as _trimesh
+    loaded = _trimesh.load(mesh_path, force="mesh")
+    check_fits_platform(np.asarray(loaded.vertices), radius, max_height)
 
 def _default_machine_profile() -> MachineProfile:
     """
@@ -118,6 +149,8 @@ def _default_machine_profile() -> MachineProfile:
         # (axe lineaire de plus) : position_coupled_axes=[].
         position_coupled_axes=[0],
         radial_direction=np.array([0.0, -1.0, 0.0]),
+        # Plateau de 300 mm de diametre (utilisateur, 2026-09-29).
+        platform_radius=150.0,
     )
 
 
@@ -242,9 +275,15 @@ class PipelineParams:
     # tri par altitude locale a ete mesuree et s'est averee une regression
     # (voir historique de session) - retiree, pas reintroduite sans nouvelle
     # mesure positive.
+    # continuous_rings (2026-10-01) : le decoupage en troncons laissait le
+    # segment de jonction NON extrude (7,7 % de la longueur deposee sur death,
+    # 15,7 % sur l_shape : des trous dans les parois), et le contour n=0 sans
+    # son segment de fermeture. Mesure step9b sur les 4 modeles : death -15 %,
+    # turkish -2,6 %, l-triple +0,8 %, l_shape +3 % ; active comme correction
+    # d'un defaut physique (CLAUDE.md, limite #65).
     toolpath2d: Step6Params = field(
         default_factory=lambda: Step6Params(
-            out_of_plane_interpolation_power=2.0, split_rings_into_runs=True
+            out_of_plane_interpolation_power=2.0, split_rings_into_runs=True, continuous_rings=True
         )
     )
     scheduling: Step7Params = field(default_factory=Step7Params)
@@ -254,7 +293,11 @@ class PipelineParams:
     # CollisionSimParams (step9) - l'orchestrateur doit choisir une valeur
     # raisonnable plutot que de laisser l'appelant en decouvrir l'absence.
     collision: CollisionSimParams = field(
-        default_factory=lambda: CollisionSimParams(path_sampling_step=2.0, safety_margin=1.0)
+        # fast_kdtree (limite #62) : mesure contre l'exact sur les 4 modeles le
+        # 2026-10-01 (l-triple et l_shape entiers, turkish et death par
+        # echantillon) : 0 faux positif, 0 faux negatif, ecart <= 0,087 mm ;
+        # death 16 s au lieu de plusieurs heures.
+        default_factory=lambda: CollisionSimParams(path_sampling_step=2.0, safety_margin=1.0, fast_kdtree=True)
     )
     adjustment: Step10Params = field(default_factory=Step10Params)
     # Borne de l'angle de tete selon la hauteur au-dessus du plateau, AVANT
@@ -264,7 +307,7 @@ class PipelineParams:
     # Reorientation par paliers des points en contact, machine a axe couple
     # (limite #62, step10.reorient_coupled_tiers), APRES step9 et avant
     # step10.run ; step9 est rejoue apres chaque tour. Opt-in (None).
-    coupled_reorientation_tiers: Optional[tuple] = None      # ex. (45.0, 90.0, 181.0)
+    coupled_reorientation_tiers: Optional[tuple[float, ...]] = None      # ex. (45.0, 90.0, 181.0)
     coupled_reorientation_rounds: int = 3
     machine_profile: MachineProfile = field(default_factory=_default_machine_profile)
     # Routage des trajets a vide longs (CLAUDE.md limite #46) : palliatif
@@ -275,6 +318,13 @@ class PipelineParams:
     # a vide long contre l'index de matiere imprimee), jamais impose sans
     # activation explicite de l'appelant.
     travel_routing: Optional[TravelRoutingParams] = None
+    # step5b (2026-10-01) : ordre des couches contraint par la tete - la
+    # couche sur laquelle la tete toucherait une autre passe avant elle.
+    # ACTIVE par defaut (CLAUDE.md, limite #67) : collisions de la vraie tete
+    # death 41,6 -> 1,2 %, turkish 53,6 -> 0,6 % ; matiere sans appui turkish
+    # 0,70 -> 0,25 % mais death 0,227 -> 0,311 % (A VALIDER par l'utilisateur) ;
+    # l_shape et l-triple inchanges. None = ordre de step5 seul.
+    collision_order: Optional[CollisionOrderParams] = field(default_factory=CollisionOrderParams)
     # Verification du support de depot sur la trajectoire machine reelle
     # (voir pipeline/step9b_support_check.py) : quelle matiere est extrudee
     # sans rien de deja imprime en dessous, et s'agit-il d'un defaut d'ORDRE
@@ -283,6 +333,15 @@ class PipelineParams:
     # travel_routing : le mecanisme ajoute un cout non nul (une passe sur
     # tous les points en extrusion), jamais impose sans activation explicite.
     support_check: Optional[SupportCheckParams] = None
+    # Directions cibles de step4 projetees sur les inclinaisons ATTEIGNABLES
+    # quand le premier axe est couple a la position (machine actuelle, limite
+    # #59) : voir FieldSolverParams.radial_tilt_origin et limite #64. ACTIVE
+    # par defaut apres mesure sur les QUATRE modeles de res/test_models/
+    # (matiere sans appui : l_shape -9 %, l-triple -45 %, death -23 %,
+    # turkish -30 % ; ecart tete/normale median 16-49 deg -> 3-6 deg).
+    # Sans effet sur une machine a C libre (position_coupled_axes vide) ou si
+    # radial_tilt_origin est deja renseigne.
+    reachable_tilt_from_machine: bool = True
 
 
 @dataclass
@@ -325,6 +384,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
     LayerExtractionError, FieldSolverError, SchedulingError,
     ToolpathResolutionError remontent telles quelles a l'appelant.
     """
+    check_model_fits_machine(mesh_path, params.machine_profile)
     junction_zones = None
     if params.junction_refinement_resolution is not None:
         # Passe LEGERE, jetable : mesh + step2 (overhang) + step3
@@ -394,11 +454,16 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
 
     print("[main] Etape 4/10 - resolution du champ scalaire")
     scalar_field = field_solver_run(
-        tet_mesh, mesh_data, overhang_map, region_dependency_graph, params.constraints, params.field_solver
+        tet_mesh, mesh_data, overhang_map, region_dependency_graph, params.constraints,
+        _effective_field_solver_params(params)
     )
 
     print("[main] Etape 5/10 - extraction des couches courbes")
     layers = layers_run(tet_mesh, mesh_data, scalar_field, region_dependency_graph, params.layers)
+    if params.collision_order is not None:
+        layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)
+        print(f"[main]   ordre contraint par la tete : {order_report.constraints} contrainte(s), "
+              f"{order_report.moved_layers} couche(s) deplacee(s), {order_report.cycle_breaks} violee(s)")
     print(f"[main]   {len(layers)} couche(s)")
 
     print("[main] Etape 6/10 - remplissage 2D par couche")
@@ -412,7 +477,10 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
 
     print("[main] Etape 8/10 - trajectoire machine (resolution IK)")
     toolpath, step8_diagnostics = machine_toolpath_run(
-        colored_layers, schedule, params.machine_profile, params.machine_toolpath
+        colored_layers, schedule, params.machine_profile, params.machine_toolpath,
+        direction_field=(gradient_direction_field(tet_mesh, scalar_field,
+                                                  nodal=params.machine_toolpath.per_point_normal_nodal)
+                         if params.machine_toolpath.per_point_normal else None),
     )
     print(
         f"[main]   {len(toolpath.points)} point(s) de trajectoire, "

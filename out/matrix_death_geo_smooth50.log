@@ -1,0 +1,37 @@
+[preview] Etape 1/8 - ingestion : res/test_models/death.stl
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire
+[preview] Etape 5/8 - extraction des couches courbes
+[preview]   242 couche(s)
+[preview] Etape 6/8 - remplissage 2D par couche
+[preview] Etape 7/8 - couleur + ordonnancement
+[preview]   242 passe(s) d'impression
+[preview] Etape 8/8 - trajectoire machine (resolution IK)
+[preview]   293036 point(s) de trajectoire, 169165 orientation(s) inatteignable(s)
+[preview] Etape 8c/8 - verification du support de depot
+[preview]   2197 depot(s) sans support (0.81% de la matiere extrudee) : 2117 defaut(s) d'ordre, 0 surplomb(s) reel(s)
+[preview] step1->step8 termine en 72.7s
+[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)
+{
+ "model": "death.stl",
+ "variant": "geo_smooth50",
+ "resolution": 0.8,
+ "layer_height_base": 0.2,
+ "apex_use_cpp": "1",
+ "seconds": 72.7,
+ "layers": 242,
+ "points": 293036,
+ "layer_thickness_measured": 0.2489,
+ "tested": 270842,
+ "unsupported": 2197,
+ "unsupported_fraction": 0.008111740424306423,
+ "ordering_defects": 2117,
+ "tilt_resolved": 80,
+ "true_overhang": 0,
+ "travel_total_mm": 98363.6,
+ "travel_max_mm": 60.41,
+ "step8_diagnostics": 169165,
+ "b_jumps_gt10": 3,
+ "time": "2026-09-30 21:29:38"
+}

@@ -1,0 +1,16 @@
+[preview] Etape 1/8 - ingestion : res/test_models/death.stl
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire
+[preview] Etape 5/8 - extraction des couches courbes
+[preview]   254 couche(s)
+[preview] Etape 6/8 - remplissage 2D par couche
+[preview] Etape 7/8 - couleur + ordonnancement
+[preview]   254 passe(s) d'impression
+[preview] Etape 8/8 - trajectoire machine (resolution IK)
+[preview]   407456 point(s) de trajectoire, 0 orientation(s) inatteignable(s)
+[preview] step1->step8 termine en 13.7s
+[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)
+death.stl : rapide 27855 points signales sur 66923 echantillonnes (16 s)
+  exact sur 300 signales + 300 non signales (346 s) : faux positifs 0, faux negatifs 0
+  penetration exact - rapide : min 0.000 max 0.073 mm ; faux positifs, profondeur rapide max 0.000 mm ; faux negatifs, profondeur exacte max 0.000 mm

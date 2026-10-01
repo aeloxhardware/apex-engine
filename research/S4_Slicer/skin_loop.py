@@ -12,6 +12,7 @@ Usage (venv d'Apex) :
       [--max-iter=3] [--trim-radius=2.0] [--head-tolerance=45] [--pattern=rectilinear]
 Journaux : output_models/skin_loop_<etape>_it<n>.log
 """
+import safe_io  # noqa: F401 -- ecritures robustes aux verrous transitoires
 import json
 import os
 import subprocess

@@ -5,12 +5,14 @@ file_io/gcode_export.py d'Apex.
 Usage (venv d'Apex) :
   APEX_USE_CPP=1 ../../.venv/Scripts/python.exe -u export_gcode.py <modele> <passe> [variante]
       [--print-speed=25] [--travel-speed=80] [--retract=0.8] [--retract-speed=35] [--clearance=1.0]
+      [--tilt-sign=1|-1] [--z-reference=tip|pivot] [--no-tip-at-bead-top] [--strict]
 Sortie : output_models/loop_<modele><variante>_pass<k>.gcode + rapport.
 Degagements controles : points de l'axe de la tete (pointe -> pivot) contre
 la matiere deja deposee (arbre k-d, contact franc = rayon de cordon) ;
 hauteur mini de la VRAIE tete (aetheris-4) pour refuser un degagement vers le
 plateau.
 """
+import safe_io  # noqa: F401 -- ecritures robustes aux verrous transitoires
 import os
 import pickle
 import sys
@@ -39,7 +41,13 @@ def main():
                          travel_speed=float(flags.get("--travel-speed", 80)),
                          retract_length=float(flags.get("--retract", 0.8)),
                          retract_speed=float(flags.get("--retract-speed", 35)),
-                         travel_clearance=float(flags.get("--clearance", 1.0)))
+                         travel_clearance=float(flags.get("--clearance", 1.0)),
+                         # convention du modele de tete (limite #61, EN ATTENTE de
+                         # l'utilisateur) : regenerer en une commande une fois tranchee
+                         tilt_sign=float(flags.get("--tilt-sign", 1.0)),
+                         z_reference=flags.get("--z-reference", "tip"),
+                         tip_at_bead_top="--no-tip-at-bead-top" not in sys.argv,
+                         strict="--strict" in sys.argv)
     t0 = time.time()
     sim = s9.CollisionSimParams(path_sampling_step=2.0, safety_margin=params.platform_margin)
     head = s9._filter_nozzle_contact_zone(s9._surface_sample_points(machine.nozzle_model, sim.toolhead_sample_spacing),

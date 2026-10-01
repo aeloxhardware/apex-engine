@@ -1,7 +1,7 @@
 {
 	"InstallScripts" : 
 	[
-		"R:/APEX_NEW_VERSION/slicer_engine/cpp/build/cmake_install.cmake"
+		"R:/APEX_NEW_VERSION/slicer_alg/cpp/build/cmake_install.cmake"
 	],
 	"Parallel" : false
 }

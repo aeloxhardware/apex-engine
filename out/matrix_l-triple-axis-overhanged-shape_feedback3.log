@@ -1,0 +1,37 @@
+[preview] Etape 1/8 - ingestion : res/test_models/l-triple-axis-overhanged-shape.stl
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire
+[preview] Etape 5/8 - extraction des couches courbes
+[preview]   143 couche(s)
+[preview] Etape 6/8 - remplissage 2D par couche
+[preview] Etape 7/8 - couleur + ordonnancement
+[preview]   143 passe(s) d'impression
+[preview] Etape 8/8 - trajectoire machine (resolution IK)
+[preview]   27935 point(s) de trajectoire, 27935 orientation(s) inatteignable(s)
+[preview] Etape 8c/8 - verification du support de depot
+[preview]   1146 depot(s) sans support (4.72% de la matiere extrudee) : 7 defaut(s) d'ordre, 0 surplomb(s) reel(s)
+[preview] step1->step8 termine en 4.7s
+[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)
+{
+ "model": "l-triple-axis-overhanged-shape.stl",
+ "variant": "feedback3",
+ "resolution": 0.8,
+ "layer_height_base": 0.2,
+ "apex_use_cpp": "1",
+ "seconds": 4.7,
+ "layers": 143,
+ "points": 27935,
+ "layer_thickness_measured": 0.2564,
+ "tested": 24267,
+ "unsupported": 1146,
+ "unsupported_fraction": 0.047224626035356654,
+ "ordering_defects": 7,
+ "tilt_resolved": 1139,
+ "true_overhang": 0,
+ "travel_total_mm": 11922.7,
+ "travel_max_mm": 25.19,
+ "step8_diagnostics": 27935,
+ "b_jumps_gt10": 1046,
+ "time": "2026-09-30 21:21:21"
+}

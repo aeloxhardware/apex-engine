@@ -87,6 +87,96 @@ class MeshIngestError(Exception):
     """Levee quand le mesh source ne peut pas etre charge ou exploite."""
 
 
+# Tentative finale de TetGen lancee en parallele de la sonde de
+# `_finish_geometric_resolution` (voir `_tetrahedralize`). Interrupteur de
+# module pour les tests d'equivalence (resultat identique dans les deux cas).
+_SPECULATIVE_TETGEN = True
+
+
+class ModelTooLargeError(MeshIngestError):
+    """Le modele ne peut tenir sur le plateau DANS AUCUNE position (CLAUDE.md,
+    feuille de route « refuser dès l'entrée un modèle trop grand »).
+    `footprint_radius` et `platform_radius` en mm, pour l'affichage UI."""
+
+    def __init__(self, footprint_radius: float, platform_radius: float, height: float | None = None,
+                 max_height: float | None = None):
+        self.footprint_radius = footprint_radius
+        self.platform_radius = platform_radius
+        self.height = height
+        self.max_height = max_height
+        parts = []
+        if footprint_radius > platform_radius:
+            parts.append(f"empreinte au sol de rayon {footprint_radius:.1f} mm > plateau de rayon "
+                         f"{platform_radius:.1f} mm")
+        if height is not None and max_height is not None and height > max_height:
+            parts.append(f"hauteur {height:.1f} mm > hauteur utile {max_height:.1f} mm")
+        super().__init__("modele trop grand pour la machine : " + " ; ".join(parts))
+
+
+def _min_enclosing_circle(points: np.ndarray) -> tuple[np.ndarray, float]:
+    """Plus petit cercle englobant de points 2D (Welzl iteratif, ordre
+    aleatoire a graine fixe : resultat deterministe). Exact a l'arrondi pres."""
+    pts = np.unique(np.asarray(points, dtype=float), axis=0)
+    if len(pts) == 0:
+        return np.zeros(2), 0.0
+    rng = np.random.default_rng(0)
+    pts = pts[rng.permutation(len(pts))]
+
+    def circle2(a, b):
+        c = (a + b) / 2.0
+        return c, float(np.linalg.norm(a - c))
+
+    def circle3(a, b, c):
+        d = 2.0 * (a[0] * (b[1] - c[1]) + b[0] * (c[1] - a[1]) + c[0] * (a[1] - b[1]))
+        if abs(d) < 1e-15:  # colineaires : le cercle du plus grand segment
+            best = max((circle2(a, b), circle2(a, c), circle2(b, c)), key=lambda t: t[1])
+            return best
+        ux = ((a @ a) * (b[1] - c[1]) + (b @ b) * (c[1] - a[1]) + (c @ c) * (a[1] - b[1])) / d
+        uy = ((a @ a) * (c[0] - b[0]) + (b @ b) * (a[0] - c[0]) + (c @ c) * (b[0] - a[0])) / d
+        center = np.array([ux, uy])
+        return center, float(np.linalg.norm(a - center))
+
+    def inside(c, r, p):
+        return np.linalg.norm(p - c) <= r * (1.0 + 1e-12) + 1e-12
+
+    c, r = pts[0].copy(), 0.0
+    for i in range(1, len(pts)):
+        if inside(c, r, pts[i]):
+            continue
+        c, r = pts[i].copy(), 0.0
+        for j in range(i):
+            if inside(c, r, pts[j]):
+                continue
+            c, r = circle2(pts[i], pts[j])
+            for k in range(j):
+                if not inside(c, r, pts[k]):
+                    c, r = circle3(pts[i], pts[j], pts[k])
+    return c, r
+
+
+def check_fits_platform(vertices: np.ndarray, platform_radius: float | None,
+                        max_height: float | None = None) -> float:
+    """Leve ModelTooLargeError si le modele ne tient sur le plateau dans aucune
+    position : son empreinte XY (plus petit cercle englobant, calcule sur
+    l'enveloppe convexe) depasse le rayon du plateau, ou sa hauteur depasse la
+    hauteur utile. Independant du PLACEMENT (decide par l'interface) : ne
+    refuse que l'impossible. Rend le rayon d'empreinte (mm)."""
+    v = np.asarray(vertices, dtype=float)
+    if platform_radius is None or len(v) == 0:
+        return 0.0
+    xy = v[:, :2]
+    try:
+        from scipy.spatial import ConvexHull
+        xy = xy[ConvexHull(xy).vertices]
+    except Exception:  # points colineaires/degeneres : cercle sur tous les points
+        pass
+    _, radius = _min_enclosing_circle(xy)
+    height = float(np.ptp(v[:, 2]))
+    if radius > platform_radius or (max_height is not None and height > max_height):
+        raise ModelTooLargeError(radius, float(platform_radius), height, max_height)
+    return radius
+
+
 # Tolerance du test de separation par plan (_triangles_cross) : en dessous,
 # un sommet est considere SUR le plan de l'autre triangle, pas d'un cote.
 # Deux faces adjacentes coplanaires se toucheraient sinon a tort.
@@ -1466,15 +1556,20 @@ def _finish_geometric_resolution(
     current = resolved
     for _probe in range(_GEOMETRIC_RESOLUTION_MAX_TETGEN_PROBES):
         try:
-            _tetrahedralize_once_isolated(
+            probe = _tetrahedralize_once_isolated(
                 current, resolution, None, 5.0, 0.0, None, None,
             )
-            return current  # deja verifie tetraedrisable tel quel (sans raffinement)
+            # deja verifie tetraedrisable tel quel (sans raffinement) ; le
+            # TetMesh de la sonde est RENDU : la tentative « sans raffinement
+            # plateau » de `_tetrahedralize` refait exactement ce calcul
+            # (meme maillage, meme resolution ; marge et platform_z ignores
+            # sans raffinement). Mesure turkish.stl : 7,26 s economisees.
+            return current, probe
         except _TetgenCrashError:
-            return current  # rien a cibler depuis un crash natif
+            return current, None  # rien a cibler depuis un crash natif
         except RuntimeError as exc:
             if not _is_recoverable_tetgen_error(exc):
-                return current
+                return current, None
             # `exc.tetgen_output` (capture depuis la VRAIE tentative) s'est
             # mesuree peu fiable - tronquee avant les avertissements
             # nommes eux-memes sur ce chemin de code precis (voir
@@ -1484,21 +1579,21 @@ def _finish_geometric_resolution(
             tetgen_output = _probe_tetgen_conflicts(current)
             conflict_vertices = _parse_tetgen_conflict_vertices(tetgen_output)
             if not conflict_vertices:
-                return current
+                return current, None
             faces = np.asarray(current.faces)
             seed_faces = [
                 i for i, face in enumerate(faces)
                 if len(conflict_vertices.intersection(int(v) for v in face)) >= 2
             ]
             if not seed_faces:
-                return current
+                return current, None
             repaired = _repair_local_self_intersections(
                 current, extra_seed_faces=seed_faces, require_euler_preserved=False,
             )
             if repaired is None:
-                return current
+                return current, None
             current = repaired
-    return current
+    return current, None
 
 
 def _tetrahedralize(
@@ -1594,6 +1689,8 @@ def _tetrahedralize(
     # pas encore a lui seul a faire accepter ce modele precis (recouvrements
     # coplanaires non traites) - reste neanmoins utile en cascade, avant le
     # repli plus destructeur pymeshfix.
+    speculative_attempts: dict = {}
+    probe_results: dict = {}
     resolved = resolve_self_intersections(mesh)
     resolved_collapsed = False
     if resolved is not None and len(resolved.faces) < 0.5 * len(mesh.faces):
@@ -1629,7 +1726,30 @@ def _tetrahedralize(
         # segment nomme (2 faces partageant le sommet 890) restait apres
         # le nettoyage SAT ci-dessus ; cible et repare en 1 iteration
         # supplementaire, TetGen aboutit alors sur la geometrie COMPLETE.
-        resolved = _finish_geometric_resolution(resolved, resolution)
+        # Execution SPECULATIVE (session du 2026-10-01) : la sonde de
+        # `_finish_geometric_resolution` est une vraie tetraedrisation SANS
+        # raffinement, jetee ; la tentative suivante (AVEC raffinement) est
+        # un autre calcul. Mesure sur death.stl : 6,55 s + 6,85 s en serie.
+        # Quand la sonde reussit (cas nominal), elle rend `resolved` INTACT :
+        # la tentative finale porte alors sur ce meme objet. On la lance donc
+        # EN PARALLELE de la sonde (deux sous-processus TetGen) et on ne
+        # garde son issue que si la sonde n'a rien modifie - resultat
+        # identique dans tous les cas, temps = max au lieu de somme.
+        speculative = None
+        if _SPECULATIVE_TETGEN and not junction_zones:
+            import concurrent.futures as _cf
+            _executor = _cf.ThreadPoolExecutor(max_workers=1)
+            speculative = _executor.submit(
+                _tetrahedralize_once_isolated, resolved, resolution, near_platform_resolution,
+                near_platform_margin, platform_z, junction_zones, junction_refinement_resolution,
+            )
+            _executor.shutdown(wait=False)
+        before_finish = resolved
+        resolved, probe_tet_mesh = _finish_geometric_resolution(resolved, resolution)
+        if probe_tet_mesh is not None and not junction_zones:
+            probe_results[id(resolved)] = probe_tet_mesh
+        if speculative is not None and resolved is before_finish:
+            speculative_attempts[id(resolved)] = speculative
         attempts.append(("apres resolution geometrique", resolved, near_platform_resolution))
 
     # Meme garde-fou anti-effondrement que `_clean_and_repair` (limite #51) :
@@ -1686,6 +1806,11 @@ def _tetrahedralize(
     last_error: Optional[Exception] = None
     for _label, candidate, npr in attempts:
         try:
+            future = speculative_attempts.get(id(candidate)) if npr == near_platform_resolution else None
+            if future is not None:
+                return future.result()
+            if npr is None and id(candidate) in probe_results:
+                return probe_results[id(candidate)]
             return _tetrahedralize_once_isolated(
                 candidate, resolution, npr, near_platform_margin, platform_z,
                 junction_zones, junction_refinement_resolution,

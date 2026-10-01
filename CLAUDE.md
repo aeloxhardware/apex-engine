@@ -169,6 +169,7 @@ slicer_engine/
 │   └── build_cpp.py                 # FAIT — construit le noyau natif (localise vcvars64.bat via
 │                                     #   vswhere, puis cmake+ninja). Une seule commande.
 ├── cpp/                             # NOYAU NATIF — portage en cours, voir limite #56
+│   ├── third_party/clipper2/        # Clipper2 2.0.1 (BSL-1.0), offsets polygonaux (pas 15)
 │   ├── third_party/eigen/           # Eigen 3.4.0 (MPL-2.0), header-only, VERSIONNE.
 │   │                                 #   Introduit au pas 7 seulement, quand step4 en a eu besoin.
 │   ├── CMakeLists.txt               # FAIT — C++20, /O2, /fp:precise (JAMAIS /fp:fast : il
@@ -202,6 +203,9 @@ slicer_engine/
 │   │   ├── interpolate.hpp          # FAIT — pas 10 : pondération inverse-distance de
 │   │   │                             #   l'offset hors-plan (step6), ×2,8 — DERNIER poste
 │   │   │                             #   Python isolé visible au profil hors TetGen
+│   │   ├── toolpath2d.hpp           # FAIT — pas 15 : parois + remplissage d'une zone (step6),
+│   │   │                             #   Clipper2, tolérance déclarée, opt-in APEX_NATIVE_FILL=1
+│   │   ├── (isosurface, geometry2d, past_material, gcode_export, params : pas 11-24, limite #56)
 │   │   └── internal/
 │   │       └── triangle_aabb_bvh.hpp  # FAIT — BVH interne partagé (pas 8+9), sans
 │   │                                    #   contrat d'équivalence (structure privée)
@@ -250,6 +254,7 @@ slicer_engine/
 │   ├── step3_segmentation.py        # FAIT — tests pytest formalisés (9 tests)
 │   ├── step4_field_solver.py        # FAIT — résolution FEM du champ scalaire (14 tests)
 │   ├── step5_layers.py              # FAIT — extraction des couches courbes (14 tests)
+│   ├── step5b_collision_order.py    # FAIT — ordre des couches contraint par la tête (limite #67)
 │   ├── step6_toolpath2d.py          # FAIT — remplissage 2D par couche (11 tests)
 │   ├── step7_scheduling.py          # FAIT — couleur + ordonnancement trous/purges (19 tests)
 │   ├── step8_machine_toolpath.py    # FAIT — resolution IK generique N-axes (16 tests)
@@ -310,9 +315,10 @@ slicer_engine/
                                       #   (pas de compilateur requis pour lancer la suite).
 ```
 
-**État global (2026-09-30) : 402 tests réussis dans les deux positions de `APEX_USE_CPP`.**
-Avec `=1`, 3 tests de plus (`MeshDistance`, T9) se sautent tant que le module C++ n'est pas
-reconstruit. Avant : 386/386 tests passants dans les deux positions de `APEX_USE_CPP` (step1 à step10, plus les étapes intermédiaires step1b/step8b/step9b, core/geometry_utils.py, et les 56 tests d'équivalence du portage C++). Ce compteur a longtemps affiché 166, puis 272, puis 318, puis 331, puis 340, puis 344, puis 351, puis 357, puis 362, puis 365, puis 370, puis 375, puis 385, alors que la suite en comptait déjà bien davantage : le remettre à jour à chaque session, ou ne pas s'y fier.
+**État global (2026-10-01, session autonome) : 461/461 dans les deux positions de
+`APEX_USE_CPP`**, aucun test sauté (module `cpp/lib` reconstruit avec les pas 11 à 24). Le
+2026-09-30 : 406/406. Auparavant : 402 dans les deux positions, les 3
+tests `MeshDistance` se sautant tant que le module n'était pas reconstruit. Avant : 386/386 tests passants dans les deux positions de `APEX_USE_CPP` (step1 à step10, plus les étapes intermédiaires step1b/step8b/step9b, core/geometry_utils.py, et les 56 tests d'équivalence du portage C++). Ce compteur a longtemps affiché 166, puis 272, puis 318, puis 331, puis 340, puis 344, puis 351, puis 357, puis 362, puis 365, puis 370, puis 375, puis 385, alors que la suite en comptait déjà bien davantage : le remettre à jour à chaque session, ou ne pas s'y fier.
 
 **Un noyau natif C++ est en cours d'intégration** (`cpp/`, voir limite #56) :
 `_PrintedGeometryIndex` et la cinématique inverse N axes (step8) y sont déjà
@@ -2025,12 +2031,20 @@ pour affichage/validation avant export G-code.
         atteignent ;
       - ne lisse jamais l'angle couplé, car le lisser déplacerait le point
         atteint.
-    - Ce chemin est en Python dans les deux positions de `APEX_USE_CPP`.
+    - Ce chemin était en Python dans les deux positions de `APEX_USE_CPP`
+      (84 s sur death) ; il passe par l'IK native depuis le pas 17 (limite #56).
     - `main._default_machine_profile` décrit désormais la machine actuelle.
 
     **Reste non traité, à reprendre** : les directions candidates de step3
-    et step7, ainsi que la réorientation de step10, parcourent encore toute
-    la sphère sans tenir compte de la position.
+    et step7 parcourent encore toute la sphère sans tenir compte de la
+    position. **Step10 corrigé le 2026-10-01** : en machine couplée,
+    `_try_local_reorientation` ne propose plus que des candidats à C FIGÉ
+    (`_coupled_candidates`, grille 4× plus fine sur B seul) — la grille
+    produit complète proposait des C inexécutables. Et quand step9 est en
+    mode rapide (`fast_kdtree`), step10 revérifie avec le même contrôleur
+    (`_fast_checker`) au lieu de l'index exact par capsules (incohérence qui
+    rendait step10 interminable sur death.stl). Côté step4, les directions
+    cibles sont désormais projetées sur le demi-plan atteignable (limite #64).
 
     **Limites de la tête et troncature des angles (même jour).**
     L'utilisateur a donné les limites de B : 750 °/s et 300 °/s². Elles sont
@@ -2082,9 +2096,14 @@ pour affichage/validation avant export G-code.
       - Y est déroulé, et hérité au centre.
     - **Pivot** : le firmware commande le pivot de B, à 45 mm de la pointe.
       On a X = R + L sin B et Z = z + L (cos B − 1), avec comme référence la
-      pointe à B = 0. **À confirmer par l'utilisateur** : si le zéro Z du
-      firmware est le pivot, il faut ajouter 45 mm. Le signe est vérifié par
-      un test contre `step9._positioned_toolhead_vertices`.
+      pointe à B = 0. **Confirmé par l'utilisateur (2026-09-30)** : le zéro Z
+      du firmware est atteint quand la buse touche le plateau, donc aucun
+      décalage de 45 mm à ajouter. Le signe est vérifié par un test contre
+      `step9._positioned_toolhead_vertices`.
+    - **Vitesses validées par l'utilisateur (2026-09-30)** : impression
+      25 mm/s, trajets à vide 80 mm/s, 195 °C.
+    - **GPU : Vulkan** (décision de l'utilisateur, 2026-09-30), pour couvrir
+      aussi macOS et les cartes AMD/Intel.
     - **F** est recalculé par segment pour garder la vitesse de la pointe (le
       firmware traite Y et B comme linéaires), puis ralenti par `feed_plan`
       aux limites de vitesse et d'accélération de B.
@@ -2101,6 +2120,28 @@ pour affichage/validation avant export G-code.
       (`scripts/preview_gcode_file.py`) et au contrôle aller-retour.
     - Tests : `tests/test_gcode_export.py`.
 
+    **Suite du 2026-10-01 (session autonome)** :
+    - **Le firmware RRF ne fait AUCUNE cinématique** (utilisateur) : ni
+      polaire, ni pivot. Tout est dans le slicer, pour qu'une nouvelle machine
+      ne demande jamais de mise à jour d'imprimante.
+    - **Divergence NON RÉSOLUE avec la prévisualisation UX de l'utilisateur**
+      (qui fait référence, conçue pour la machine) : elle montre des
+      trajectoires sous le plateau et qui dépassent sur le Benchy, là où le
+      modèle ci-dessus place la pointe à 0,04 mm au plus bas et la vraie tête
+      jamais sous 1 mm. Lire X/Z comme la pointe (aucune compensation) reproduit
+      exactement ses symptômes (outil `scripts/gcode_tilt_profile.py`). **Aucun
+      G-code ne doit être imprimé avant que la convention soit tranchée.**
+    - Modèle de tête **paramétré** en attendant : `GcodeParams.tilt_sign`
+      (sens du déport radial du pivot) et `z_reference` (`"tip"` : défaut
+      d'origine ; `"pivot"` : Z firmware = hauteur du pivot).
+    - **Pointe au sommet du cordon** (`tip_at_bead_top`, défaut vrai) : step5
+      place la première isovaleur à v_min + δ/2, donc chaque point de
+      trajectoire est au MILIEU de sa couche ; la pointe est relevée de h/2 le
+      long de l'axe de la tête. Fait géométrique, pas un réglage.
+    - **Garde-fous** dans `GcodeReport` (pointe et tête les plus basses,
+      étendues X/Y/Z firmware — Y cumule jusqu'à 35 tours sur le Benchy) ;
+      `strict` refuse d'écrire un fichier dont la pointe passe sous 0.
+
 62. **step9 : contrôle rapide par arbre k-d (`CollisionSimParams.fast_kdtree`,
     opt-in, 2026-09-30).** Il est porté de la recherche (`full_step89.py
     --fast`, où il ramenait 30 min à environ 1 min sur le Benchy).
@@ -2116,6 +2157,17 @@ pour affichage/validation avant export G-code.
       (0,125 mm), à couvrir par la marge de 1 mm.
     - Désactivé par défaut tant qu'il n'est pas mesuré sur les quatre modèles
       de `res/test_models/`.
+    - **Mesures contre l'exact (2026-10-01)** : l-triple, trajectoire entière,
+      680 événements communs sur 681 (le manquant à 0,000 mm), 1 s contre 552 s ;
+      l_shape, 0 événement des deux côtés ; turkish, par ÉCHANTILLON
+      (`scripts/compare_step9_sampled.py` : 1 000 points signalés + 1 000 non
+      signalés revérifiés en exact), **0 faux positif, 0 faux négatif**, écart
+      de pénétration ≤ 0,087 mm (borne 0,125), 41 s pour la trajectoire entière
+      contre 6 684 s pour les seuls 2 000 points exacts. L'exact sur la
+      trajectoire entière de turkish ou death prend plusieurs heures.
+      death, par échantillon (300 + 300) : 0 faux positif, 0 faux négatif,
+      écart ≤ 0,073 mm, 16 s. **Activé par défaut dans `main.PipelineParams`**
+      (le défaut de la dataclass `CollisionSimParams` reste `False`).
     - **Pas encore portés** : la borne de B selon la hauteur et la
       réorientation par paliers de la recherche. Leur place est l'étape 10,
       puisqu'elles modifient la trajectoire.
@@ -2139,6 +2191,216 @@ pour affichage/validation avant export G-code.
 
     **Limite connue** : une alternance PARFAITE (0/14/0/14) résiste à un
     médian. Les données réelles montrent surtout des pics isolés.
+
+    **Mesuré sur le pipeline FEM par défaut (2026-10-01)** : le médian 9 ne
+    change presque rien (l_shape 708 → 671 sauts de B > 10°, temps réel
+    0,157 → 0,154 h ; death, turkish, l-triple identiques). Raison : 597 des
+    708 sauts de l_shape (84 %) sont aux TRAJETS À VIDE (changement de couche),
+    pas des oscillations ; les 111 restants sont près de l'axe du plateau
+    (rayon médian 1,4 mm), où C imposé tourne vite. C'est le cas « ne pas
+    centrer les modèles » de la feuille de route, pas un défaut de filtre.
+    Reste opt-in.
+
+64. **Nouvelle référence step9b, mécanismes opt-in tranchés, et les
+    inclinaisons ATTEIGNABLES activées par défaut (session autonome du
+    2026-10-01).** Outil : `scripts/measure_matrix.py <stl> <variante>`, une
+    ligne JSON par mesure (`out/measure_matrix*.jsonl`) : step9b, épaisseur de
+    couche RÉELLE mesurée, diagnostics step8, sauts de B, **écart tête /
+    normale locale** (cinématique directe des angles résolus contre +∇φ du
+    tétraèdre le plus proche : métrique PHYSIQUE, indépendante de la cible que
+    step8 s'est donnée) et **temps réel estimé** (`feed_plan`, limites de B).
+
+    **Référence step9b @ 0,8, après les limites #57/#58** (l'ancienne,
+    0,466578 %, est obsolète) : l_shape 3,337 %, l-triple 4,821 %, death
+    0,346 %, turkish 1,033 %.
+
+    **Découverte : le défaut d'orientation du pipeline par défaut.** Avec la
+    cinématique couplée (limite #59), la tête déposait en moyenne loin de la
+    normale de ses propres couches : écart médian 28,7° (l_shape), 49,1°
+    (l-triple), 16,4° (death), 28,2° (turkish), jusqu'à 55 % des points au-delà
+    de 45°. Deux causes, mesurées séparément :
+    - step4 visait des directions qui penchent en TANGENTIEL ou vers le
+      CENTRE, inatteignables : B ne penche que dans le plan radial, vers +R ;
+    - step8 visait UNE normale par couche (plan moyen), qui n'est dans le plan
+      radial que de quelques points d'une couche qui fait le tour du plateau.
+
+    **Mécanismes et verdicts (4 modèles)** :
+
+    | variante | matière sans appui | verdict |
+    |---|---|---|
+    | `free_axis_median_window=9` seul | inchangée (orientation seule) | opt-in |
+    | `support_feedback_iterations=3` à épaisseur égalisée | death −53 %, l_shape −3 %, l-triple −2 %, **turkish +6 %** | opt-in |
+    | `support_feedback_iterations=50` | dégrade 3 modèles | opt-in |
+    | `branch_cut_threshold=0.05` | **death ×1,94** | opt-in (retrait possible) |
+    | `use_geodesic_directions` + lissage 50 | **death ×2,3** | opt-in (confirme #52) |
+    | **`radial_tilt_origin`** (projection sur le demi-plan radial atteignable) | l_shape −9 %, l-triple −45 %, death −23 %, turkish −30 % | **ACTIVÉ** |
+
+    `radial` améliore la matière sans appui sur les QUATRE modèles, alors même
+    que ses couches sortent plus fines (biais défavorable : turkish 0,29 →
+    0,24 mm, plus proche de la cible 0,2), et ramène l'écart médian tête /
+    normale à 3-6° (au-delà de 45° : 0 à 1,7 %). Coût : temps réel de turkish
+    +15 % (plus de couches) ; les trois autres modèles sont neutres ou plus
+    rapides. Activation : `PipelineParams.reachable_tilt_from_machine = True`
+    (défaut) ; `main._effective_field_solver_params` renseigne
+    `radial_tilt_origin` depuis le profil machine quand `position_coupled_axes
+    == [0]`. Sans effet sur une machine à C libre.
+
+    **Collisions avec la vraie tête (step9 rapide, part des points
+    échantillonnés)**, mesurées APRÈS la décision ci-dessus (critère oublié
+    dans la première matrice) :
+
+    | modèle | sans `radial` | avec `radial` |
+    |---|---:|---:|
+    | l_shape | 0 % | 0 % |
+    | l-triple | 10,5 % | **0 %** |
+    | death | 31,0 % | **41,4 % (dégrade)** |
+    | turkish | 61,3 % (+ 36 contacts plateau) | 53,8 % (0 plateau) |
+
+    Décision maintenue (métrique de référence step9b meilleure sur les 4,
+    collisions meilleures sur 2), **à valider par l'utilisateur** à cause de
+    death. **TRANCHÉ PAR LA MESURE le 2026-10-01, après l'ordre contraint par
+    la tête (limite #67)** : avec / sans `radial`, collisions death 0,13 / 0,35 %,
+    turkish 0,21 / 31 %, l-triple 0 / 15 %, l_shape 0 / 0 ; matière sans appui
+    death 0,22 / 0,36 %, turkish 0,20 / 1,03 %, l-triple 2,7 / 5,5 %, l_shape
+    3,1 / 3,7 %. `radial` gagne partout ; seul coût, le temps réel de turkish
+    (+15 %). Plus rien à valider. Constat plus important que le choix lui-même : **le pipeline FEM
+    par défaut n'est pas imprimable sur death et turkish** dans tous les cas.
+    Diagnostic sur death (échantillon de 3 000 points) : la tête touche, à
+    ~11 mm au-dessus de sa pointe, de la matière déposée ~55 000 points plus
+    tôt et ~9 mm PLUS HAUT que la couche en cours. C'est le défaut d'ORDRE des
+    limites #50 à #54, désormais chiffré en collisions réelles ; la voie Bird
+    de la recherche (0 contact dans le lissage, 0 à 9 dans le corps) est la
+    voie d'impression de ces pièces.
+
+    **Normale par point (step8, opt-in, ARBITRAGE À TRANCHER PAR
+    L'UTILISATEUR)** : `Step8Params.per_point_normal` (gradient local du
+    champ, `gradient_direction_field`) et `per_point_normal_nodal` (variante
+    continue : gradient moyenné aux nœuds, interpolé en barycentrique).
+    Écart médian supplémentaire divisé par 2 (death 6,2 → 3,5°, turkish 3,1 →
+    1,4°), mais temps réel +38 à +130 % : le gradient P1 varie d'un
+    tétraèdre à l'autre et fait osciller B, que le firmware ralentit. Meilleur
+    compromis mesuré : nodal + médian 9 (death 1,76 → 2,43 h, turkish 4,75 →
+    5,59 h). Qualité de dépôt contre temps : aucune mesure ne tranche.
+
+65. **Étape 6 : des trous dans TOUTES les parois, depuis l'activation du
+    découpage en tronçons (corrigé le 2026-10-01, `Step6Params.continuous_rings`,
+    ACTIVÉ par défaut).** Trouvé en portant step6 en C++ (pas 15), parce que la
+    longueur totale dépendait du point de départ des anneaux, ce qui ne devrait
+    pas arriver.
+    - **Cause** : `_split_ring_into_runs` découpe chaque anneau en tronçons
+      monotones à indices DISJOINTS. Le segment qui relie deux tronçons
+      n'appartient à aucun : step8 en fait un trajet à vide. De plus, le
+      contour d'origine n=0 et ses trous sortent OUVERTS de la
+      classification, donc leur segment de fermeture n'est jamais tracé.
+    - **Mesure** (longueur des polylignes, découpées contre non découpées) :
+      **death 7,7 %**, **l_shape 15,7 %** de la longueur perdue au découpage ;
+      fermetures : 0,1 % et 0,85 %.
+    - **Correctif** : chaque tronçon reprend le dernier sommet du précédent
+      (le segment de jonction prend le sens du tronçon suivant, qui reste
+      monotone), et les contours n=0 reçoivent leur point de fermeture.
+      Vérifié : longueur découpée = longueur non découpée + fermetures, à
+      0,000 mm près. Le test historique « aucun point ajouté au découpage »
+      reste vrai sans l'option ; avec elle, un sommet par jonction est
+      volontairement répété.
+    - **step9b, 4 modèles** (`out/measure_continuous.jsonl`) :
+
+      | modèle | longueur extrudée | matière sans appui |
+      |---|---:|---:|
+      | l_shape | 6 946 → 8 324 mm (+20 %) | 3,05 → 3,14 % |
+      | l-triple | 10 819 → 12 433 mm (+15 %) | 2,64 → 2,66 % |
+      | death | 122 920 → 133 441 mm (+8,6 %) | **0,266 → 0,227 %** |
+      | turkish | 325 746 → 352 788 mm (+8,3 %) | **0,721 → 0,702 %** |
+
+      Activé par défaut malgré deux légères hausses : ce n'est pas un réglage
+      mais un défaut physique (parois trouées), et la métrique varie peu.
+    - **Contrôle physique** (`scripts/check_wall_coverage.py [--legacy]`) :
+      part de la bande de parois couverte par les cordons réellement extrudés.
+      l_shape : médiane **84,0 → 98,8 %**, aire non couverte 247 → 19 mm² ;
+      death : **89,1 → 98,5 %**, 2 378 → 347 mm². Le reliquat (~1,5 %) tient aux
+      extrémités plates des cordons et aux zones plus fines que deux parois.
+      Le même script mesure le remplissage (zone intérieure hors recouvrement des
+      parois) : death médiane 22,2 % pour 20 % visés (raccords du zigzag), 2
+      couches sur 174 sous la moitié de la visée ; l_shape 30,5 % (zones
+      étroites). Pas de défaut de remplissage.
+    - Tests : `test_split_ring_shared_vertices_extrude_every_segment`
+      (contrôlé : il échoue sans partage), `test_continuous_rings_closes_original_contour`.
+
+66. **Étape 10 : en mode exact, aucune réorientation ne pouvait réussir
+    (corrigé le 2026-10-01).** `_collisions_at_points` (revérification) et
+    `_build_reorientation_context` (évaluation des candidats) échantillonnaient
+    la tête SANS `_filter_nozzle_contact_zone`, contrairement à step9. La
+    pointe touchait donc toujours le cordon qu'elle dépose, et tout point testé
+    était déclaré en collision. Conséquence : en mode exact (le mode par
+    défaut de `CollisionSimParams`), chaque collision finissait en support de
+    secours. Le mode rapide (`_fast_checker`) appliquait déjà le filtre.
+    Trouvé en comparant step9 rapide et exact par échantillon
+    (`scripts/compare_step9_sampled.py`) : l'exact via step10 signalait 300
+    points sur 300 là où step9 n'en voyait aucun. Test :
+    `test_exact_recheck_matches_step9_exact_events` (échoue sans le correctif).
+    Les journaux de step10 antérieurs (mode exact) sont à relire : leurs
+    « support de secours » n'en étaient pas forcément.
+
+67. **Étape 5b : ORDRE DES COUCHES CONTRAINT PAR LA TÊTE
+    (`pipeline/step5b_collision_order.py`, 2026-10-01, ACTIVÉ par défaut).
+    Collisions de la vraie tête divisées par 35 (death) et 90 (turkish) : le
+    pipeline FEM devient imprimable sur ces deux modèles, ce qu'aucun des
+    mécanismes des limites #50 à #54 n'avait obtenu.**
+    - **Le circuit ouvert** (même diagnostic que la limite #53) : step5 ordonne
+      les couches par isovaleur et continuité spatiale, sans jamais connaître la
+      tête ; la collision n'est mesurée qu'à l'étape 9, après tout. Sur death,
+      la tête touchait (limite #64) de la matière déposée ~55 000 points plus tôt
+      et ~9 mm plus haut.
+    - **Mécanisme** : la tête est posée (IK de step8, mêmes conventions) sur des
+      points du contour de chaque couche L, tous les 3 mm ; si elle passe à moins
+      de 1 mm de la matière d'une couche M (contour densifié + grille intérieure,
+      un seul arbre k-d pour toutes les couches), alors **L avant M**. Ces
+      contraintes s'ajoutent à l'ordre de step5 par un tri topologique STABLE
+      (sans contrainte, ordre inchangé). Cycle : on place la couche au plus petit
+      nombre de contraintes entrantes restantes (heuristique d'arcs de retour) ;
+      le premier essai (plus petit indice) laissait 13 105 contraintes violées
+      sur turkish et ne gagnait presque rien (53,6 → 47,9 %).
+    - **Mesures** (`measure_matrix.py <stl> corder --collisions`,
+      `out/measure_corder.jsonl`) :
+
+      | modèle | contraintes | couches déplacées | violées | collisions tête | matière sans appui |
+      |---|---:|---:|---:|---:|---:|
+      | death | 25 523 | 127 | 0 | **41,6 → 1,2 %** | 0,227 → 0,311 % |
+      | turkish | 52 416 | 345 | 216 | **53,6 → 0,6 %** | **0,70 → 0,25 %** |
+      | l-triple | 5 224 | 0 | 0 | 0 → 0 | identique |
+      | l_shape | 5 725 | 0 | 0 | 0 → 0 | identique |
+
+      Pipeline complet death (step1→10) : 57 → **35 s**, points en collision
+      27 855 → 827. Coût de l'étape : +3,5 s (death), +12 s (turkish).
+
+      **Avec les contraintes d'APPUI en plus** (`support_depth=0.3`, défaut :
+      M sous un point de L ⇒ M avant L, sauf si la tête impose l'inverse) :
+
+      | modèle | contraintes | violées | collisions tête | matière sans appui |
+      |---|---:|---:|---:|---:|
+      | death | 26 436 | 161 | **41,6 → 0,13 %** | **0,227 → 0,222 %** |
+      | turkish | 53 276 | 277 | **53,6 → 0,21 %** | **0,70 → 0,198 %** |
+      | l-triple | 5 583 | 4 | 0 → 0 | identique (aucune couche déplacée) |
+      | l_shape | 6 068 | 2 | 0 → 0 | identique (aucune couche déplacée) |
+
+      **Plus aucun arbitrage** : aucun des quatre modèles ne se dégrade sur
+      aucune des deux métriques. C'est le défaut retenu.
+      Pipeline complet (step1→10, défauts) : **death 35 s, 88 points en
+      collision** (27 855 avant) ; **turkish 75 s, 322 points** (~76 000 avant).
+    - Sans les contraintes d'appui, death payait +37 % de matière sans appui
+      (0,311 %) : l'arbitrage a disparu en les ajoutant, sans le trancher.
+    - **Leçon, la même qu'en #53** : sept mécanismes jouaient sur les ENTRÉES de
+      l'ordre (direction, ancrage, géodésique) ; celui-ci branche le critère qui
+      compte (la tête passe-t-elle ?) à l'endroit où l'ordre se décide.
+    - **Vérifié image par image** (`out/death_order_step5b.gif`) : pilier, pont,
+      cabine, puis la coque en porte-à-faux EN DERNIER. C'est l'objectif énoncé
+      par l'utilisateur en limite #54 (« imprimer les couches suspendues en
+      dernier »), atteint ici pour +37 % de matière sans appui, là où l'ordre
+      géodésique le payait ×4. Restent quelques petits fragments isolés en l'air
+      à mi-parcours (pointe de la proue), à examiner.
+    - Tests : `tests/test_step5b_collision_order.py` (tri stable, cycle signalé).
+    - **Reste** : 216 contraintes violées sur turkish (cycles réels entre
+      couches en anneau ; découper les couches en morceaux les lèverait) ; la
+      granularité est la couche entière.
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
@@ -3555,6 +3817,11 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
     exigerait de changer le PRÉCONDITIONNEUR (le Jacobi actuel laisse 978
     itérations) ou la formulation, c'est-à-dire un changement algorithmique à
     mesurer sur la métrique step9b, pas un portage.
+    Mesuré le 2026-10-01 sur le système de death @ 0,8 (87 913 inconnues,
+    1,1 M non-zéros) : CG Jacobi **1,25 s** (959 itérations) ; SuperLU direct
+    **110 s** ; CG + ILU de scipy (drop 1e-4) ne converge pas en 10 000
+    itérations (96 s). Le seul candidat restant est le Cholesky incomplet
+    d'Eigen (déjà vendoré), pour ~1 s à gagner sur ~12 : non tenté.
 
     **Eigen 3.4.0** est vendoré dans `cpp/third_party/eigen/` (header-only,
     MPL-2.0 vérifiée à la source) et intégré au build.
@@ -3774,6 +4041,221 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
 
     **365/365 tests dans les deux positions de l'interrupteur** (362 + 3) —
     185,71 s (Python) contre 171,35 s (C++) sur la suite complète.
+
+    ### Pas 11 à 14 (session autonome du 2026-10-01) — portage systématique
+
+    **Pas 11 : contrat de paramètres.** `config/schema.py` dérive des
+    annotations de type l'aller-retour JSON et le schéma JSON de TOUS les
+    paramètres. Aucune liste n'est tenue à la main : un champ ajouté apparaît
+    partout, et `test_every_field_in_schema` le vérifie. `config/params.py`
+    réexporte les dataclasses sans les déplacer (aucun import cassé).
+    `scripts/gen_params.py` écrit `config/params.schema.json` (pour l'UI
+    TypeScript) et `cpp/include/apex/params.hpp` (structures C++, valeurs par
+    défaut comprises, y compris celles propres à `PipelineParams` comme
+    `Step6Params(out_of_plane_interpolation_power=2.0)`).
+    `test_generated_files_up_to_date` échoue si l'on oublie de relancer le
+    générateur. La sonde native `params_defaults_probe` prouve que l'en-tête
+    compile et rend les mêmes défauts que Python. Champs `typing.Any`
+    (`MachineProfile.nozzle_model`) : non sérialisés, `x-runtime-only`. Un
+    champ JSON inconnu est une ERREUR (faute de frappe côté UI jamais ignorée
+    en silence). Deux annotations précisées au passage
+    (`LayerParams.support_rotation_axes: list[RotationAxisSpec]`,
+    `coupled_reorientation_tiers: tuple[float, ...]`).
+
+    **Pas 12** : `point_in_polygon_2d` natif (`apex/geometry2d.hpp`), lancer de
+    rayon transcrit terme à terme, au bit près (0,52 s de Python sur death).
+    Le reste de `geometry_utils` n'a pas d'appelant chaud mesuré.
+
+    **step6 en parallèle par couche** (`_STEP6_THREADS`, défaut min(8,
+    cœurs)) : les couches sont indépendantes, `map` conserve l'ordre, résultat
+    identique au bit (`scripts/check_step_parallel.py`). Gain limité par le
+    GIL : 2,89 → 1,77 s sur death. Step8 : normale de couche mise en cache
+    (29 691 produits vectoriels pour 257 valeurs distinctes).
+
+    **Bilan death @ 0,8 (profilé, même poste)** : 105 s en début de session →
+    **18 s**. TetGen 7,2 s (plancher, désormais seul gros poste), step8 3,6 s,
+    step4 2,7 s, step6 2,6 s, step5 1,2 s.
+
+    **Pas 13 : marching tetrahedra + soudure** (`apex/isosurface.hpp`,
+    `IsosurfaceExtractor`, construit une fois par champ). **Au bit près**, et
+    c'est atteignable ici (pas de réduction, pas de solve) : même formule
+    d'interpolation, orientation au signe d'un produit mixte, même ORDRE de
+    sortie que la version numpy par lots (tous les « caps » puis tous les
+    « quads », 2 triangles consécutifs), soudure par `nearbyint` (arrondi au
+    pair comme `np.round`) et tri lexicographique STABLE (comme
+    `np.unique(return_index)`).
+
+    **Pas 14 : tracé de bord** (`boundary_loops`, remplace
+    `trimesh.outline()`). Reproduit exactement outline() quand le bord est
+    fait de boucles simples (chaque sommet de degré 2) : le DFS de scipy part
+    du plus petit indice, suit son plus petit voisin et se referme, et les
+    boucles sortent par indice de départ croissant (vérifié empiriquement).
+    Sinon, repli sur trimesh POUR CETTE COUCHE seulement
+    (`_NATIVE_OUTLINE_FALLBACKS`).
+
+    Mesure sur modèles réels (`scripts/check_step5_native.py`, même champ,
+    step5 rejoué dans les deux modes) : **contours identiques au bit**,
+    **0 repli**. step5 : l_shape 0,14 → 0,02 s ; death @ 0,8 **2,56 → 1,14 s**.
+    Suite complète : 421/421 dans les deux positions (avant le pas 14).
+
+    **Pas 17 : IK couplée à la position (step8, machine actuelle).** Le
+    profil de death @ 0,8 après le pas 14 était sans appel : **step8 = 84 s sur
+    105 s**, entièrement dans `_resolve_all_axis_angles_coupled`, écrit en
+    Python pur au passage à la cinématique couplée (limite #59) — l'IK native
+    du pas 2 ne servait plus du tout. Réorganisé en trois temps
+    (`_resolve_all_axis_angles_coupled_native`) : C de tous les points d'un
+    coup (sa seule dépendance séquentielle est l'héritage sur l'axe, un
+    remplissage vers l'avant) ; cibles ramenées dans le repère de C par
+    Rodrigues par lots ; axes internes résolus par l'IK NATIVE du pas 2, sans
+    détection de singularité (la boucle Python n'en fait pas pour les axes
+    internes), avec la même reprise au point fautif. Aucune ligne de C++
+    nouvelle. Équivalence : écart max 2e-14 degré sur 20 000 points (93 %
+    bit-identiques ; produits scalaires vectorisés à un ULP près), mêmes
+    diagnostics. ×60 sur la fonction ; **pipeline death 105 s → 25,5 s**
+    (profilé), step8 84 → 4,3 s. TetGen (12,7 s) redevient la moitié du temps.
+
+    **TetGen en parallèle de lui-même (step1, sans C++).** Le « plancher dur »
+    de TetGen cachait deux tétraédrisations complètes EN SÉRIE sur tout modèle
+    qui passe par la résolution des auto-intersections (death.stl) : la sonde
+    de `_finish_geometric_resolution` (qualité, SANS raffinement plateau,
+    6,55 s, résultat jeté) puis la tentative réelle (AVEC raffinement, 6,85 s).
+    Ce ne sont pas les mêmes calculs, donc pas de réutilisation possible. Mais
+    quand la sonde réussit, cas nominal, elle rend le maillage INTACT, et la
+    tentative réelle porte sur ce même objet. Elle est donc lancée EN PARALLÈLE
+    de la sonde (deux sous-processus), et son issue n'est retenue que si la
+    sonde n'a rien modifié : résultat identique dans tous les cas (vérifié au
+    bit sur death, 388 775 tétraèdres ; logique verrouillée par
+    `test_speculative_tetgen_uses_parallel_attempt_only_when_probe_left_mesh_intact`).
+    step1 sur death : **15,6 s → 8,1-8,6 s**. Interrupteur de module
+    `step1_ingest._SPECULATIVE_TETGEN`. Désactivé quand des zones de jonction
+    sont raffinées (non mesuré dans ce cas).
+
+    Second doublon, trouvé sur turkish.stl (7 appels TetGen) : quand la sonde
+    réussit APRÈS une réparation, la cascade essaie le maillage réparé avec
+    raffinement (échec), puis « sans raffinement plateau » — c'est-à-dire
+    exactement le calcul de la sonde (même maillage, même résolution ; marge
+    et `platform_z` ignorés sans raffinement). `_finish_geometric_resolution`
+    rend désormais le TetMesh de sa sonde, réutilisé tel quel (7,26 s).
+    Comparaison au bit contre la version git (`step1` complet) : identique sur
+    death (388 775 tétraèdres) et turkish (452 144) ; step1 **13,8 → 7,7 s**
+    (death) et **20,2 → 12,8 s** (turkish).
+
+    **Pas 19 : contrôle de collision rapide** (`apex/past_material.hpp`,
+    `PastMaterialIndex`). L'algorithme Python de `FastCollisionChecker` (K plus
+    proches voisins scipy, puis boule exacte si la liste est saturée de
+    matière future) calcule EXACTEMENT la distance minimale à la matière déjà
+    déposée dans le rayon : un point passé hors des K plus proches est plus
+    loin qu'eux, et le cas saturé est rattrapé. Le natif calcule ce même
+    minimum avec un arbre k-d dont chaque nœud connaît sa boîte et le PLUS
+    PETIT indice de dépôt de son sous-arbre : un sous-arbre entièrement futur
+    est élagué d'un coup. Identique au bit (300 requêtes aléatoires contre
+    l'algorithme Python), mêmes événements sur death (24 789). step9 rapide :
+    **death 233 → 13,7 s (×17)**, turkish ~36 s pour 141 602 points.
+
+    **Pas 21a : étape 2 entière en natif** (`apex/overhang.hpp`,
+    `compute_overhang_map`) : angles, score de risque, ponts par rayons
+    verticaux (BVH du pas 6), composantes connexes (union-find sur le graphe de
+    TOUTES les faces, comme le Python) et axe principal (vecteur propre de la
+    covariance 3×3, Eigen). Gain de temps nul (0,02 s) : pièce de
+    l'orchestrateur natif. Sur les 4 modèles : surplombs et ponts identiques,
+    risque **au bit**, portée à 2e-16. Le signe de la portée est désormais
+    CANONIQUE des deux côtés (plus grande composante positive), sans effet
+    physique (step6 balaie perpendiculairement). Cas dégénéré assumé : un
+    plafond carré a deux variances égales, tout axe du plan est principal, et
+    LAPACK et Eigen en choisissent des différents ; le test vérifie donc la
+    variance le long des deux axes, pas leur égalité.
+
+    **Pas 21b : étape 3, chemin par défaut, en natif** (`apex/segmentation.hpp`,
+    `segment_default`) : compatibilité face/direction, croissance de régions,
+    direction par région, profondeurs (BFS multi-sources par composante),
+    graphe de dépendances. **IDENTIQUE au Python sur les 4 modèles**, avec et
+    sans critère d'angle de fusion, ORDRE DES DÉPENDANCES COMPRIS (transcrit de
+    networkx : nœuds croissants, voisins par première apparition). Les options
+    `branch_cut_threshold` et `anchor_growth_weight` restent en Python.
+    **Découverte préalable** : `_region_growing` triait les arêtes par
+    `np.argsort` NON stable, alors que chaque arête figure deux fois au même
+    risque. Le résultat dépendait donc de l'implémentation de numpy : sur
+    turkish, le tri stable fait passer de 11 à 24 régions. **Tri stable
+    adopté** (mesuré : death et les 2 modèles fins inchangés, turkish 0,198 →
+    0,172 % de matière sans appui et collisions 0,21 → 0,13 %).
+
+    **Pas 21c : étape 7 entière en natif** (`apex/scheduling.hpp`,
+    `schedule_layers`) : couleur par arête (distance à la surface par
+    `MeshDistance`, qui rend désormais aussi l'indice du triangle le plus
+    proche), lissage par longueur d'arc, découpage « une polyligne = une
+    couleur », groupes par couleur, deadline des trous (BVH du pas 6 + arbre
+    k-d du champ), arbitrage trou / purge et ordonnancement EDF. **Identique
+    au Python** sur 5 scénarios (sans peinture, bicolore, latérale, avec lissage,
+    trous gratuits), polylignes, couleurs et passes comprises. Tolérance
+    déclarée aux seules frontières : point à égale distance de deux faces de
+    couleurs différentes, somme de longueurs comparée à `merge_tolerance`.
+    `build_color_dependency_graph`, dont le Python ne lit pas le résultat,
+    n'est pas porté.
+
+    **step9 rapide : positionnement de la tête par lots**
+    (`_positioned_toolhead_vertices_batch`, matrices de rotation composées dans
+    le même ordre, produit matriciel par lots de 1 000 poses). Pose par pose,
+    Rodrigues prenait 14,5 s sur 20. death : **step9 20 → 6,3 s**, mêmes 88
+    événements (écart de quelques ULP, sans effet sur un contrôle à 0,125 mm).
+    Puis : requête de matière passée PAR LOTS et en parallèle
+    (`min_past_distance_batch`, identique au bit à l'appel unitaire, testé),
+    contrôle du plateau par lots avec raccourci exact (une pose loin en z du
+    plateau ne peut pas le toucher), échantillonnage et densification
+    vectorisés. **step9 rapide : 20 → 2,9 s** sur death, toujours 88 événements.
+    Même technique dans step5b (`_rotation_matrices`) : 6 → 3 s (death),
+    12 → 7,4 s (turkish), contraintes identiques.
+
+    **Pas 24 : export G-code** (`apex/gcode_export.hpp`). Le corps du fichier
+    est produit en natif, **texte identique ligne à ligne** : 955 226 lignes
+    du Benchy, et tous les champs de `GcodeReport` égaux. Trois transcriptions
+    obligatoires : le modulo flottant de Python (signe du diviseur, pas
+    `fmod`), `f"{v:.4f}"` par `std::to_chars` (arrondi exact comme le dtoa de
+    Python), et la norme à QUATRE composantes (X, Y, Z, B) de l'avance.
+    `feed_plan` : passes avant/arrière en natif, au bit, à condition d'écrire
+    `pow(x, 2.0)` comme numpy (`prev ** 2`) et non `x * x` (27 facteurs sur
+    943 000 différaient d'un ULP sinon). En-tête, pied et `travel_check`
+    (rappel Python) restent en Python ; `head_zlow` passe en TABLE
+    (`head_zlow_from_table`). Benchy : **export 20,9 s → 0,8 s**.
+
+    **Pas 15 : remplissage 2D d'une zone (step6), Clipper2** (`apex/toolpath2d.hpp`,
+    `fill_region`). Parois par offset en onglet (limite 5 comme GEOS), puis
+    remplissage LINES / GRID / CROSSED_ZIGZAG (balayage pair-impair, raccords qui
+    suivent le bord, à défaut raccord droit couvert par la zone). Les ponts
+    restent en Python. **Pas au bit, et c'est assumé** : Clipper2 calcule en
+    entiers (1e-6 mm ici) et part d'un autre sommet d'anneau. Écart par couche
+    ≤ 1e-4 sur l_shape et l-triple (`scripts/check_native_fill.py --continuous`).
+    Sur death, 12 couches s'écartent de plus de 1 % : sur une fente fine du
+    contour, l'onglet de GEOS s'allonge en pointe de 4 mm qui ronge la paroi, là
+    où Clipper2 coupe en carré à la distance d'offset. Le natif est plus proche
+    de la vraie géométrie, mais différent. step9b à parois continues :
+    l_shape −0,8 %, l-triple −1,1 %, death +0,7 %, turkish −2,6 %. step6 sur
+    death **1,81 → 0,51 s**. **Opt-in** (`APEX_NATIVE_FILL=1`, en plus de
+    `APEX_USE_CPP=1`) : à basculer par défaut avec le passage au tout-natif.
+    C'est en le portant qu'a été trouvé le défaut des parois trouées (limite #65).
+    Remesuré avec les défauts actuels (ordre contraint par la tête, parois
+    continues) : death +0,8 %, turkish −3 %, l-triple −1,1 %, l_shape −0,8 % de
+    matière sans appui, collisions identiques. Reste opt-in par principe (le
+    chemin natif ne doit pas déplacer la métrique) jusqu'à la bascule.
+
+    **step8 en tableaux (sans C++, au bit).** `_iter_schedule_points` rend un
+    `_RawPoints` (une colonne par champ, assemblé par blocs d'une polyligne)
+    au lieu de ~400 000 objets `_RawPoint` ; l'IK couplée concatène ses blocs
+    au lieu de convertir chaque ligne en liste ; `_lift_to_3d` calcule sa
+    normale par un produit vectoriel scalaire au lieu de `np.cross` (même
+    formule, même arrondi, 0,8 s d'appels évités). Trajectoire et diagnostics
+    **identiques au bit** contre l'ancienne version
+    (`scripts/check_step8_arrays.py`, avec et sans médian / normale par point).
+    step8 sur death : **1,92 → 0,82 s**. L'accès point par point (`raw[i]`)
+    reste disponible pour les replis et les tests.
+
+    > Leçon : un changement de COMPORTEMENT (ici la cinématique couplée) peut
+    > faire sortir silencieusement un chemin du natif. Reprofiler après chaque
+    > changement de comportement, pas seulement après chaque portage.
+
+    Outillage : `scripts/build_cpp.py --dev` construit dans
+    `cpp/build_dev/lib` sans toucher `cpp/lib`, verrouillé sous Windows tant
+    qu'un calcul long l'a chargé ; `APEX_CPP_LIB_DIR` fait charger ce
+    module. `scripts/profile_pipeline.py` : profil par étape.
 
     ### CE QUI RESTE À PORTER — le profil ne guide plus
 
@@ -4059,6 +4541,7 @@ limite #51 pour le détail chiffré) :
 | `SegmentationParams.anchor_growth_weight` | opt-in **désactivé** | -11 % `death`, **+76 % `turkish`** |
 | départage par marge angulaire | **retiré** (aucun cas d'usage) | dégrade sur 4 modèles / 4 |
 | `FieldSolverParams.use_geodesic_directions` | opt-in **désactivé** | −56 % / −42 % sur les 2 modèles fins, **×2,2 sur `death`**, `turkish` non mesuré |
+| **`step5b` ordre contraint par la tête + appui** (limite #67) | **ACTIVÉ** | death 0,227 → 0,222 %, turkish 0,70 → 0,198 %, 2 modèles fins inchangés ; collisions de la tête death 41,6 → 0,13 %, turkish 53,6 → 0,21 % |
 
 Quatre enseignements à ne pas repayer :
 1. **« Ancré au plateau » est le bon critère pour SIGNALER un risque et le
@@ -4091,6 +4574,15 @@ TOUTES les couches). Pistes jamais mesurées : rendre ce flip conditionnel à
 la plage angulaire réelle de la tête (0-185°, elle PEUT déposer vers le
 bas), pondérer le terme de direction par région, ou un champ à plusieurs
 branches.
+
+**Mesuré le 2026-10-01 (`measure_matrix.py ... noflip`, radial actif, parois
+continues)** : sans `enforce_upward_growth`, l_shape et l-triple sont
+identiques au bit (le redressement ne s'y déclenche jamais), mais **death
+0,227 → 11,4 %** de matière sans appui (défauts d'ordre 717 → 33 153) et
+**turkish 0,70 → 3,55 %**. Avec C imposé et B dans le seul demi-plan radial,
+« la tête peut déposer vers le bas » ne suffit pas : le redressement reste
+indispensable. La piste « flip conditionnel à la plage de B » est donc close
+sous cette forme ; restent le poids par région et le champ à branches.
 
 **Les 10 étapes du cœur algorithmique sont écrites, stables et testées
 (272/272 tests).** `MachineProfile` décrit une cinématique générique à N

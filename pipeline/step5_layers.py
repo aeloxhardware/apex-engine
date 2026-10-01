@@ -53,9 +53,11 @@ from core.mesh_types import (
     Layer,
     MeshData,
     RegionDependencyGraph,
+    RotationAxisSpec,
     ScalarField,
     TetMesh,
 )
+from core import _cpp
 from core.spatial import KDTree
 
 
@@ -221,7 +223,7 @@ class LayerParams:
     # (main.py) doit passer explicitement `MachineProfile.rotation_axes` s'il
     # veut ce fix - meme discipline que `nozzle_width`, jamais une seconde
     # source de verite devinee.
-    support_rotation_axes: Optional[list] = None
+    support_rotation_axes: Optional[list[RotationAxisSpec]] = None
 
     # Nombre de directions candidates testees quand `support_rotation_axes`
     # est actif - meme grandeur et meme defaut que
@@ -636,6 +638,11 @@ def _weld_vertices(
 # Decision 3 - Contours fermes via trace de bord (trimesh.outline())
 # ---------------------------------------------------------------------------
 
+# Nombre de couches ou le trace natif a rendu la main a trimesh (bord
+# non-variete) - mesure du taux de repli, verifie par les tests d'equivalence.
+_NATIVE_OUTLINE_FALLBACKS = 0
+
+
 def _extract_closed_contours(vertices: np.ndarray, faces: np.ndarray) -> list[np.ndarray]:
     """
     Extrait les boucles de contour fermees du patch triangule (vertices,
@@ -660,6 +667,15 @@ def _extract_closed_contours(vertices: np.ndarray, faces: np.ndarray) -> list[np
                       & (faces[:, 0] != faces[:, 2])]
     if len(faces) == 0:
         return []
+
+    # Pas 14 du portage C++ : trace de bord natif, identique a outline() dans le
+    # cas des boucles simples ; None = bord non-variete -> trimesh ci-dessous.
+    global _NATIVE_OUTLINE_FALLBACKS
+    if _cpp.enabled() and hasattr(_cpp.module(), "boundary_loops"):
+        loops = _cpp.module().boundary_loops(np.ascontiguousarray(faces, dtype=np.int64), len(vertices))
+        if loops is not None:
+            return [vertices[loop] for loop in loops if len(loop) >= 4]
+        _NATIVE_OUTLINE_FALLBACKS += 1
 
     try:
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
@@ -1742,14 +1758,29 @@ def run(
 
     raw_layers: list[tuple[float, list[np.ndarray], list[int], tuple[np.ndarray, np.ndarray, np.ndarray]]] = []
 
-    for isovalue in isovalues:
-        vertices, faces, source_tets = _extract_isosurface_triangles(
-            tet_mesh, scalar_field.values, float(isovalue), tet_min, tet_max
+    # Pas 13 du portage C++ (CLAUDE.md limite #56) : marching tetrahedra +
+    # soudure en natif, construit UNE fois par champ. Equivalence au bit
+    # (tests/test_cpp_equivalence.py) ; chemin Python inchange sinon.
+    native_extractor = None
+    if _cpp.enabled() and hasattr(_cpp.module(), "IsosurfaceExtractor"):
+        native_extractor = _cpp.module().IsosurfaceExtractor(
+            np.ascontiguousarray(tet_mesh.tet_vertices, dtype=float),
+            np.ascontiguousarray(tet_mesh.tetrahedra, dtype=np.int64),
+            np.ascontiguousarray(scalar_field.values, dtype=float),
         )
-        if len(faces) == 0:
-            continue
 
-        welded_vertices, welded_faces = _weld_vertices(vertices, faces, weld_tolerance)
+    for isovalue in isovalues:
+        if native_extractor is not None:
+            welded_vertices, welded_faces, source_tets = native_extractor.extract(float(isovalue), weld_tolerance)
+            if len(welded_faces) == 0:
+                continue
+        else:
+            vertices, faces, source_tets = _extract_isosurface_triangles(
+                tet_mesh, scalar_field.values, float(isovalue), tet_min, tet_max
+            )
+            if len(faces) == 0:
+                continue
+            welded_vertices, welded_faces = _weld_vertices(vertices, faces, weld_tolerance)
         contours = _extract_closed_contours(welded_vertices, welded_faces)
         if not contours:
             continue

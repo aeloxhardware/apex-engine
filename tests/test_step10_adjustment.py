@@ -494,3 +494,81 @@ def test_reorient_coupled_tiers_clears_contact_and_tapers_neighbours():
     assert bs[idx - 6] == 0.0                              # 3 mm : intacte
     assert all(p.axis_angles[0] == 90.0 for p in out.points)
     assert tp.points[idx].axis_angles == [90.0, 0.0]
+
+
+# ---------------------------------------------------------------------------
+# Machine couplee (limite #59) et mode rapide de step9 (session du 2026-10-01)
+# ---------------------------------------------------------------------------
+
+def test_coupled_candidates_never_change_the_position_imposed_axis():
+    import numpy as np
+    from core.mesh_types import RotationAxisSpec
+    from pipeline.step10_adjustment import _coupled_candidates
+    axes = [RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+            RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))]
+    dirs, angles = _coupled_candidates(axes, [123.4, 20.0], np.array([0.0, 0.0, 1.0]), 48)
+    assert np.all(angles[:, 0] == 123.4)
+    assert angles[:, 1].min() == 0.0 and angles[:, 1].max() == 185.0 and len(angles) == 48
+    assert np.allclose(np.linalg.norm(dirs, axis=1), 1.0)
+
+
+def test_fast_recheck_matches_step9_fast_events():
+    """En mode rapide, `_collisions_at_points` rend exactement les evenements
+    de step9 rapide aux memes indices (meme controleur, memes echantillons)."""
+    import numpy as np
+    import trimesh
+    from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
+    from pipeline import step9_collision_sim as s9
+    from pipeline.step10_adjustment import _collisions_at_points
+    head = trimesh.creation.box(extents=[6, 6, 20])
+    head.apply_translation([0, 0, 13])           # corps au-dessus de la pointe
+    machine = MachineProfile(
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+                       RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
+        platform_origin=np.array([0.0, 0.0, -50.0]), nozzle_model=head, nozzle_diameter=0.4)
+    pts = []
+    for k in range(60):                           # une colonne haute, puis un passage dessous a cote
+        pts.append(ToolpathPoint(position=np.array([10.0, 0.0, 0.2 * k]), axis_angles=[90.0, 0.0],
+                                 extrusion=1.0, feedrate=1.0, color_id=None))
+    for k in range(40):
+        pts.append(ToolpathPoint(position=np.array([10.0 + 0.25 * k, 2.0, 0.2]), axis_angles=[90.0, 0.0],
+                                 extrusion=1.0, feedrate=1.0, color_id=None))
+    tp = ToolpathMachine(points=pts)
+    params = s9.CollisionSimParams(path_sampling_step=0.1, safety_margin=1.0, fast_kdtree=True)
+    ref = {(e.point_index, e.obstacle_type, round(e.penetration_depth, 12)) for e in s9.run(tp, machine, params).events}
+    idx = sorted({i for i, _, _ in ref})
+    got = {(e.point_index, e.obstacle_type, round(e.penetration_depth, 12))
+           for e in _collisions_at_points(tp, machine, params, idx)}
+    assert ref and got == ref
+
+
+def test_exact_recheck_matches_step9_exact_events():
+    """En mode EXACT, `_collisions_at_points` doit rendre les evenements de
+    step9 exact aux memes indices. Bug reel (corrige le 2026-10-01) : step10
+    oubliait `_filter_nozzle_contact_zone`, si bien que la pointe touchait
+    toujours le cordon qu'elle depose et que tout point re-teste etait declare
+    en collision - aucune reorientation ne pouvait reussir en mode exact."""
+    from pipeline import step9_collision_sim as s9
+    head = trimesh.creation.box(extents=[6, 6, 20])
+    head.apply_translation([0, 0, 10.05])        # corps au-dessus de la pointe, pointe a l'origine
+    machine = MachineProfile(
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+                       RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
+        platform_origin=np.array([0.0, 0.0, -50.0]), nozzle_model=head, nozzle_diameter=0.4)
+    pts = []
+    for k in range(60):
+        pts.append(ToolpathPoint(position=np.array([10.0, 0.0, 0.2 * k]), axis_angles=[90.0, 0.0],
+                                 extrusion=1.0, feedrate=1.0, color_id=None))
+    for k in range(40):
+        pts.append(ToolpathPoint(position=np.array([10.0 + 0.25 * k, 2.0, 0.2]), axis_angles=[90.0, 0.0],
+                                 extrusion=1.0, feedrate=1.0, color_id=None))
+    tp = ToolpathMachine(points=pts)
+    params = s9.CollisionSimParams(path_sampling_step=0.1, safety_margin=1.0, fast_kdtree=False)
+    assert params.nozzle_contact_clearance > 0
+    ref = {(e.point_index, e.obstacle_type, round(e.penetration_depth, 12)) for e in s9.run(tp, machine, params).events}
+    sampled = s9._sample_point_indices(tp.points, params.path_sampling_step)
+    got = {(e.point_index, e.obstacle_type, round(e.penetration_depth, 12))
+           for e in _collisions_at_points(tp, machine, params, sampled)}
+    assert ref, "la fixture doit produire des collisions, sinon le test ne verifie rien"
+    assert len({i for i, _, _ in ref}) < len(sampled), "et des points sans collision"
+    assert got == ref

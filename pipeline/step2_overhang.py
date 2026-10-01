@@ -277,6 +277,11 @@ def _compute_bridge_span_directions(
         except np.linalg.LinAlgError:
             main_axis = np.array([1.0, 0.0, 0.0])
 
+        # signe canonique (plus grande composante positive) : le vecteur propre
+        # n'est defini qu'au signe pres, et le natif doit rendre le meme
+        main_axis = np.asarray(main_axis, dtype=float)
+        if main_axis[int(np.argmax(np.abs(main_axis)))] < 0:
+            main_axis = -main_axis
         span_direction[face_indices] = main_axis
 
     return span_direction
@@ -285,6 +290,28 @@ def _compute_bridge_span_directions(
 # ---------------------------------------------------------------------------
 # Point d'entree principal de l'etape
 # ---------------------------------------------------------------------------
+
+def _native_overhang_map(mesh_data: MeshData, params: OverhangParams) -> OverhangMap | None:
+    """Pas 21a du portage (cpp/src/core/overhang.cpp) : toute l'etape en natif.
+    Memes surplombs et ponts ; risque a 1e-12 ; direction de portee au SIGNE
+    pres (voir apex/overhang.hpp). None si le noyau natif est inactif."""
+    from core import _cpp
+    if not _cpp.enabled():
+        return None
+    module = _cpp.module()
+    if module is None or not hasattr(module, "overhang_map"):
+        return None
+    risk, over, bridge, span = module.overhang_map(
+        np.ascontiguousarray(mesh_data.vertices, dtype=float),
+        np.ascontiguousarray(mesh_data.faces, dtype=np.int64),
+        np.ascontiguousarray(mesh_data.face_normals, dtype=float),
+        float(params.overhang_angle_threshold_deg), int(params.bridge_detection_ray_density),
+        float(params.bridge_support_ratio_threshold), float(params.bridge_max_gap_distance),
+        float(params.bridge_horizontal_angle_tolerance_deg),
+        np.ascontiguousarray(params.up_vector, dtype=float),
+    )
+    return OverhangMap(risk_score=risk, is_overhang=over, is_bridge=bridge, bridge_span_direction=span)
+
 
 def run(mesh_data: MeshData, params: OverhangParams) -> OverhangMap:
     """
@@ -300,6 +327,10 @@ def run(mesh_data: MeshData, params: OverhangParams) -> OverhangMap:
         OverhangMap avec risk_score, is_overhang, is_bridge et
         bridge_span_direction alignes sur l'indexation des faces.
     """
+    native = _native_overhang_map(mesh_data, params)
+    if native is not None:
+        return native
+
     angle_from_down_deg = _compute_overhang_angles(mesh_data, params.up_vector)
 
     is_overhang = _compute_is_overhang(angle_from_down_deg, params.overhang_angle_threshold_deg)

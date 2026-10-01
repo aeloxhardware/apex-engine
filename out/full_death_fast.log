@@ -1,0 +1,21 @@
+[main] Etape 1/10 - ingestion : res/test_models/death.stl
+[main]   watertight avant/apres reparation : True/True, 388775 tetraedres
+[main] Etape 2/10 - detection des surplombs
+[main]   359 faces en surplomb sur 2310
+[main] Etape 3/10 - segmentation en regions
+[main]   22 region(s)
+[main] Etape 4/10 - resolution du champ scalaire
+[main] Etape 5/10 - extraction des couches courbes
+[main]   254 couche(s)
+[main] Etape 6/10 - remplissage 2D par couche
+[main] Etape 7/10 - couleur + ordonnancement
+[main]   254 passe(s) d'impression
+[main] Etape 8/10 - trajectoire machine (resolution IK)
+[main]   367866 point(s) de trajectoire, 0 orientation(s) inatteignable(s)
+[main] Etape 9/10 - simulation de collision
+[main]   24789 collision(s) detectee(s) (nozzle_model_checked=True, chuck_checked=False)
+[main] Etape 10/10 - ajustement
+[main]   converged=True, 24789 ajustement(s), 0 collision(s) non resolue(s)
+total 57.2 s
+collisions step9 24789 converge True non resolues 0 iterations 1
+methodes Counter({'fallback_support': 24772, 'local_reorientation': 17})

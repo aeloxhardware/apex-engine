@@ -705,7 +705,16 @@ def _region_growing(
     # impliquant une face a fort risque contraint plus tot le choix de
     # direction, ce qui limite les retours en arriere.
     edge_risk = risk_score[adjacency_coo.row] + risk_score[adjacency_coo.col]
-    order = np.argsort(-edge_risk)
+    # Tri STABLE (2026-10-01) : chaque arete figure deux fois avec le meme
+    # risque, les ex-aequo sont donc certains, et l'ordre d'un tri NON stable
+    # (le `quicksort` de numpy, en realite introsort) depend de son
+    # implementation. Mesure : sur turkish, le seul passage au tri stable fait
+    # passer la segmentation de 11 a 24 regions. Ex-aequo departages dans
+    # l'ordre (ligne, colonne) de la matrice d'adjacence, reproductible (et
+    # transcrit tel quel par le natif). step9b sur les 4 modeles : death et
+    # les 2 modeles fins inchanges, turkish 0,198 -> 0,172 % de matiere sans
+    # appui, collisions 0,21 -> 0,13 %.
+    order = np.argsort(-edge_risk, kind="stable")
 
     def find(f: int) -> int:
         while region_id[f] != f:
@@ -1194,6 +1203,41 @@ def _build_dependency_graph(
 # Point d'entree principal de l'etape
 # ---------------------------------------------------------------------------
 
+def _native_segmentation(mesh_data, effective_risk, is_platform_contact, directions, params):
+    """Pas 21b du portage (cpp/src/core/segmentation.cpp) : chemin par defaut
+    en natif, IDENTIQUE au Python (ordre des dependances compris). None si le
+    noyau natif est inactif."""
+    from core import _cpp
+    if not _cpp.enabled():
+        return None
+    module = _cpp.module()
+    if module is None or not hasattr(module, "segment_default"):
+        return None
+    labels, direction_index, depth, deps = module.segment_default(
+        np.ascontiguousarray(mesh_data.vertices, dtype=float),
+        np.ascontiguousarray(mesh_data.faces, dtype=np.int64),
+        np.ascontiguousarray(mesh_data.face_normals, dtype=float),
+        np.ascontiguousarray(effective_risk, dtype=float),
+        np.ascontiguousarray(is_platform_contact, dtype=np.uint8),
+        np.ascontiguousarray(directions, dtype=float),
+        float(params.max_angle_from_direction_deg),
+        -1.0 if params.max_region_merge_angle_deg is None else float(params.max_region_merge_angle_deg),
+        np.ascontiguousarray(params.up_vector, dtype=float),
+    )
+    regions = {
+        int(r): Region(id=int(r), face_ids=np.where(labels == r)[0],
+                       target_direction=directions[int(direction_index[r])])
+        for r in range(len(direction_index))
+    }
+    pairs = np.asarray(deps, dtype=np.int64).reshape(-1, 2)
+    return RegionDependencyGraph(
+        regions=regions,
+        dependencies=[(int(a), int(b)) for a, b in pairs],
+        platform_contact_faces=is_platform_contact,
+        region_print_depth={int(r): int(d) for r, d in enumerate(depth)},
+    )
+
+
 def run(
     mesh_data: MeshData,
     overhang_map: OverhangMap,
@@ -1252,6 +1296,13 @@ def run(
         effective_params = replace(params, direction_candidate_count=60)
 
     directions = _generate_candidate_directions(effective_params)
+
+    if params.branch_cut_threshold is None and params.anchor_growth_weight is None:
+        native = _native_segmentation(
+            mesh_data, effective_risk, is_platform_contact, directions, params
+        )
+        if native is not None:
+            return native
     compatibility = _face_direction_compatibility(
         mesh_data.face_normals, directions, params.max_angle_from_direction_deg
     )
