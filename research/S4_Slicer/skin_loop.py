@@ -9,7 +9,7 @@ collision sont alors retirees par P5, comme le prevoyait le plan).
 
 Usage (venv d'Apex) :
   ../../.venv/Scripts/python.exe -u skin_loop.py "<modele STL>" <passe> <variante> --first-layer=<motif>
-      [--max-iter=3] [--trim-radius=2.0] [--head-tolerance=45] [--pattern=rectilinear]
+      [--max-iter=8] [--trim-radius=2.0] [--head-tolerance=45] [--pattern=rectilinear]
 Journaux : output_models/skin_loop_<etape>_it<n>.log
 """
 import safe_io  # noqa: F401 -- ecritures robustes aux verrous transitoires
@@ -37,7 +37,10 @@ def main():
     flags = {a.split("=")[0]: a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--") and "=" in a}
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     model, k, variant = args[0], args[1], args[2] if len(args) > 2 else ""
-    max_iter = int(flags.get("--max-iter", 3))
+    # 8 tours (2026-10-01) : avec 3, le dino gardait 8 points de contact et
+    # perdait la zone ENTIERE du sommet de la tete (~460 mm2 de trous) ; le
+    # rognage local converge en 4 tours.
+    max_iter = int(flags.get("--max-iter", 8))
     py = sys.executable
     env = dict(os.environ, APEX_USE_CPP="1")
     name = "loop_" + model.replace(" ", "_") + variant

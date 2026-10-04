@@ -1,13 +1,13 @@
-micro-zones (distance au bord < 0.60 mm) : 26 rattachees, 9 isolees et 17 a voisines inaccessibles non lissees (90.4 mm2) | 3.4 s
-dino_pin passe 5 : 14462 faces (18398 apres coupe), 310 couches
-  retenue              9062 faces   41.7% de la surface
-  inatteignable        2079 faces   12.7% de la surface
-  collision plateau    4031 faces   27.7% de la surface
-  collision objet       419 faces    3.0% de la surface
-  contact plateau      1956 faces   13.8% de la surface
-  zone trop petite       67 faces    0.1% de la surface
-  micro-zone non lissee    784 faces    1.0% de la surface
-  morceaux apres coupe aux aretes (< 150 deg entre faces) : 58 ; bandes (minimum) : 102 ; zones : 70 (moments 55 a 309)
+micro-zones (distance au bord < 0.60 mm) : 15 rattachees, 11 isolees et 18 a voisines inaccessibles non lissees (71.2 mm2) | 2.6 s
+tilted benchy undertriangulated_repaired_pin passe 4 : 22474 faces (24094 apres coupe), 313 couches
+  retenue              7200 faces   30.3% de la surface
+  inatteignable        7925 faces   38.7% de la surface
+  collision plateau    7238 faces   26.0% de la surface
+  collision objet       348 faces    2.2% de la surface
+  contact plateau       388 faces    1.9% de la surface
+  zone trop petite      157 faces    0.1% de la surface
+  micro-zone non lissee    838 faces    0.8% de la surface
+  morceaux apres coupe aux aretes (< 150 deg entre faces) : 73 ; bandes (minimum) : 106 ; zones : 51 (moments 8 a 312)
   chaque zone accessible a son moment : True
-  sommets de surface non localises dans un tetraedre : 9
-  temps : surface et phi 0.1 s ; IK couplee a la position (12506 faces, centre + 3 sommets) 0.1 s ; collision (10427 faces, 4581 points de tete, calcule) 10.8 s ; coupe le long de 33 lignes de niveau 0.0 s ; bandes et zones 3.4 s ; total 14.4 s
+  sommets de surface non localises dans un tetraedre : 82
+  temps : surface et phi 0.2 s ; IK couplee a la position (22086 faces, centre + 3 sommets) 0.2 s ; collision (14161 faces, 4581 points de tete, cache) 0.0 s ; coupe le long de 32 lignes de niveau 0.0 s ; bandes et zones 2.6 s ; total 3.0 s

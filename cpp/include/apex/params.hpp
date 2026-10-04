@@ -296,7 +296,7 @@ struct GcodeParams {
     double retract_speed{35.0};
     double retract_min_travel{2.0};
     double travel_clearance{1.0};
-    double pivot_to_tip{45.0};
+    double pivot_to_tip{46.0};
     double tilt_sign{1.0};
     std::string z_reference{"tip"};
     bool tip_at_bead_top{true};

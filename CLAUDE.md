@@ -2138,6 +2138,23 @@ pour affichage/validation avant export G-code.
       place la première isovaleur à v_min + δ/2, donc chaque point de
       trajectoire est au MILIEU de sa couche ; la pointe est relevée de h/2 le
       long de l'axe de la tête. Fait géométrique, pas un réglage.
+    - **Pivot à 46 mm** (mesure de l'utilisateur, 2026-10-01 ; 45 avant).
+    - **La pointe quittait sa trajectoire PENDANT les mouvements** (trouvé le
+      2026-10-01 grâce aux rendus de l'utilisateur) : le firmware interpole X, Z
+      et B linéairement ; avec le pivot à 46 mm, un saut de B entre deux points
+      proches (0 → 58°, ou 3,8 ↔ 74° en alternance sur le dino) fait balayer à
+      la pointe un arc de plusieurs mm EN EXTRUDANT. Mesuré au milieu de chaque
+      mouvement : Benchy 1 953 mouvements extrudés à plus de 1 mm (max 26 mm),
+      dino 3 852 (max 16,6 mm). Les contrôles précédents ne regardaient que les
+      EXTRÉMITÉS des mouvements. **Correctif** : `GcodeParams.max_tip_deviation`
+      (0,05 mm, défaut) découpe chaque mouvement par bisection jusqu'à ce que le
+      milieu interpolé par le firmware reste sur la droite visée, l'extrusion
+      étant répartie au prorata. Après : 0 mouvement à plus de 0,1 mm sur les
+      deux pièces, +9 % de lignes. Le chemin natif (pas 24) ne découpe pas encore :
+      il n'est emprunté que si `max_tip_deviation=None`. Test :
+      `test_moves_are_split_so_the_tip_follows_the_line`. Reste en amont :
+      l'alternance de B elle-même (réorientation de la recherche), qui ralentit
+      l'impression.
     - **Garde-fous** dans `GcodeReport` (pointe et tête les plus basses,
       étendues X/Y/Z firmware — Y cumule jusqu'à 35 tours sur le Benchy) ;
       `strict` refuse d'écrire un fichier dont la pointe passe sous 0.
@@ -2401,6 +2418,74 @@ pour affichage/validation avant export G-code.
     - **Reste** : 216 contraintes violées sur turkish (cycles réels entre
       couches en anneau ; découper les couches en morceaux les lèverait) ; la
       granularité est la couche entière.
+
+68. **Trous dans la peau du Benchy (2026-10-02) : CAUSE TROUVÉE — le seuil de
+    coupure au retour dans la pièce réelle (`bird_slice_deformed.py`,
+    `keep = score <= w/2`) coupait des morceaux de la paroi extérieure. Corrigé
+    (`--cut-factor`, défaut 2,0). Le chemin pour y arriver a produit deux
+    conclusions fausses, retirées : à lire avant de reprendre une enquête.**
+    - **Constat** (prévisualiseur de l'utilisateur, G-code `..._pass4`) : bord
+      déchiqueté sur une paroi quasi verticale du haut de l'arche (x≈5,6 ;
+      y≈−7,5 ; z≈52–55,5), coupures visibles dans l'inspecteur (lignes
+      968238, 973645, 992290, 994100).
+    - **Chaîne de mesures qui l'a localisé** (surface du STL → distance à
+      l'élément le plus proche, tous DENSIFIÉS le long des segments) :
+      maillage tétra (couvre la peau : frontière à 0,124 mm, rapport de volumes
+      1,0006) → contours de couche `contour_3d` (0,1 % de la peau à > 0,3 mm)
+      → trajectoires par couche `toolpath_3d` (5,4 % dans la zone) → G-code
+      (5,4 %, identique : l'export, step8 et step9 ne perdent rien). La perte
+      est donc entre le contour de couche et `toolpath_3d`.
+    - **Mécanisme** : au retour de l'espace déformé vers la pièce, un point de
+      trajectoire à plus de `w/2` (0,2 mm) HORS du volume déformé est coupé
+      (garde-fou contre les fausses zones pleines des plis, jusqu'à 4 mm
+      mesuré sur la couche 65). Les parois de cette zone sont à 0,15–0,19 mm
+      hors du volume : juste sous le seuil, et au-delà sur une partie des
+      points (4042 points coupés sur le Benchy, 0,45 %). Chaque point coupé
+      laisse une interruption dans la paroi.
+    - **Correction mesurée** : `--cut-factor` (défaut 2,0 ; 0,5 = ancien
+      comportement). Points coupés : Benchy 4042 → 332, Squirtle 5775 → 279 ;
+      l_shape et dino sans effet notable. Peau à plus de 0,4 mm d'une
+      trajectoire : zone du trou 1,14 % → 0,00 % (à 3 w), Benchy entier
+      0,33 % → 0,18 % (à 2 w), Squirtle 2,53 → 2,44 %, dino 2,94 → 2,81 %,
+      l_shape identique. Matière à plus de 0,25 mm hors de la pièce :
+      0,000 % → 0,008 % (Benchy, 2 w), 0,042 % (Squirtle, 2 w). 3 w gagne un
+      peu plus de couverture mais fait monter la matière hors pièce (0,022 %
+      Benchy) : 2 w retenu.
+    - **Non résolu** : le dino (6,2 % de peau à > 0,3 mm, 1,4 % à > 0,6 mm) et
+      Squirtle (6,2 % / 0,65 %) ont d'autres défauts de couverture que ce seuil
+      ne corrige pas. Les trous du milieu et du bas de la première capture du
+      Benchy (zones non lissées, corps brut) ne sont pas expliqués non plus.
+    - **Conclusions FAUSSES retirées en cours de route** : (1) « le maillage
+      tétraédrique ne recouvre pas la peau » (test d'appartenance d'un point
+      décalé : faux positifs près des arêtes ; la mesure correcte donne 0 %) ;
+      (2) « les coupures du G-code sont des vides dans la paroi » (ce sont des
+      sauts d'un anneau fermé à l'autre) ; (3) à deux reprises, des distances
+      mesurées à des POINTS de trajectoire au lieu de segments densifiés ont
+      fait croire à des vides (points espacés de 0,3 à 1 mm). **Toujours
+      densifier avant de mesurer une couverture.**
+    - **Hypothèses écartées (ne pas rouvrir)** : dégénérescence des tétraèdres
+      (step5 correct sur 313 couches ; 4,8 % de tétraèdres à q < 0,05 après
+      déformation sans effet démontré) ; troncature du fichier à 1 M de
+      mouvements (la tête du prévisualiseur est à la FIN) ; sens du pivot
+      (`--tilt-sign=-1` donne des cordons dans tous les sens, le
+      prévisualiseur applique bien la compensation, au signe +1) ; référence de
+      Z (`--z-reference=pivot` ne change rien) ; mouvements courts ignorés ;
+      débit d'extrusion (0,0333 mm de filament par mm de pointe).
+    - **Outils ajoutés** : `core/tet_coverage.py` (distance surface → frontière
+      du maillage, rapport de volumes ; garde-fou, mesure 0,000 % sur les 4
+      modèles), `step1_ingest.run(check_surface_coverage=True)`,
+      `scripts/check_tet_coverage.py`, `tests/test_tet_coverage.py` (3).
+      Recherche (non versionnée) : `bird_slice_deformed.py --cut-factor= --output-tag=`.
+    - **Affichage de l'inspecteur du prévisualiseur** (à ne pas prendre pour
+      des défauts du fichier) : « vitesse 133 mm/s » et « débit 10,65 mm³/s »
+      lisent F comme une vitesse de pointe alors que F est en unités firmware
+      (Y compte en degrés ; près de l'axe, 1 mm de pointe = 7° de Y, donc
+      F ≈ 8000 pour 25 mm/s) ; « épaisseur de couche négative » vient du Z qui
+      descend entre deux points d'une couche courbe.
+    - **Hors sujet mais mesuré** : le G-code du Benchy contient 2199 sauts
+      sans extrusion de 0,5 à 2,5 mm SANS rétraction (sauts d'un anneau à
+      l'autre) ; 41 % des mouvements extrudés font moins de 0,05 mm
+      (découpage `max_tip_deviation`, fichier lourd : 1,07 M de mouvements).
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
