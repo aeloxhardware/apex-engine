@@ -138,6 +138,24 @@ En mode exact, step10 oubliait le filtre de la zone de contact de la buse : chaq
 
 ### step8 en tableaux (au bit) : death 1,92 → 0,82 s.
 
+### Fin d'après-midi du 2026-10-01 — corrections après les rendus de l'utilisateur
+- **Pivot à 46 mm** (utilisateur ; 45 avant).
+- **La pointe quittait sa trajectoire PENDANT les mouvements** (saut de B, interpolation linéaire
+  du firmware) : jusqu'à 26 mm sur le Benchy. `GcodeParams.max_tip_deviation=0.05` découpe les
+  mouvements ; après : 0 mouvement à plus de 0,1 mm. Test ajouté.
+- **Trous du dino** : 83 % dans la zone de lissage du sommet de la tête, retirée en bloc après 3
+  tours de rognage. `skin_loop.py` passe à 8 tours par défaut (converge en 4-5) : surface
+  découverte dino 1,32 → 0,19 %, Benchy 0,11 % (1 zone retirée au lieu de 5).
+- **Bosses du Benchy** : pas de matière hors pièce (0 % au-delà de 0,3 mm) ; ce sont les zones NON
+  lissées (escaliers bruts) : bas de coque (collision plateau, 26 %), flancs de cabine
+  (inatteignables avec C imposé, 38,7 %). Pistes : excentrer la pièce / la surélever ; l'axe
+  linéaire de l'upgrade.
+- Les fichiers reçus par l'utilisateur via un autre canal étaient TRONQUÉS à 1 000 000 d'octets ;
+  envoi en zip Deflate (`out/share/*_v3.zip`).
+- Outils : `scripts/render_gcode_check.py`, `scripts/gcode_surface_coverage.py`.
+- Push GitHub BLOQUÉ (connexion demandée par git-credential-manager sur ce poste) ; commit local
+  sur la branche `session-2026-10-01`, les correctifs de fin d'après-midi NON commités.
+
 ### Après-midi du 2026-10-01 — « salon d'abord » (décision de l'utilisateur)
 Chaîne Bird refaite avec les correctifs du jour (`out/run_bird_chain.sh`, journal `out/bird_chain.log`) :
 

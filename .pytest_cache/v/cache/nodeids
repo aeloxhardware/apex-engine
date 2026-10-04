@@ -462,5 +462,8 @@
   "tests/test_step9b_support_check.py::test_tilt_resolves_previously_classified_overhang",
   "tests/test_step9b_support_check.py::test_travel_moves_are_not_counted_as_deposits",
   "tests/test_step9b_support_check.py::test_true_overhang_stays_true_when_no_tilt_helps",
-  "tests/test_step9b_support_check.py::test_unknown_platform_never_exempts_silently"
+  "tests/test_step9b_support_check.py::test_unknown_platform_never_exempts_silently",
+  "tests/test_tet_coverage.py::test_fully_tetrahedralised_box_has_no_surface_outside_the_volume",
+  "tests/test_tet_coverage.py::test_removed_tetrahedra_are_reported_as_a_cluster_at_their_location",
+  "tests/test_tet_coverage.py::test_step1_reports_coverage_only_when_asked"
 ]

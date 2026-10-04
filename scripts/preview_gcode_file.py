@@ -25,7 +25,7 @@ from file_io.gcode_export import firmware_to_machine, parse_gcode  # noqa: E402
 def main():
     flags = {a.split("=")[0]: a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--") and "=" in a}
     path = [a for a in sys.argv[1:] if not a.startswith("--")][0]
-    pivot = float(flags.get("--pivot", 45.0))
+    pivot = float(flags.get("--pivot", 46.0))
     moves = parse_gcode(open(path).read().splitlines())
     tips = np.array([firmware_to_machine(x, y, z, b, pivot) for x, y, z, b, _ in moves])
     extrude = np.array([m[4] for m in moves])

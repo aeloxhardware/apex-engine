@@ -102,10 +102,10 @@ def test_export_extrusion_and_retraction(machine):
 
 def test_parse_round_trip_positions(machine):
     tp = _toolpath(machine)
-    params = GcodeParams(decimals=6)
+    params = GcodeParams(decimals=6, max_tip_deviation=None)
     lines, _ = export_gcode(tp, machine, params)
     moves = parse_gcode(lines)
-    tips = np.array([firmware_to_machine(x, y, z, b, 45.0) for x, y, z, b, _ in moves])
+    tips = np.array([firmware_to_machine(x, y, z, b, params.pivot_to_tip) for x, y, z, b, _ in moves])
     # la pointe est au SOMMET du cordon : point de trajectoire (milieu de couche) + h/2 selon l'axe de tete
     half = np.where(tp["is_skin"], params.skin_thickness, params.layer_height) / 2
     for p, h in zip(tp["position"], half):
@@ -164,3 +164,30 @@ def test_guards_and_strict(machine, tmp_path):
     out2 = tmp_path / "y.gcode"
     _, rep = export_gcode(tp, machine, GcodeParams(strict=True), str(out2))
     assert not rep.written and not out2.exists()
+
+
+def test_moves_are_split_so_the_tip_follows_the_line(machine):
+    """Le firmware interpole X, Z et B lineairement : avec le pivot a 46 mm, un
+    saut de B entre deux points proches fait sortir la pointe de sa droite
+    PENDANT le mouvement (2026-10-01 : jusqu'a 26 mm sur le Benchy). Avec
+    `max_tip_deviation`, chaque mouvement est decoupe et la pointe reste sur
+    la droite ; la matiere totale est inchangee."""
+    pos = np.array([[30.0, 0.0, 5.0], [30.5, 0.0, 5.0], [31.0, 0.0, 5.0]])
+    tp = {"position": pos, "axis_angles": np.array([[90.0, 0.0], [90.0, 60.0], [90.0, 0.0]]),
+          "extrusion": np.array([0.0, 1.0, 1.0])}
+    off = GcodeParams(decimals=6, max_tip_deviation=None, tip_at_bead_top=False)
+    on = GcodeParams(decimals=6, max_tip_deviation=0.05, tip_at_bead_top=False)
+    _l0, r0 = export_gcode(tp, machine, off)
+    lines, r1 = export_gcode(tp, machine, on)
+    assert r1.subdivided_moves >= 2 and r1.max_tip_deviation_before > 5.0
+    moves = parse_gcode(lines)
+    fw = np.array([m[:4] for m in moves])
+    # milieu de chaque mouvement interpole lineairement par le firmware
+    worst = 0.0
+    for a, b in zip(fw[:-1], fw[1:]):
+        ta = firmware_to_machine(*a, on.pivot_to_tip)
+        tb = firmware_to_machine(*b, on.pivot_to_tip)
+        tm = firmware_to_machine(*((a + b) / 2), on.pivot_to_tip)
+        worst = max(worst, float(np.linalg.norm(tm - (ta + tb) / 2)))
+    assert worst <= 0.05 + 1e-9
+    assert r1.filament_mm == pytest.approx(r0.filament_mm, rel=1e-9)

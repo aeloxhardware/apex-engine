@@ -169,6 +169,11 @@ def main():
     variant = args[2] if len(args) > 2 else ""
     use_skin = "--skin" in flags
     skin_thickness = float(flags.get("--skin-thickness", 0.2))
+    # seuil de coupure au retour dans la piece : un point a plus de cut_factor x w hors du
+    # volume deforme n'est pas depose (defaut 2,0 depuis le 2026-10-02 : 0,5 coupait des morceaux de parois a la limite du volume deforme, mesure sur le Benchy). --output-tag
+    # evite d'ecraser la sortie de reference lors d'un essai.
+    cut_factor = float(flags.get("--cut-factor", 2.0))
+    output_tag = flags.get("--output-tag", "")
     first_layer_pattern = flags.get("--first-layer")
     stl = os.path.join(HERE, "input_models", f"{model_name}.stl")
     if not os.path.exists(stl):                  # comme bird_loop.model_path
@@ -404,7 +409,7 @@ def main():
             # polygone y a cree une fausse zone pleine. Extrapole, il sortait
             # de la piece (jusqu'a 4 mm, couche 65 du Benchy). On coupe la
             # trajectoire a ces points au lieu de les deposer.
-            keep = score <= w / 2
+            keep = score <= w * cut_factor
             n_cut += int((~keep).sum())
             edges = np.flatnonzero(np.diff(np.concatenate([[0], keep.astype(np.int8), [0]])))
             for start, stop in zip(edges[::2], edges[1::2]):
@@ -438,7 +443,7 @@ def main():
     print(f"contours ramenes -> surface du STL d'origine : mediane {np.median(dist):.3f} mm, "
           f"95e centile {np.percentile(dist, 95):.3f} mm, max {dist.max():.3f} mm")
 
-    out = f"{prefix}_deformed_slice{'_skin' if use_skin else ''}_pass{pass_index}.pkl"
+    out = f"{prefix}_deformed_slice{'_skin' if use_skin else ''}{output_tag}_pass{pass_index}.pkl"
     with open(out, "wb") as f:
         pickle.dump(out_layers, f)
     print(f"sortie : {out}")

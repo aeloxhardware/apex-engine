@@ -1910,7 +1910,10 @@ def test_gcode_export_native_identical_text(restore_switch, variant):
     from file_io.gcode_export import GcodeParams, export_gcode, head_zlow_from_table
     machine = main._default_machine_profile()
     machine.nozzle_model = None
-    params = GcodeParams() if variant != "pivot" else GcodeParams(z_reference="pivot", tilt_sign=-1.0)
+    # max_tip_deviation=None : sinon le decoupage desactive le chemin natif et le
+    # test comparerait Python a lui-meme
+    params = (GcodeParams(max_tip_deviation=None) if variant != "pivot"
+              else GcodeParams(z_reference="pivot", tilt_sign=-1.0, max_tip_deviation=None))
     hz = None if variant == "sans_table" else head_zlow_from_table(np.arange(0, 185.5, 0.5), -np.linspace(1, 30, 371))
     for seed in range(3):
         tp = _random_machine_toolpath(seed)

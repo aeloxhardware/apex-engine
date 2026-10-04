@@ -1,15 +1,16 @@
-controle gradient : 4263/4263 tetraedres calculables, ecart max a (0,0,1) = 1.2e-13
-zones retirees (non creusees) : 2
+controle gradient : 24345/24345 tetraedres calculables, ecart max a (0,0,1) = 3.2e-13
+zones retirees (non creusees) : 1
 creusement parallele : 10 processus
-creusement sous les zones de surface (epaisseur 0.2 mm) : 264/310 couches recalculees (12 s)
-premiere couche : motif concentric_conform, 35 passes
-etapes 5+6 dans l'espace deforme : 310 couches (14 s)
-planeite : ecart en z max par couche = 0.0e+00 mm ; couches avec un contour invalide : 0/310 (avant : 65/284) ; raisons : {}
-  couches valides : 299, remplissage mesure/attendu mediane 1.22, 10e-90e 1.13-1.36
-remplissage mesure / attendu, sur 299 couches qui en attendent : mediane 1.22, 10e-90e centiles 1.13-1.36 (couche 185 avant : 0,27)
-morceaux (zone coupee par la 1re paroi, > 0,5 mm2) : 68, dont SANS trajectoire : 0
-trous : 29, bordes par leur contour : 29
-retour : 766392 points, hors de tout tetraedre 3772 (0.49%), ambigus (plissement) 2488 (0.32%), coupes (a plus de w/2 hors du volume) 1732 (0.23%), sauts transformes en trajets a vide 303
-segments ramenes : median 0.11 mm, 99e centile 0.81 mm, max 1.00 mm (avant subdivision : max 39,2)
-contours ramenes -> surface du STL d'origine : mediane 0.200 mm, 95e centile 0.200 mm, max 3.613 mm
-sortie : R:\APEX_NEW_VERSION\slicer_alg\research\S4_Slicer\output_models\loop_dino_pin_deformed_slice_skin_pass5.pkl
+creusement sous les zones de surface (epaisseur 0.2 mm) : 283/313 couches recalculees (16 s)
+premiere couche : motif concentric_conform, 14 passes
+etapes 5+6 dans l'espace deforme : 313 couches (18 s)
+planeite : ecart en z max par couche = 8.9e-16 mm ; couches avec un contour invalide : 1/313 (avant : 65/284) ; raisons : {'Self-intersection': 1}
+  couches valides : 237, remplissage mesure/attendu mediane 1.79, 10e-90e 1.39-2.28
+  couches a contour invalide : 1, remplissage mesure/attendu mediane 1.69, 10e-90e 1.69-1.69
+remplissage mesure / attendu, sur 238 couches qui en attendent : mediane 1.79, 10e-90e centiles 1.39-2.28 (couche 185 avant : 0,27)
+morceaux (zone coupee par la 1re paroi, > 0,5 mm2) : 99, dont SANS trajectoire : 0
+trous : 181, bordes par leur contour : 181
+retour : 920829 points, hors de tout tetraedre 14288 (1.55%), ambigus (plissement) 240 (0.03%), coupes (a plus de w/2 hors du volume) 3973 (0.43%), sauts transformes en trajets a vide 15
+segments ramenes : median 0.05 mm, 99e centile 0.57 mm, max 0.99 mm (avant subdivision : max 39,2)
+contours ramenes -> surface du STL d'origine : mediane 0.200 mm, 95e centile 0.201 mm, max 1.541 mm
+sortie : R:\APEX_NEW_VERSION\slicer_alg\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_pin_deformed_slice_skin_pass4.pkl

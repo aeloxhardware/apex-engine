@@ -20,7 +20,7 @@ import re
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import math
@@ -81,6 +81,15 @@ class IngestReport:
     # non-manifold, faisant echouer la reparation standard ET pymeshfix
     # (qui reduisait le mesh entier a 10 faces - voir CLAUDE.md).
     dominant_shell_fragments_dropped: int = 0
+    # Ecart entre la SURFACE du modele et la frontiere du volume tetraedrise
+    # (core/tet_coverage). `None` = non mesure. Un maillage dont la frontiere
+    # s'ecarte de la peau laisse des trous dans les couches que step5 ne voit
+    # pas : ses contours sont les sections des tetraedres. Donnee explicite.
+    surface_outside_volume_fraction: Optional[float] = None   # part de la peau a plus de `tolerance`
+    surface_outside_volume_area: float = 0.0                  # mm2
+    surface_max_distance_to_tets: float = 0.0                 # mm, pire ecart
+    tet_volume_ratio: float = 0.0                             # volume tetra / volume du modele
+    surface_outside_volume_clusters: list = field(default_factory=list)  # (aire mm2, centre) par amas
 
 
 class MeshIngestError(Exception):
@@ -2211,6 +2220,7 @@ def run(
     platform_z: Optional[float] = None,
     junction_zones: Optional[list[JunctionZone]] = None,
     junction_refinement_resolution: Optional[float] = None,
+    check_surface_coverage: bool = False,
 ) -> tuple[MeshData, TetMesh, IngestReport]:
     """
     Charge, nettoie et prepare le mesh source pour le reste du pipeline.
@@ -2259,6 +2269,9 @@ def run(
             de jonction, plus fine que `resolution` (opt-in, None =
             desactive par defaut). Ignore si `junction_zones` est vide ou
             None.
+        check_surface_coverage: mesure la part de la surface hors du volume
+            tetraedrise et la remonte dans l'`IngestReport` (opt-in, defaut
+            False : calcul supplementaire, aucun effet sur le maillage).
 
     Returns:
         Tuple (MeshData, TetMesh, IngestReport).
@@ -2282,5 +2295,17 @@ def run(
     )
 
     report.tetrahedra_generated = tet_mesh.tet_count
+
+    if check_surface_coverage:
+        from core.tet_coverage import surface_outside_volume
+
+        coverage = surface_outside_volume(
+            cleaned_mesh.vertices, cleaned_mesh.faces, tet_mesh.tet_vertices, tet_mesh.tetrahedra
+        )
+        report.surface_outside_volume_fraction = coverage.far_fraction
+        report.surface_outside_volume_area = coverage.far_area
+        report.surface_max_distance_to_tets = coverage.max_distance
+        report.tet_volume_ratio = coverage.volume_ratio
+        report.surface_outside_volume_clusters = [(c.area, c.center) for c in coverage.clusters[:10]]
 
     return mesh_data, tet_mesh, report

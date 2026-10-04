@@ -13,7 +13,7 @@ releves dans ces scripts, verifies avec l'utilisateur, sont repris :
   l'accord avec `axis_angles[0]` (`GcodeReport.c_mismatch_deg`) ;
 - firmware B = B d'Apex (B > 0 penche le CORPS de la tete vers +R, donc la
   buse vers le centre, meme convention que step9._positioned_toolhead_vertices) ;
-- le firmware commande le PIVOT de B, a `pivot_to_tip` (45 mm) de la pointe,
+- le firmware commande le PIVOT de B, a `pivot_to_tip` (46 mm) de la pointe,
   sans compensation : l'export la fait. Reference : a B = 0 les coordonnees
   firmware sont celles de la pointe (calibration buse verticale), donc
   X = R + L sin B et Z = z + L (cos B - 1) ;
@@ -74,7 +74,7 @@ class GcodeParams:
     retract_speed: float = 35.0          # mm/s (utilisateur, 2026-09-30)
     retract_min_travel: float = 2.0      # pas de retraction pour un trajet plus court (mm)
     travel_clearance: float = 1.0        # degagement le long d'un seul axe (mm)
-    pivot_to_tip: float = 45.0           # pivot de B -> pointe (mm)
+    pivot_to_tip: float = 46.0           # pivot de B -> pointe (mm) : 46, mesure de l'utilisateur (2026-10-01 ; 45 auparavant)
     # Modele pivot/pointe, parametre en attendant la confirmation de
     # l'utilisateur (sa previsualisation UX et ce modele divergent, 2026-09-30).
     # tilt_sign : signe du deport radial du pivot quand B > 0 (+1 = corps vers +R).
@@ -91,6 +91,14 @@ class GcodeParams:
     platform_margin: float = 1.0         # marge tete / plateau (mm)
     singularity_radius: float = 1e-6     # R sous lequel Y est herite du point precedent
     decimals: int = 4
+    # Le firmware interpole X, Z et B LINEAIREMENT. Le pivot etant a
+    # `pivot_to_tip` de la pointe, un changement de B entre deux points proches
+    # fait sortir la POINTE de sa trajectoire PENDANT le mouvement (mesure du
+    # 2026-10-01 : 1 953 mouvements extrudes du Benchy a plus de 1 mm, jusqu'a
+    # 26 mm ; visibles dans la previsualisation de l'utilisateur). Chaque
+    # mouvement est donc decoupe jusqu'a ce que la pointe reste a moins de cette
+    # distance (mm) de la droite visee. None = desactive (historique).
+    max_tip_deviation: Optional[float] = 0.05
 
 
 @dataclass
@@ -98,6 +106,8 @@ class GcodeReport:
     lines: int = 0
     moves: int = 0
     travels: int = 0
+    subdivided_moves: int = 0             # mouvements decoupes (max_tip_deviation)
+    max_tip_deviation_before: float = 0.0  # pire ecart de la pointe AVANT decoupage (mm)
     retractions: int = 0
     clearance_axes: dict = field(default_factory=lambda: {"Z": 0, "R": 0, "none": 0})
     filament_mm: float = 0.0
@@ -298,7 +308,7 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
     from core import _cpp
     table = getattr(head_zlow, "table", None) if head_zlow is not None else (np.zeros(0), np.zeros(0))
     if (_cpp.enabled() and hasattr(_cpp.module(), "export_gcode_body") and travel_check is None
-            and table is not None and n):
+            and table is not None and n and params.max_tip_deviation is None):
         body, st = _cpp.module().export_gcode_body(
             np.ascontiguousarray(pos), np.ascontiguousarray(ang[:, :2]), np.ascontiguousarray(ext),
             np.ascontiguousarray(skin, dtype=np.uint8), np.ascontiguousarray(slow, dtype=float),
@@ -326,6 +336,46 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
         n_loop = n
 
     def move(point, b, tip_speed, e_add=0.0, comment=""):
+        """Mouvement vers (point, b), DECOUPE si besoin pour que la pointe suive
+        la droite visee a `max_tip_deviation` pres (voir GcodeParams)."""
+        tol = params.max_tip_deviation
+        prev = state["fw"]
+        if tol is None or prev is None:
+            emit(point, b, tip_speed, e_add, comment)
+            return
+        a_tip, a_b = state["tip"], float(prev[3])
+        pieces = []
+
+        def deviation(p0, b0, fw0, p1, b1):
+            fw1 = machine_to_firmware(p1, b1, L, fw0[1], params.singularity_radius,
+                                      params.tilt_sign, params.z_reference)
+            mid_fw = [(u + v) / 2.0 for u, v in zip(fw0, fw1)]
+            mid_tip = firmware_to_machine(*mid_fw, L, params.tilt_sign, params.z_reference)
+            return float(np.linalg.norm(mid_tip - (np.asarray(p0) + np.asarray(p1)) / 2.0)), fw1
+
+        def split(p0, b0, fw0, p1, b1, depth):
+            dev, fw1 = deviation(p0, b0, fw0, p1, b1)
+            if depth == 0:
+                rep.max_tip_deviation_before = max(rep.max_tip_deviation_before, dev)
+            if dev <= tol or depth >= 10:
+                pieces.append((np.asarray(p1, dtype=float), b1))
+                return fw1
+            pm = (np.asarray(p0, dtype=float) + np.asarray(p1, dtype=float)) / 2.0
+            bm = (b0 + b1) / 2.0
+            fwm = split(p0, b0, fw0, pm, bm, depth + 1)
+            return split(pm, bm, fwm, p1, b1, depth + 1)
+
+        split(a_tip, a_b, prev, np.asarray(point, dtype=float), float(b), 0)
+        if len(pieces) > 1:
+            rep.subdivided_moves += 1
+        total = float(np.linalg.norm(np.asarray(point, dtype=float) - a_tip))
+        start = a_tip
+        for k, (p, bb) in enumerate(pieces):
+            share = float(np.linalg.norm(p - start)) / total if total > 1e-12 else 1.0 / len(pieces)
+            emit(p, bb, tip_speed, e_add * share, comment if k == len(pieces) - 1 else "")
+            start = p
+
+    def emit(point, b, tip_speed, e_add=0.0, comment=""):
         prev = state["fw"]
         fw = machine_to_firmware(point, b, L, None if prev is None else prev[1], params.singularity_radius,
                                  params.tilt_sign, params.z_reference)

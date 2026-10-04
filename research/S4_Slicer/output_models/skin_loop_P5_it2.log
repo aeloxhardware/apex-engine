@@ -1,16 +1,16 @@
-dino passe 5 : 310 couches de corps (rangs croissants), 37 zones de lissage inserees
-vitesse de depot 25 mm/s ; tete B limitee a 750 deg/s et 300 deg/s2 : temps des passes de lissage 5.6 min -> 12.2 min (x2.17)
-angles de tete (C impose par la position) : 0.4 s ; zones avec des points au-dela de 45 deg : 0
-collisions : 4481 points de lissage testes en 12.7 s
+tilted benchy undertriangulated_repaired passe 4 : 313 couches de corps (rangs croissants), 33 zones de lissage inserees
+vitesse de depot 25 mm/s ; tete B limitee a 750 deg/s et 300 deg/s2 : temps des passes de lissage 4.1 min -> 8.3 min (x2.03)
+angles de tete (C impose par la position) : 0.2 s ; zones avec des points au-dela de 45 deg : 1
+collisions : 3308 points de lissage testes en 9.4 s
 
-zones en collision (RETIREES) : 6/37 (2038 mm2 sur 3107)
-  zone   3 moment 264     7.2 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.10 mm), ecart tete max 27 deg
-  zone   4 moment 257  1365.9 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.04 mm), ecart tete max 45 deg
-  zone   5 moment 139   543.6 mm2 : plateau 0, piece 2, au-dela de 45 deg 0 (penetration max 0.12 mm), ecart tete max 45 deg
-  zone  28 moment 129   106.2 mm2 : plateau 0, piece 2, au-dela de 45 deg 0 (penetration max 0.16 mm), ecart tete max 24 deg
-  zone  29 moment  72     5.3 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.43 mm), ecart tete max 17 deg
-  zone  34 moment  69     9.4 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.16 mm), ecart tete max 38 deg
-zones gardees : 31, ecart tete / normale max par zone : mediane 28 deg, max 45 deg
-points de collision (rognage) : 11 sur 4481
-13 s au total
-R:\APEX_NEW_VERSION\slicer_alg\research\S4_Slicer\output_models\loop_dino_pin_print_order_pass5.pkl
+zones en collision (RETIREES) : 6/33 (234 mm2 sur 2211)
+  zone   5 moment 191    34.6 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.62 mm), ecart tete max 30 deg
+  zone   6 moment 191    37.1 mm2 : plateau 0, piece 4, au-dela de 45 deg 0 (penetration max 0.16 mm), ecart tete max 29 deg
+  zone  13 moment 290    62.1 mm2 : plateau 0, piece 0, au-dela de 45 deg 1 (penetration max 0.00 mm), ecart tete max 45 deg
+  zone  15 moment 213    15.0 mm2 : plateau 0, piece 3, au-dela de 45 deg 0 (penetration max 0.85 mm), ecart tete max 20 deg
+  zone  17 moment 219    12.4 mm2 : plateau 0, piece 6, au-dela de 45 deg 0 (penetration max 0.56 mm), ecart tete max 26 deg
+  zone  20 moment 111    72.4 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.19 mm), ecart tete max 19 deg
+zones gardees : 27, ecart tete / normale max par zone : mediane 31 deg, max 45 deg
+points de collision (rognage) : 16 sur 3308
+12 s au total
+R:\APEX_NEW_VERSION\slicer_alg\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_pin_print_order_pass4.pkl

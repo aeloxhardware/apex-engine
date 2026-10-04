@@ -1,11 +1,10 @@
-dino passe 5 : 310 couches de corps (rangs croissants), 30 zones de lissage inserees
-vitesse de depot 25 mm/s ; tete B limitee a 750 deg/s et 300 deg/s2 : temps des passes de lissage 2.1 min -> 4.3 min (x2.03)
-angles de tete (C impose par la position) : 0.1 s ; zones avec des points au-dela de 45 deg : 0
-collisions : 32259 points de lissage testes en 64.8 s
+tilted benchy undertriangulated_repaired passe 4 : 313 couches de corps (rangs croissants), 28 zones de lissage inserees
+vitesse de depot 25 mm/s ; tete B limitee a 750 deg/s et 300 deg/s2 : temps des passes de lissage 3.7 min -> 7.2 min (x1.93)
+angles de tete (C impose par la position) : 0.2 s ; zones avec des points au-dela de 45 deg : 0
+collisions : 57987 points de lissage testes en 112.0 s
 
-zones en collision (RETIREES) : 1/30 (523 mm2 sur 1120)
-  zone   3 moment 139   522.7 mm2 : plateau 0, piece 1, au-dela de 45 deg 0 (penetration max 0.01 mm), ecart tete max 45 deg
-zones gardees : 29, ecart tete / normale max par zone : mediane 28 deg, max 45 deg
-points de collision (rognage) : 1 sur 32259
-65 s au total
-R:\APEX_NEW_VERSION\slicer_alg\research\S4_Slicer\output_models\loop_dino_pin_print_order_pass5.pkl
+zones en collision (RETIREES) : 0/28 (0 mm2 sur 2032)
+zones gardees : 28, ecart tete / normale max par zone : mediane 33 deg, max 45 deg
+points de collision (rognage) : 0 sur 57987
+112 s au total
+R:\APEX_NEW_VERSION\slicer_alg\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_pin_print_order_pass4.pkl
