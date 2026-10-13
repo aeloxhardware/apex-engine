@@ -31,7 +31,62 @@ def test_pivot_offset_matches_step9_head_orientation(machine):
         r_body = float(np.hypot(body[0], body[1]))
         assert fx == pytest.approx(r_body, abs=1e-9)
         assert fz == pytest.approx(body[2] - 45.0, abs=1e-9)     # reference : pointe a B = 0
-        assert fb == b
+        assert fb == b           # B firmware = B d'Apex (b_sign = +1)
+
+
+def test_b_sign_roundtrips():
+    """b_sign = +1 par defaut (B positif = corps de la tete vers +R, buse vers le centre) ; avec -1
+    le B emis est l'oppose, la geometrie (X, Z) reste celle du B d'Apex, et l'aller-retour
+    firmware -> pointe reste exact dans les deux conventions."""
+    p = np.array([30.0, 0.0, 10.0])
+    fx, _, fz, fb = machine_to_firmware(p, 40.0, 46.0)
+    fx_neg, _, fz_neg, fb_neg = machine_to_firmware(p, 40.0, 46.0, b_sign=-1.0)
+    assert fb == 40.0 and fb_neg == -40.0
+    assert (fx, fz) == pytest.approx((fx_neg, fz_neg))
+    for sign in (-1.0, 1.0):
+        fw = machine_to_firmware(p, 40.0, 46.0, b_sign=sign)
+        assert firmware_to_machine(*fw, 46.0, b_sign=sign) == pytest.approx(p, abs=1e-9)
+    assert GcodeParams().b_sign == 1.0
+
+
+def test_clearance_avoids_blocked_points():
+    """Un point de degagement en contact est evite : l'autre axe au meme pas,
+    puis un pas double ; si tout est bloque, le premier candidat sur est garde."""
+    params = GcodeParams()
+    pos = np.array([30.0, 0.0, 10.0])
+    axis0, up0 = clearance_move(pos, 0.0, params)              # tete verticale : Z
+    assert axis0 == "Z" and up0 == pytest.approx([30.0, 0.0, 11.0])
+    # Z bloque a 1 mm : R au meme pas (sens du corps de la tete : B = 0 -> sr = 0 -> +R)
+    axis1, up1 = clearance_move(pos, 0.0, params, blocked=lambda p: p[2] > 10.5 and p[0] == 30.0)
+    assert axis1 == "R" and up1 == pytest.approx([31.0, 0.0, 10.0])
+    # les deux axes bloques a 1 mm : pas double (2 mm)
+    axis2, up2 = clearance_move(pos, 0.0, params,
+                                blocked=lambda p: np.linalg.norm(p - pos) < 1.5)
+    assert np.linalg.norm(up2 - pos) == pytest.approx(2.0)
+    # tout est bloque : repli sur le premier candidat sur, jamais pire que sans controle
+    axis3, up3 = clearance_move(pos, 0.0, params, blocked=lambda p: True)
+    assert (axis3, tuple(up3)) == (axis0, tuple(up0))
+
+
+def test_y_turns_reported_and_limit_refuses_write(machine, tmp_path):
+    """Le cumul de rotation de Y est rapporte en tours ; `max_y_turns` avec `strict`
+    refuse d'ecrire le fichier (cables / joint tournant)."""
+    n = 40
+    t = np.linspace(0.0, 3 * 2 * np.pi, n)                 # 3 tours de plateau
+    pos = np.column_stack([30.0 * np.cos(t), 30.0 * np.sin(t), np.full(n, 0.2)])
+    ang = np.array([[_c(machine, p), 0.0] for p in pos])
+    tp = {"position": pos, "axis_angles": ang, "extrusion": np.r_[0.0, np.ones(n - 1)],
+          "is_skin": np.zeros(n, dtype=bool)}
+    _, rep = export_gcode(tp, machine, GcodeParams())
+    assert rep.y_turns == pytest.approx(3.0, abs=0.2)
+    _, rep_native = export_gcode(tp, machine, GcodeParams(max_tip_deviation=None))   # chemin natif si actif
+    assert rep_native.y_turns == pytest.approx(rep.y_turns, abs=1e-6)
+    out = tmp_path / "t.gcode"
+    _, rep_ok = export_gcode(tp, machine, GcodeParams(strict=True, max_y_turns=5.0), str(out))
+    assert rep_ok.written and out.exists()
+    out2 = tmp_path / "t2.gcode"
+    _, rep_no = export_gcode(tp, machine, GcodeParams(strict=True, max_y_turns=2.0), str(out2))
+    assert not rep_no.written and not out2.exists()
 
 
 def test_known_cases(machine):
@@ -191,3 +246,18 @@ def test_moves_are_split_so_the_tip_follows_the_line(machine):
         worst = max(worst, float(np.linalg.norm(tm - (ta + tb) / 2)))
     assert worst <= 0.05 + 1e-9
     assert r1.filament_mm == pytest.approx(r0.filament_mm, rel=1e-9)
+
+
+def test_firmware_time_estimate_slows_on_z_limit(machine):
+    """Les vitesses max par axe ralentissent l'estimation : une montee de B (donc de Z, par la
+    compensation du pivot) a Z lent coute bien plus que Z rapide ; sans limite : rien."""
+    n = 30
+    pos = np.column_stack([np.linspace(20.0, 21.0, n), np.zeros(n), np.full(n, 5.0)])
+    ang = np.array([[_c(machine, p), 3.0 * k] for k, p in enumerate(pos)])   # B monte de 3 deg par point
+    tp = {"position": pos, "axis_angles": ang, "extrusion": np.r_[0.0, np.ones(n - 1)],
+          "is_skin": np.zeros(n, dtype=bool)}
+    fast = export_gcode(tp, machine, GcodeParams(fw_axis_speeds=(1666.7, 600.0, 133.3, 1666.7)))[1]
+    slow = export_gcode(tp, machine, GcodeParams(fw_axis_speeds=(1666.7, 600.0, 1.0, 1666.7)))[1]
+    none = export_gcode(tp, machine, GcodeParams(fw_axis_speeds=None))[1]
+    assert none.print_time_fw_s == 0.0
+    assert slow.print_time_fw_s > 3.0 * fast.print_time_fw_s > 0.0

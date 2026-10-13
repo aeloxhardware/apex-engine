@@ -78,6 +78,16 @@ class Step10Params:
     # Nombre de voisins de part et d'autre du point modifie sur lesquels
     # valider les limites de vitesse/acceleration angulaire.
     rate_limit_neighbor_margin: int = 1
+    # Diagnostics d'ORIENTATION de l'etape 8 (ecart tete / direction visee,
+    # sans collision) : seuls ceux dont l'ecart residuel depasse ce seuil
+    # (degres) entrent dans la boucle (re-segmentation, puis support de
+    # secours). Les autres sont journalises `orientation_deviation` et ne
+    # comptent PAS comme supports. None (DEFAUT, decision de l'utilisateur
+    # du 2026-10-07) = jamais : un support ne corrige pas une orientation.
+    # 0.0 = comportement historique (tout diagnostic devient support :
+    # 115 312 sur death contre 209 vraies collisions, limite #74).
+    # Une collision reelle au meme point suit toujours la voie normale.
+    orientation_support_min_residual_deg: Optional[float] = None
 
 
 def clamp_head_height(
@@ -179,7 +189,7 @@ def reorient_coupled_tiers(
     L'entree n'est jamais mutee.
     """
     from pipeline.step9_collision_sim import (
-        FastCollisionChecker,
+        fast_checker_for,
         _filter_nozzle_contact_zone,
         _positioned_toolhead_vertices,
     )
@@ -197,7 +207,7 @@ def reorient_coupled_tiers(
         _surface_sample_points(machine_profile.nozzle_model, sim_params.toolhead_sample_spacing),
         sim_params.nozzle_contact_clearance,
     )
-    checker = FastCollisionChecker(toolpath, machine_profile, sim_params, samples)
+    checker = fast_checker_for(toolpath, machine_profile, sim_params, samples)
     lo, hi = axes[ax].angle_range_deg
     grid = np.arange(lo, hi + 1e-9, grid_step_deg)
     z_unit = np.array([[0.0, 0.0, 1.0]])
@@ -472,12 +482,12 @@ def _build_reorientation_context(
 def _fast_checker(toolpath, machine_profile, sim_params):
     """Controleur rapide de step9, avec les MEMES echantillons de tete que
     step9 en mode rapide (zone de contact de la buse retiree)."""
-    from pipeline.step9_collision_sim import FastCollisionChecker, _filter_nozzle_contact_zone
+    from pipeline.step9_collision_sim import fast_checker_for, _filter_nozzle_contact_zone
     samples = _filter_nozzle_contact_zone(
         _surface_sample_points(machine_profile.nozzle_model, sim_params.toolhead_sample_spacing),
         sim_params.nozzle_contact_clearance,
     )
-    return FastCollisionChecker(toolpath, machine_profile, sim_params, samples)
+    return fast_checker_for(toolpath, machine_profile, sim_params, samples)
 
 
 def _fast_events(checker, point_idx: int, point: ToolpathPoint) -> list[CollisionEvent]:
@@ -661,9 +671,29 @@ def run(
     axes = machine_profile.rotation_axes or []
 
     tracked_indices = sorted({event.point_index for event in collision_report.events})
-    diagnostic_indices = sorted(
-        {diagnostic.point_index for diagnostic in (step8_diagnostics or [])}
-    )
+    diagnostics = list(step8_diagnostics or [])
+    threshold = params.orientation_support_min_residual_deg
+    if threshold is None:
+        threshold = float("inf")
+    if diagnostics:
+        # Ecart d'orientation sous le seuil : journalise, jamais un support
+        # (voir Step10Params.orientation_support_min_residual_deg).
+        logged: set[int] = set()
+        for diagnostic in diagnostics:
+            if diagnostic.residual_angle_error_deg <= threshold and diagnostic.point_index not in logged:
+                logged.add(diagnostic.point_index)
+                entries.append(
+                    AdjustmentLogEntry(
+                        point_index=diagnostic.point_index,
+                        method="orientation_deviation",
+                        detail=(
+                            f"ecart d'orientation {diagnostic.residual_angle_error_deg:.1f} deg "
+                            f"<= {threshold:g} deg : depot incline, sans support"
+                        ),
+                    )
+                )
+        diagnostics = [d for d in diagnostics if d.residual_angle_error_deg > threshold]
+    diagnostic_indices = sorted({diagnostic.point_index for diagnostic in diagnostics})
 
     pending_events = list(collision_report.events)
     iterations_used = 0
@@ -688,10 +718,13 @@ def run(
         # ci-dessus) - voir _ReorientationContext.
         reorientation_context = _build_reorientation_context(current, machine_profile, sim_params)
 
+        # Ensembles, pas listes : avec la normale par point, death compte ~115 000
+        # diagnostics d'etape 8, et un `in` sur la liste triee rendait cette boucle
+        # quadratique (73 s sur 81 s de step10, 2026-10-06). Meme resultat.
+        diagnostic_set = set(diagnostic_indices)
+        pending_event_indices = {event.point_index for event in pending_events}
         for point_index in problem_indices:
-            is_diagnostic_only = point_index in diagnostic_indices and not any(
-                event.point_index == point_index for event in pending_events
-            )
+            is_diagnostic_only = point_index in diagnostic_set and point_index not in pending_event_indices
 
             # --- Niveau 1 : reorientation locale ------------------------------
             if not is_diagnostic_only:

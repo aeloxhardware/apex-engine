@@ -367,7 +367,7 @@ def test_step8_diagnostic_skips_reorientation_and_goes_to_resegmentation():
         report,
         machine,
         _sim_params(),
-        Step10Params(),
+        Step10Params(orientation_support_min_residual_deg=0.0),
         step8_diagnostics=diagnostics,
         resegmentation_hook=hook,
     )
@@ -393,10 +393,65 @@ def test_step8_diagnostic_falls_back_to_support_without_hook():
     ]
 
     _adjusted, adjustment = adjustment_run(
-        toolpath, report, machine, _sim_params(), Step10Params(), step8_diagnostics=diagnostics
+        toolpath, report, machine, _sim_params(), Step10Params(orientation_support_min_residual_deg=0.0),
+        step8_diagnostics=diagnostics,
     )
 
     assert [entry.method for entry in adjustment.entries] == ["fallback_support"]
+
+    # Defaut (None) : un ecart d'orientation n'est jamais un support.
+    _adjusted, adjustment = adjustment_run(
+        toolpath, report, machine, _sim_params(), Step10Params(), step8_diagnostics=diagnostics
+    )
+    assert [entry.method for entry in adjustment.entries] == ["orientation_deviation"]
+
+
+def _one_diagnostic(toolpath, residual):
+    return [
+        Step8Diagnostic(
+            point_index=2,
+            layer_id=0,
+            segment_index=0,
+            residual_angle_error_deg=residual,
+            position=toolpath.points[2].position,
+        )
+    ]
+
+
+def test_orientation_deviation_below_threshold_is_logged_not_supported():
+    """Un ecart d'orientation sous le seuil n'est pas un support (2026-10-07)."""
+    machine = _z_axis_machine(_offset_toolhead())
+    toolpath = _wall_then_probe_toolpath(np.array([500.0, 500.0, 5.0]))
+    report = collision_run(toolpath, machine, _sim_params())
+    params = Step10Params(orientation_support_min_residual_deg=45.0)
+
+    _adjusted, adjustment = adjustment_run(
+        toolpath, report, machine, _sim_params(), params, step8_diagnostics=_one_diagnostic(toolpath, 42.0)
+    )
+    assert [entry.method for entry in adjustment.entries] == ["orientation_deviation"]
+    assert adjustment.converged is True
+
+    _adjusted, adjustment = adjustment_run(
+        toolpath, report, machine, _sim_params(), params, step8_diagnostics=_one_diagnostic(toolpath, 50.0)
+    )
+    assert [entry.method for entry in adjustment.entries] == ["fallback_support"]
+
+
+def test_orientation_threshold_never_hides_a_real_collision():
+    machine = _z_axis_machine(_offset_toolhead())
+    toolpath = _wall_then_probe_toolpath(np.array([0.0, 0.0, 5.0]))
+    report = collision_run(toolpath, machine, _sim_params())
+    assert report.has_collisions
+    reference = adjustment_run(toolpath, report, machine, _sim_params(), Step10Params())[1]
+    params = Step10Params()   # defaut : aucun ecart d'orientation compte comme support
+    diagnostics = [
+        Step8Diagnostic(point_index=e.point_index, layer_id=0, segment_index=0,
+                        residual_angle_error_deg=10.0, position=toolpath.points[e.point_index].position)
+        for e in report.events
+    ]
+    adjustment = adjustment_run(toolpath, report, machine, _sim_params(), params, step8_diagnostics=diagnostics)[1]
+    handled = [e.method for e in adjustment.entries if e.method != "orientation_deviation"]
+    assert handled == [e.method for e in reference.entries]
 
 
 # ---------------------------------------------------------------------------

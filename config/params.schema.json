@@ -372,8 +372,12 @@
   },
   "GcodeParams": {
    "additionalProperties": false,
-   "description": "GcodeParams(nozzle_temp: 'float' = 195.0, filament_diameter: 'float' = 1.75, layer_height: 'float' = 0.2, skin_thickness: 'float' = 0.2, line_width: 'float' = 0.4, flow: 'float' = 1.0, print_speed: 'float' = 25.0, travel_speed: 'float' = 80.0, rotation_feed: 'float' = 3000.0, max_feed: 'float' = 12000.0, retract_length: 'float' = 0.8, retract_speed: 'float' = 35.0, retract_min_travel: 'float' = 2.0, travel_clearance: 'float' = 1.0, pivot_to_tip: 'float' = 46.0, tilt_sign: 'float' = 1.0, z_refere",
+   "description": "GcodeParams(nozzle_temp: 'float' = 195.0, filament_diameter: 'float' = 1.75, layer_height: 'float' = 0.2, skin_thickness: 'float' = 0.2, line_width: 'float' = 0.4, flow: 'float' = 1.0, print_speed: 'float' = 25.0, travel_speed: 'float' = 80.0, rotation_feed: 'float' = 3000.0, max_feed: 'float' = 12000.0, retract_length: 'float' = 0.8, retract_speed: 'float' = 35.0, retract_min_travel: 'float' = 2.0, travel_clearance: 'float' = 1.0, travel_clearance_max_factor: 'float' = 4.0, pivot_to_tip: 'float",
    "properties": {
+    "b_sign": {
+     "default": 1.0,
+     "type": "number"
+    },
     "decimals": {
      "default": 4,
      "type": "integer"
@@ -386,6 +390,22 @@
      "default": 1.0,
      "type": "number"
     },
+    "fw_axis_speeds": {
+     "anyOf": [
+      {
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": [
+      1666.7,
+      600.0,
+      133.3,
+      1666.7
+     ]
+    },
     "layer_height": {
      "default": 0.2,
      "type": "number"
@@ -397,6 +417,28 @@
     "max_feed": {
      "default": 12000.0,
      "type": "number"
+    },
+    "max_tip_deviation": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": 0.05
+    },
+    "max_y_turns": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
     },
     "nozzle_temp": {
      "default": 195.0,
@@ -452,6 +494,10 @@
     },
     "travel_clearance": {
      "default": 1.0,
+     "type": "number"
+    },
+    "travel_clearance_max_factor": {
+     "default": 4.0,
      "type": "number"
     },
     "travel_speed": {
@@ -698,6 +744,7 @@
       "excluded_range_half_width_deg": 15.0,
       "max_adjustment_iterations": 3,
       "max_direction_deviation_deg": 45.0,
+      "orientation_support_min_residual_deg": null,
       "rate_limit_neighbor_margin": 1,
       "reorientation_samples_per_axis": 12
      }
@@ -867,8 +914,8 @@
      "$ref": "#/$defs/MachineProfile",
      "default": {
       "build_volume": null,
-      "max_angular_acceleration": 5.235987755982989,
-      "max_angular_velocity": 13.08996938995747,
+      "max_angular_acceleration": 22.689280275926283,
+      "max_angular_velocity": 29.08940264298949,
       "nozzle_diameter": 0.4,
       "platform_origin": [
        0.0,
@@ -916,12 +963,12 @@
      "default": {
       "clamp_angle_rates": false,
       "default_feedrate": 1000.0,
-      "free_axis_median_window": 0,
+      "free_axis_median_window": 9,
       "ik_refine_iterations": 8,
       "ik_refine_step_multiplier": 0.5,
       "ik_samples_per_axis": 10,
       "max_unreachable_angular_error_deg": 5.0,
-      "per_point_normal": false,
+      "per_point_normal": true,
       "per_point_normal_nodal": false,
       "singularity_radius_epsilon": 0.001,
       "travel_feedrate": 0.0
@@ -956,6 +1003,10 @@
        1.0
       ]
      }
+    },
+    "place_on_platform": {
+     "default": true,
+     "type": "boolean"
     },
     "reachable_tilt_from_machine": {
      "default": true,
@@ -1178,7 +1229,7 @@
   },
   "Step10Params": {
    "additionalProperties": false,
-   "description": "Step10Params(max_adjustment_iterations: 'int' = 3, reorientation_samples_per_axis: 'int' = 12, max_direction_deviation_deg: 'float' = 45.0, excluded_range_half_width_deg: 'float' = 15.0, rate_limit_neighbor_margin: 'int' = 1)",
+   "description": "Step10Params(max_adjustment_iterations: 'int' = 3, reorientation_samples_per_axis: 'int' = 12, max_direction_deviation_deg: 'float' = 45.0, excluded_range_half_width_deg: 'float' = 15.0, rate_limit_neighbor_margin: 'int' = 1, orientation_support_min_residual_deg: 'Optional[float]' = None)",
    "properties": {
     "excluded_range_half_width_deg": {
      "default": 15.0,
@@ -1191,6 +1242,17 @@
     "max_direction_deviation_deg": {
      "default": 45.0,
      "type": "number"
+    },
+    "orientation_support_min_residual_deg": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
     },
     "rate_limit_neighbor_margin": {
      "default": 1,
@@ -1319,7 +1381,7 @@
   },
   "Step8Params": {
    "additionalProperties": false,
-   "description": "Step8Params(ik_samples_per_axis: 'int' = 10, ik_refine_iterations: 'int' = 8, ik_refine_step_multiplier: 'float' = 0.5, singularity_radius_epsilon: 'float' = 0.001, travel_feedrate: 'float' = 0.0, default_feedrate: 'float' = 1000.0, max_unreachable_angular_error_deg: 'float' = 5.0, clamp_angle_rates: 'bool' = False, free_axis_median_window: 'int' = 0, per_point_normal: 'bool' = False, per_point_normal_nodal: 'bool' = False)",
+   "description": "Step8Params(ik_samples_per_axis: 'int' = 10, ik_refine_iterations: 'int' = 8, ik_refine_step_multiplier: 'float' = 0.5, singularity_radius_epsilon: 'float' = 0.001, travel_feedrate: 'float' = 0.0, default_feedrate: 'float' = 1000.0, max_unreachable_angular_error_deg: 'float' = 5.0, clamp_angle_rates: 'bool' = False, free_axis_median_window: 'int' = 9, per_point_normal: 'bool' = True, per_point_normal_nodal: 'bool' = False)",
    "properties": {
     "clamp_angle_rates": {
      "default": false,
@@ -1330,7 +1392,7 @@
      "type": "number"
     },
     "free_axis_median_window": {
-     "default": 0,
+     "default": 9,
      "type": "integer"
     },
     "ik_refine_iterations": {
@@ -1350,7 +1412,7 @@
      "type": "number"
     },
     "per_point_normal": {
-     "default": false,
+     "default": true,
      "type": "boolean"
     },
     "per_point_normal_nodal": {

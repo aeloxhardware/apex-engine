@@ -753,7 +753,7 @@ class SupportCheckReport:
 class AdjustmentLogEntry:
     """Une entrée du journal d'ajustement post-collision (étape 10)."""
     point_index: int
-    method: str                     # "local_reorientation" | "region_resegmentation" | "fallback_support"
+    method: str                     # "local_reorientation" | "region_resegmentation" | "fallback_support" | "orientation_deviation"
     detail: str = ""
 
 

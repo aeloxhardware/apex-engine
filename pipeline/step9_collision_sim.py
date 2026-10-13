@@ -586,6 +586,11 @@ def _check_static_obstacle(
 
 PLATFORM_RADIUS = 150.0      # mm, ordre de grandeur d'un plateau, faute de mieux fourni
 PLATFORM_HALF_HEIGHT = 0.5   # mm, moitie de l'epaisseur du disque (cylinder(height=1.0))
+# SURFACE du plateau a z = platform_origin.z (corrige le 2026-10-06) : les pieces posent a
+# z = platform_z (step3) et l'export G-code / la chaine Bird comptent le plateau en z = 0. Le disque
+# etait jusque-la CENTRE sur l'origine, donc sa surface etait a +0,5 mm et step9 etait 0,5 mm plus
+# strict que la marge annoncee (limite #70). Le centre du disque est desormais a origine - 0,5 mm.
+PLATFORM_CENTER_OFFSET = -PLATFORM_HALF_HEIGHT
 
 
 def _check_platform_disc(
@@ -628,7 +633,7 @@ def _check_platform_disc(
     # hors de la demi-epaisseur, combines - nulle a l'interieur (penetration).
     radius = PLATFORM_RADIUS if platform_radius is None else float(platform_radius)
     dr = np.maximum(radial - radius, 0.0)
-    dz = np.maximum(np.abs(local[:, 2]) - PLATFORM_HALF_HEIGHT, 0.0)
+    dz = np.maximum(np.abs(local[:, 2] - PLATFORM_CENTER_OFFSET) - PLATFORM_HALF_HEIGHT, 0.0)
     min_distance = float(np.hypot(dr, dz).min())
 
     if min_distance >= safety_margin:
@@ -654,7 +659,8 @@ def _platform_mesh_at_angle(
     disc = trimesh.creation.cylinder(
         radius=PLATFORM_RADIUS, height=PLATFORM_HALF_HEIGHT * 2.0, sections=32
     )
-    disc.apply_translation(np.asarray(machine_profile.platform_origin, dtype=float))
+    disc.apply_translation(np.asarray(machine_profile.platform_origin, dtype=float)
+                           + np.array([0.0, 0.0, PLATFORM_CENTER_OFFSET]))
     return disc
 
 
@@ -752,7 +758,7 @@ class FastCollisionChecker:
         self.machine, self.params, self.samples = machine_profile, params, toolhead_base_samples
         self.reach = params.safety_margin + machine_profile.nozzle_diameter / 2.0
         self.dense, self.owner = _densified_printed_material(toolpath.points, params.fast_densify_step)
-        self.tree = cKDTree(self.dense) if len(self.dense) else None
+        self._tree = None       # arbre scipy construit a la demande : inutile en mode natif (2026-10-06)
         self.owner_pad = np.r_[self.owner, np.iinfo(np.int64).max]   # indice "absent" de cKDTree
         # Pas 19 du portage C++ : meme minimum exact, en natif, avec elagage
         # des sous-arbres entierement futurs (CLAUDE.md limite #56).
@@ -760,6 +766,13 @@ class FastCollisionChecker:
         if len(self.dense) and _cpp.enabled() and hasattr(_cpp.module(), "PastMaterialIndex"):
             self.native = _cpp.module().PastMaterialIndex(
                 np.ascontiguousarray(self.dense, dtype=float), np.ascontiguousarray(self.owner, dtype=np.int64))
+
+    @property
+    def tree(self):
+        if self._tree is None and len(self.dense):
+            from scipy.spatial import cKDTree
+            self._tree = cKDTree(self.dense)
+        return self._tree
 
     def penetrations(self, point_idx: int, position: np.ndarray, axis_angles: list[float], verts=None):
         """(penetration plateau ou None, penetration piece ou None). `verts` :
@@ -806,7 +819,7 @@ def _platform_disc_batch(verts_block: np.ndarray, machine_profile: MachineProfil
     # sont a plus de `margin` au-dessus (ou au-dessous) de l'epaisseur du
     # plateau ne peut pas le toucher. Seules les autres paient le calcul
     # complet (2 s sur 2 sur death sans ce tri : 86 M d'hypot).
-    dz_all = np.maximum(np.abs(verts_block[..., 2] - origin[2]) - PLATFORM_HALF_HEIGHT, 0.0)
+    dz_all = np.maximum(np.abs(verts_block[..., 2] - origin[2] - PLATFORM_CENTER_OFFSET) - PLATFORM_HALF_HEIGHT, 0.0)
     near = np.flatnonzero(dz_all.min(axis=1) < margin)
     result: list = [None] * len(verts_block)
     if len(near) == 0:
@@ -816,11 +829,34 @@ def _platform_disc_batch(verts_block: np.ndarray, machine_profile: MachineProfil
     radius_value = getattr(machine_profile, "platform_radius", None)
     radius = PLATFORM_RADIUS if radius_value is None else float(radius_value)
     dr = np.maximum(radial - radius, 0.0)
-    dz = np.maximum(np.abs(local[..., 2]) - PLATFORM_HALF_HEIGHT, 0.0)
+    dz = np.maximum(np.abs(local[..., 2] - PLATFORM_CENTER_OFFSET) - PLATFORM_HALF_HEIGHT, 0.0)
     minimum = np.hypot(dr, dz).min(axis=1)
     for k, m in zip(near, minimum):
         result[k] = None if float(m) >= margin else margin - float(m)
     return result
+
+
+_FAST_CHECKER_CACHE: dict = {}
+
+
+def fast_checker_for(toolpath: ToolpathMachine, machine_profile: MachineProfile, params: CollisionSimParams,
+                     toolhead_base_samples: np.ndarray) -> "FastCollisionChecker":
+    """FastCollisionChecker REUTILISE tant que la matiere est la meme (2026-10-06). La matiere ne
+    depend que des positions et des extrusions, jamais des angles : step9 puis les iterations de
+    step10 (qui ne changent que des angles) partagent le meme controleur au lieu de le
+    reconstruire (5 constructions, 7,3 s sur death). Cache a une entree, compare par valeur
+    (positions, extrusions, echantillons de tete, parametres) et par identite du profil machine."""
+    pos = np.array([p.position for p in toolpath.points], dtype=float)
+    ext = np.array([p.extrusion for p in toolpath.points], dtype=float)
+    samples = np.asarray(toolhead_base_samples, dtype=float)
+    hit = _FAST_CHECKER_CACHE.get("entry")
+    if (hit is not None and hit[0] is machine_profile and hit[1] == params
+            and hit[2].shape == pos.shape and np.array_equal(hit[2], pos) and np.array_equal(hit[3], ext)
+            and hit[4].shape == samples.shape and np.array_equal(hit[4], samples)):
+        return hit[5]
+    checker = FastCollisionChecker(toolpath, machine_profile, params, samples)
+    _FAST_CHECKER_CACHE["entry"] = (machine_profile, params, pos, ext, samples, checker)
+    return checker
 
 
 def _run_fast_kdtree(
@@ -831,7 +867,7 @@ def _run_fast_kdtree(
     sample_indices: list[int],
 ) -> list[CollisionEvent]:
     """Variante rapide de la boucle de `run` (voir FastCollisionChecker)."""
-    checker = FastCollisionChecker(toolpath, machine_profile, params, toolhead_base_samples)
+    checker = fast_checker_for(toolpath, machine_profile, params, toolhead_base_samples)
     events: list[CollisionEvent] = []
     axes = machine_profile.rotation_axes or []
     chunk = 1000

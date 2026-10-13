@@ -79,6 +79,7 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
         print(f"[preview] Passe legere - detection des zones de jonction : {mesh_path}")
         light_mesh_data, light_tet_mesh, light_ingest_report = ingest_run(
             mesh_path, resolution=params.resolution, allow_multi_mesh=params.allow_multi_mesh,
+            place_on_platform=params.place_on_platform,
         )
         light_overhang_map = overhang_run(light_mesh_data, params.overhang)
         light_segmentation_params = (
@@ -103,6 +104,7 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
         near_platform_margin=params.near_platform_margin,
         junction_zones=junction_zones,
         junction_refinement_resolution=params.junction_refinement_resolution,
+        place_on_platform=params.place_on_platform,
     )
 
     print("[preview] Etape 2/8 - detection des surplombs")

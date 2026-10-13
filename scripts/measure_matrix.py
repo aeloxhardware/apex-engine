@@ -32,6 +32,9 @@ from scripts.export_slicing_preview import run_slicing_only  # noqa: E402
 def apply_variant(params: PipelineParams, name: str) -> None:
     if name == "ref":
         return
+    if name == "placed":            # modele pose a z = 0 a l'ingestion (2026-10-13)
+        params.place_on_platform = True
+        return
     if name == "ref_noradial":      # reference historique (avant l'activation par defaut, limite #64)
         params.reachable_tilt_from_machine = False
         return

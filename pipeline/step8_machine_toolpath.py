@@ -111,7 +111,11 @@ class Step8Params:
     # (x3,7 sur le temps du corps). 9 points : -41 % de temps. Opt-in : a
     # appliquer AVANT tout controle de collision (step9 valide les angles
     # filtres). L'ecart residuel a la direction visee est recalcule.
-    free_axis_median_window: int = 0
+    # ACTIVE PAR DEFAUT a 9 (2026-10-06) : mesure sur les 4 modeles de res/test_models/ avec la
+    # normale par point active (limite #69/#70) : temps d'impression -19 / -20 / -31 / -21 %,
+    # collisions de la vraie tete en baisse (death 137 -> 118, turkish 1613 -> 1406), matiere
+    # sans appui inchangee ; cout : ecart median tete/normale +0,2 a +0,4 deg. 0 = aucun filtre.
+    free_axis_median_window: int = 9
     # Normale PAR POINT (phase 3.1, session du 2026-10-01). Par defaut, la cible
     # de l'IK est la normale du plan MOYEN de la couche, une seule pour toute la
     # couche. Sur la machine actuelle (C impose par la position, limite #59), une
@@ -121,7 +125,11 @@ class Step8Params:
     # l'orchestrateur (`run(..., direction_field=...)`) ; sans champ fourni,
     # comportement historique. Meme choix que la recherche (full_step89 :
     # « normale du corps = gradient de phi »).
-    per_point_normal: bool = False
+    # ACTIVE PAR DEFAUT (2026-10-06, decision de l'utilisateur) et reglable : mesure
+    # sur les 4 modeles, ecart median tete/normale divise par 2 a 3, mais temps
+    # d'impression +65 a +130 % (voir CLAUDE.md, limite #69). False = normale du
+    # plan moyen de la couche (historique).
+    per_point_normal: bool = True
     # Variante continue de la normale par point (gradient moyenne aux noeuds,
     # interpole en barycentrique) ; sans effet si per_point_normal est faux.
     per_point_normal_nodal: bool = False
@@ -767,7 +775,22 @@ def run(
     raw_points = _iter_schedule_points(schedule, layers_by_id, params)
     if params.per_point_normal and direction_field is not None and raw_points:
         _apply_per_point_normals(raw_points, layers_by_id, direction_field)
+    return resolve_raw_points(raw_points, machine_profile, params)
 
+
+def resolve_raw_points(
+    raw_points: "_RawPoints",
+    machine_profile: MachineProfile,
+    params: Step8Params,
+) -> tuple[ToolpathMachine, list[Step8Diagnostic]]:
+    """
+    Points bruts (position + direction visee, extrusion, couche) -> trajectoire
+    machine : IK (couplee a la position si la machine l'impose), filtre median
+    des axes libres, lissage optionnel, diagnostics. Extrait de `run` le
+    2026-10-07 sans changement de comportement, pour que la voie Bird
+    (pipeline/bird), qui produit ses points sans couches ni planning, passe
+    par exactement la meme resolution.
+    """
     axes = machine_profile.rotation_axes or []
     # Direction a angles nuls = SENS D'IMPRESSION de la tete au repos : tete
     # vers le bas, donc impression vers +Z (axe du corps de la tete, +Z du
@@ -1179,8 +1202,6 @@ def _median_filter_free_axes(resolved_angles, raw_points, axes, machine_profile,
     ecarts residuels recalculés en radians)."""
     from scipy.ndimage import median_filter
 
-    from core.geometry_utils import _rodrigues_rotate_single
-
     angles = np.array(resolved_angles, dtype=float)
     coupled = set(getattr(machine_profile, "position_coupled_axes", None) or [])
     free = [i for i in range(len(axes)) if i not in coupled]
@@ -1200,16 +1221,29 @@ def _median_filter_free_axes(resolved_angles, raw_points, axes, machine_profile,
                     angles[start:i, ax] = median_filter(angles[start:i, ax], size=window, mode="nearest")
             start = i
     units = [np.asarray(s.axis, dtype=float) / np.linalg.norm(s.axis) for s in axes]
-    residual = np.zeros(len(raw_points))
     _positions, desired = _point_arrays(raw_points)
-    for i in range(len(raw_points)):
-        d = np.asarray(reference_direction, dtype=float)
-        for u, a in zip(reversed(units), reversed(angles[i])):
-            d = _rodrigues_rotate_single(d, u, np.radians(a))
-        t = np.asarray(desired[i], dtype=float)
-        t = t / max(np.linalg.norm(t), 1e-12)
-        residual[i] = float(np.arccos(np.clip(d @ t, -1.0, 1.0)))
-    return [list(a) for a in angles], list(residual)
+    # Ecart residuel recalcule PAR LOTS (2026-10-06 : la boucle point par point
+    # coutait ~12 s sur death avec la normale par point). Meme formule de Rodrigues,
+    # memes operations dans le meme ordre que `_rodrigues_rotate_single` ; seul le
+    # cos/sin vectorise de numpy peut differer d'un ULP (sans effet sur un seuil en degres).
+    n = len(raw_points)
+    d = np.tile(np.asarray(reference_direction, dtype=float), (n, 1))
+    for k in range(len(units) - 1, -1, -1):
+        u = units[k]
+        rad = np.radians(angles[:, k])
+        cos_a, sin_a = np.cos(rad), np.sin(rad)
+        dot = d[:, 0] * u[0] + d[:, 1] * u[1] + d[:, 2] * u[2]
+        cx = u[1] * d[:, 2] - u[2] * d[:, 1]
+        cy = u[2] * d[:, 0] - u[0] * d[:, 2]
+        cz = u[0] * d[:, 1] - u[1] * d[:, 0]
+        factor = dot * (1.0 - cos_a)
+        d = np.column_stack([d[:, 0] * cos_a + cx * sin_a + u[0] * factor,
+                             d[:, 1] * cos_a + cy * sin_a + u[1] * factor,
+                             d[:, 2] * cos_a + cz * sin_a + u[2] * factor])
+    t = np.asarray(desired, dtype=float).reshape(n, 3)
+    t = t / np.maximum(np.linalg.norm(t, axis=1), 1e-12)[:, None]
+    residual = np.arccos(np.clip((d * t).sum(axis=1), -1.0, 1.0)) if n else np.zeros(0)
+    return [list(a) for a in angles], [float(r) for r in residual]
 
 
 def _smooth_all_axes(

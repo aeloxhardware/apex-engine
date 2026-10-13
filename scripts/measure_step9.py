@@ -27,6 +27,11 @@ def main():
         params.machine_toolpath.per_point_normal = True
         params.machine_toolpath.per_point_normal_nodal = True
         params.machine_toolpath.free_axis_median_window = 9
+    if "--median" in flags:
+        # filtre median des axes libres (limite #63), applique dans step8 donc AVANT step9
+        params.machine_toolpath.free_axis_median_window = int(flags["--median"])
+    if "--no-ppn" in sys.argv:
+        params.machine_toolpath.per_point_normal = False
     result = run_slicing_only(model, params)
     tp = result.toolpath
     p = s9.CollisionSimParams(**{**params.collision.__dict__, "fast_kdtree": True})

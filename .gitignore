@@ -31,3 +31,7 @@ cpp/build_old_*/
 # trimesh/tetgen), et des donnees volumineuses (gifs, pickle_files) qui ne
 # font pas partie du code Apex. Reste local, jamais pousse.
 research/
+
+# CONFIDENTIEL (methode brevetable, decision de l utilisateur du 2026-10-07) : jamais versionne.
+Methode_calibration_*.docx
+config/pivot_to_tip.json.tmp

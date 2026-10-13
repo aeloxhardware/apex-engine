@@ -644,6 +644,42 @@ def test_ingest_explicit_platform_z_overrides_detection():
     assert report.platform_z_used == 0.0
 
 
+@pytest.mark.parametrize("z_shift", [_PLATFORM_Z_OFFSET, -15.0])
+def test_place_on_platform_translates_in_z_only(z_shift):
+    """
+    `place_on_platform` ramene min(z) a 0 par une translation en z SEULE
+    (cas reels : death.stl +1.245 mm, real_overhang.stl -15 mm), remonte le
+    decalage, et rend un maillage identique a celui d'un modele deja pose.
+    """
+    base = _l_shape_mesh()
+    shifted = base.copy()
+    shifted.apply_translation([3.0, -2.0, z_shift])
+    paths = []
+    for m in (base, shifted):
+        with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as f:
+            paths.append(f.name)
+        m.export(paths[-1])
+    try:
+        ref_data, _ref_tet, ref_report = ingest_run(paths[0], resolution=1.5, place_on_platform=True)
+        mesh_data, tet_mesh, report = ingest_run(paths[1], resolution=1.5, place_on_platform=True)
+        _d, _t, untouched = ingest_run(paths[1], resolution=1.5)
+    finally:
+        for p in paths:
+            os.unlink(p)
+
+    assert report.placement_offset_z == pytest.approx(-z_shift, abs=1e-5)
+    assert ref_report.placement_offset_z == 0.0
+    assert report.platform_z_used == pytest.approx(0.0, abs=1e-9)
+    assert mesh_data.vertices[:, 2].min() == pytest.approx(0.0, abs=1e-9)
+    assert tet_mesh.tet_vertices[:, 2].min() == pytest.approx(0.0, abs=1e-6)
+    # x, y intacts : seule la hauteur est deplacee
+    assert np.allclose(mesh_data.vertices[:, :2].mean(axis=0),
+                       ref_data.vertices[:, :2].mean(axis=0) + np.array([3.0, -2.0]), atol=1e-4)
+    # sans l'option, le modele garde ses coordonnees et aucun decalage n'est declare
+    assert untouched.placement_offset_z == 0.0
+    assert untouched.platform_z_used == pytest.approx(z_shift, abs=1e-5)
+
+
 def test_ingest_platform_z_detection_is_noop_on_mesh_already_at_zero():
     """
     Non-regression : un mesh deja pose a z=0 (comportement historique de
@@ -1095,3 +1131,34 @@ def test_probe_tet_mesh_reused_for_no_refinement_attempt(monkeypatch):
     out = s1._tetrahedralize(mesh, 1.0, near_platform_resolution=0.5)
     assert out == "SONDE"
     assert (id(repaired), None) not in calls      # jamais recalcule
+
+
+def test_translation_retry_recovers_and_moves_nodes_back(monkeypatch):
+    """Repli d'arrondi flottant : si la cascade echoue a la position d'origine, elle est
+    rejouee sur le maillage recentre en memoire, et les noeuds sont ramenes a leur place."""
+    import trimesh as _tm
+    from core.mesh_types import TetMesh as _TetMesh
+    from pipeline import step1_ingest as s1
+
+    mesh = _tm.creation.box(extents=(10.0, 10.0, 10.0))
+    mesh.apply_translation([120.0, 80.0, 5.0])
+    calls = []
+
+    def fake(m, *args, **kwargs):
+        center = (m.bounds[0] + m.bounds[1]) / 2.0
+        calls.append(center.copy())
+        if abs(center[0]) > 1.0:                       # n'accepte que le maillage recentre
+            raise s1.MeshIngestError("auto-intersections")
+        return _TetMesh(tet_vertices=np.asarray(m.vertices, dtype=float), tetrahedra=np.zeros((0, 4), int))
+
+    monkeypatch.setattr(s1, "_tetrahedralize", fake)
+    tm = s1._tetrahedralize_with_translation_retry(mesh, 1.0, None, 5.0, 0.0, None, None)
+    assert len(calls) == 2
+    assert np.allclose(tm.tet_vertices, mesh.vertices)
+
+    def always_fail(m, *args, **kwargs):
+        raise s1.MeshIngestError("toujours")
+
+    monkeypatch.setattr(s1, "_tetrahedralize", always_fail)
+    with pytest.raises(s1.MeshIngestError, match="toujours"):
+        s1._tetrahedralize_with_translation_retry(mesh, 1.0, None, 5.0, 0.0, None, None)

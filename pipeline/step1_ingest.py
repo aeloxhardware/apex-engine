@@ -72,6 +72,10 @@ class IngestReport:
     # (step3 puis step4) si aucune etape ne remonte la valeur reellement
     # utilisee - voir CLAUDE.md.
     platform_z_used: float = 0.0
+    # Translation en z appliquee a l'ingestion par `place_on_platform` (mm),
+    # 0.0 si le modele n'a pas ete deplace. Donnee explicite : le maillage
+    # remonte par `run` n'est plus aux coordonnees du fichier source.
+    placement_offset_z: float = 0.0
     # Fragments negligeables (coques individuellement watertight mais
     # minuscules par rapport a la coque dominante) ecartes pour rendre le
     # mesh watertight - donnee EXPLICITE, jamais une perte silencieuse de
@@ -2211,6 +2215,48 @@ def _build_tet_adjacency(tetrahedra: np.ndarray, node_count: int) -> sp.csr_matr
 # Point d'entree principal de l'etape
 # ---------------------------------------------------------------------------
 
+# Repli par TRANSLATION (2026-10-06). La cascade de reparation des auto-intersections
+# depend de l'arrondi flottant des coordonnees ABSOLUES : turkish.stl passe a sa
+# position d'origine mais echoue decale de 20, 40 ou 70 mm en x (resolution
+# geometrique laissant 20 auto-intersections residuelles au lieu de 8, que la
+# reparation locale ne sait plus traiter). Rejouer la cascade sur le maillage
+# translate EN MEMOIRE (centre de la boite en x, y = 0) puis ramener les noeuds
+# a leur place fait passer les trois cas. Uniquement apres un echec : un maillage
+# deja accepte n'est jamais modifie. Decalages essayes dans l'ordre (mm, en x, y).
+_TRANSLATION_RETRY_OFFSETS = ((0.0, 0.0), (0.37, 0.21))
+
+
+def _tetrahedralize_with_translation_retry(
+    mesh, resolution, near_platform_resolution, near_platform_margin, platform_z,
+    junction_zones, junction_refinement_resolution,
+) -> TetMesh:
+    try:
+        return _tetrahedralize(
+            mesh, resolution, near_platform_resolution, near_platform_margin, platform_z,
+            junction_zones, junction_refinement_resolution,
+        )
+    except MeshIngestError as first_error:
+        if junction_zones:      # zones de jonction en coordonnees absolues : pas de repli
+            raise
+        center = (np.asarray(mesh.bounds[0]) + np.asarray(mesh.bounds[1])) / 2.0
+        for dx, dy in _TRANSLATION_RETRY_OFFSETS:
+            offset = np.array([dx - center[0], dy - center[1], 0.0])
+            moved = mesh.copy()
+            moved.apply_translation(offset)
+            try:
+                tm = _tetrahedralize(
+                    moved, resolution, near_platform_resolution, near_platform_margin, platform_z,
+                    None, junction_refinement_resolution,
+                )
+            except MeshIngestError:
+                continue
+            print(f"[step1] tetraedrisation reussie apres translation de {offset[:2].round(3).tolist()} mm "
+                  f"(repli d'arrondi flottant), noeuds ramenes a leur place")
+            return TetMesh(tet_vertices=np.asarray(tm.tet_vertices, dtype=float) - offset,
+                           tetrahedra=tm.tetrahedra, tet_adjacency=tm.tet_adjacency)
+        raise first_error
+
+
 def run(
     mesh_path: str,
     resolution: float,
@@ -2221,6 +2267,7 @@ def run(
     junction_zones: Optional[list[JunctionZone]] = None,
     junction_refinement_resolution: Optional[float] = None,
     check_surface_coverage: bool = False,
+    place_on_platform: bool = False,
 ) -> tuple[MeshData, TetMesh, IngestReport]:
     """
     Charge, nettoie et prepare le mesh source pour le reste du pipeline.
@@ -2272,6 +2319,13 @@ def run(
         check_surface_coverage: mesure la part de la surface hors du volume
             tetraedrise et la remonte dans l'`IngestReport` (opt-in, defaut
             False : calcul supplementaire, aucun effet sur le maillage).
+        place_on_platform: pose le modele sur le plateau par une translation
+            en z SEULE (min(z) -> `platform_z`, ou 0.0 si `platform_z` est
+            None) : la machine place son plateau a z = 0 et l'export refuse
+            une pointe sous 0, or un STL peut avoir son minimum ailleurs
+            (death.stl : +1.245 mm, real_overhang.stl : -15 mm). Opt-in
+            (defaut False : coordonnees du fichier inchangees). Le decalage
+            applique est remonte via `IngestReport.placement_offset_z`.
 
     Returns:
         Tuple (MeshData, TetMesh, IngestReport).
@@ -2283,13 +2337,20 @@ def run(
     raw_mesh = _load_raw_mesh(mesh_path, allow_multi_mesh)
     cleaned_mesh, report = _clean_and_repair(raw_mesh)
 
+    if place_on_platform and len(cleaned_mesh.vertices):
+        target_z = 0.0 if platform_z is None else float(platform_z)
+        offset_z = target_z - float(cleaned_mesh.vertices[:, 2].min())
+        if offset_z != 0.0:
+            cleaned_mesh.apply_translation([0.0, 0.0, offset_z])
+        report.placement_offset_z = offset_z
+
     resolved_platform_z = (
         float(cleaned_mesh.vertices[:, 2].min()) if platform_z is None else platform_z
     )
     report.platform_z_used = resolved_platform_z
 
     mesh_data = _build_mesh_data(cleaned_mesh)
-    tet_mesh = _tetrahedralize(
+    tet_mesh = _tetrahedralize_with_translation_retry(
         cleaned_mesh, resolution, near_platform_resolution, near_platform_margin, resolved_platform_z,
         junction_zones, junction_refinement_resolution,
     )
