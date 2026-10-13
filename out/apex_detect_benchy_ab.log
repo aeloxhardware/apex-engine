@@ -1,0 +1,11 @@
+tour 2 : 11 points en contact ; resolus par un autre B : 0/11 (paliers 45/90/181 deg : [0, 0, 0])
+  NON resolus : 11 ; z median 38.2 mm ; B median 0 deg
+etape 9 : 65197 echantillons (1 sur 1) en 28 s ; 11 evenements sur 11 points ; par type : {('printed_part', 'body'): 11}
+  penetration mediane 0.04 mm, max 0.38 mm
+duree apex 50 s
+tour 2 : 11 points en contact ; resolus par un autre B : 0/11 (paliers 45/90/181 deg : [0, 0, 0])
+  NON resolus : 11 ; z median 38.2 mm ; B median 0 deg
+etape 9 : 65197 echantillons (1 sur 1) en 476 s ; 11 evenements sur 11 points ; par type : {('printed_part', 'body'): 11}
+  penetration mediane 0.04 mm, max 0.38 mm
+duree python 496 s
+FIN

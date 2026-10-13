@@ -1,0 +1,33 @@
+== l_shape_overhang median=0 11:47:20
+l_shape_overhang.stl : 24467 points, 5552 echantillonnes ; step9 rapide 0.4 s ; evenements {}
+  penetration max 0.000 mm
+== l_shape_overhang median=9 11:47:26
+l_shape_overhang.stl : 24467 points, 5552 echantillonnes ; step9 rapide 0.4 s ; evenements {}
+  penetration max 0.000 mm
+== l-triple-axis-overhanged-shape median=0 11:47:32
+l-triple-axis-overhanged-shape.stl : 31284 points, 7304 echantillonnes ; step9 rapide 0.6 s ; evenements {}
+  penetration max 0.000 mm
+== l-triple-axis-overhanged-shape median=9 11:47:38
+l-triple-axis-overhanged-shape.stl : 31284 points, 7304 echantillonnes ; step9 rapide 0.5 s ; evenements {}
+  penetration max 0.000 mm
+== death median=0 11:47:44
+death.stl : 407422 points, 66916 echantillonnes ; step9 rapide 5.2 s ; evenements {'printed_part': 137}
+  contacts piece : B median 19.6 (tous points : 9.9), B>30 : 42 % (tous : 6 %)
+  hauteur au-dessus du bas de piece : mediane 39.6 mm ; penetration mediane 0.364, >0,5 mm : 53
+  penetration max 1.179 mm
+== death median=9 11:48:26
+death.stl : 407422 points, 66916 echantillonnes ; step9 rapide 6.3 s ; evenements {'printed_part': 118}
+  contacts piece : B median 17.8 (tous points : 9.9), B>30 : 30 % (tous : 5 %)
+  hauteur au-dessus du bas de piece : mediane 39.8 mm ; penetration mediane 0.272, >0,5 mm : 43
+  penetration max 1.166 mm
+== turkish median=0 11:49:31
+turkish.stl : 733446 points, 152318 echantillonnes ; step9 rapide 13.7 s ; evenements {'printed_part': 1613}
+  contacts piece : B median 51.7 (tous points : 1.5), B>30 : 95 % (tous : 6 %)
+  hauteur au-dessus du bas de piece : mediane 7.0 mm ; penetration mediane 1.067, >0,5 mm : 1252
+  penetration max 1.189 mm
+== turkish median=9 11:50:55
+turkish.stl : 733446 points, 152318 echantillonnes ; step9 rapide 13.9 s ; evenements {'printed_part': 1406}
+  contacts piece : B median 51.7 (tous points : 1.6), B>30 : 95 % (tous : 5 %)
+  hauteur au-dessus du bas de piece : mediane 7.0 mm ; penetration mediane 1.069, >0,5 mm : 1085
+  penetration max 1.188 mm
+DONE

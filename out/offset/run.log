@@ -1,0 +1,53 @@
+== l_shape_overhang bounds [[-2.0, -2.0, 0.0], [18.0, 2.0, 22.0]]
+-- l_shape_overhang offset 0 17:42:35
+ "collision_platform": 0,
+ "collision_seconds": 0.4
+}
+-- l_shape_overhang offset 60 17:42:42
+ "collision_platform": 0,
+ "collision_seconds": 0.4
+}
+-- l_shape_overhang offset 100 17:42:50
+ "collision_platform": 0,
+ "collision_seconds": 0.4
+}
+== l-triple-axis-overhanged-shape bounds [[-2.0, -20.0, 0.0], [18.0, 0.0, 22.0]]
+-- l-triple-axis-overhanged-shape offset 0 17:42:59
+ "collision_platform": 0,
+ "collision_seconds": 0.5
+}
+-- l-triple-axis-overhanged-shape offset 60 17:43:06
+ "collision_platform": 0,
+ "collision_seconds": 0.5
+}
+-- l-triple-axis-overhanged-shape offset 100 17:43:15
+ "collision_platform": 0,
+ "collision_seconds": 0.6
+}
+== death bounds [[360.8054504394531, 327.032958984375, 51.39957809448242], [391.7795104980469, 389.129638671875, 101.16313171386719]]
+-- death offset 0 17:43:25
+ "collision_platform": 0,
+ "collision_seconds": 7.0
+}
+-- death offset 60 17:44:33
+ "collision_platform": 0,
+ "collision_seconds": 5.7
+}
+-- death offset 100 17:45:51
+ "collision_platform": 0,
+ "collision_seconds": 6.8
+}
+== turkish bounds [[100.0, 100.0, 30.261117935180664], [200.0, 200.0, 90.78335571289062]]
+-- turkish offset 0 17:46:58
+ "collision_platform": 14,
+ "collision_seconds": 14.9
+}
+-- turkish offset 60 17:48:57
+ "collision_platform": 0,
+ "collision_seconds": 15.4
+}
+-- turkish offset 100 17:51:05
+    ...<3 lines>...
+    )
+pipeline.step1_ingest.MeshIngestError: Le maillage contient des auto-intersections (ou un autre defaut) que TetGen refuse ou sur lequel il plante, et que la reparation automatique n'a pas suffi a corriger : The input surface mesh contain self-intersections.. La reparation `pymeshfix` a produit un resultat watertight mais radicalement plus petit que le mesh source (effondrement geometrique, rejete par garde-fou) - le defaut source n'a pas de reparation automatique fiable sur ce mesh.
+DONE

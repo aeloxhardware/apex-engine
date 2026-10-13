@@ -1,0 +1,49 @@
+[preview] Etape 1/8 - ingestion : res/test_models/death.stl
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire
+[preview] Etape 5/8 - extraction des couches courbes
+[preview]   ordre contraint par la tete : 26434 contrainte(s), 146 couche(s) deplacee(s), 161 violee(s)
+[preview]   254 couche(s)
+[preview] Etape 6/8 - remplissage 2D par couche
+[preview] Etape 7/8 - couleur + ordonnancement
+[preview]   254 passe(s) d'impression
+[preview] Etape 8/8 - trajectoire machine (resolution IK)
+[preview]   407422 point(s) de trajectoire, 126969 orientation(s) inatteignable(s)
+[preview] Etape 8c/8 - verification du support de depot
+[preview]   825 depot(s) sans support (0.22% de la matiere extrudee) : 699 defaut(s) d'ordre, 0 surplomb(s) reel(s)
+[preview] step1->step8 termine en 35.7s
+[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)
+{
+ "model": "death.stl",
+ "variant": "ref",
+ "resolution": 0.8,
+ "layer_height_base": 0.2,
+ "apex_use_cpp": "1",
+ "seconds": 35.7,
+ "layers": 254,
+ "points": 407422,
+ "layer_thickness_measured": 0.2152,
+ "tested": 371844,
+ "unsupported": 825,
+ "unsupported_fraction": 0.0022186723464678736,
+ "ordering_defects": 699,
+ "tilt_resolved": 126,
+ "true_overhang": 0,
+ "extruded_mm": 133438.9,
+ "travel_total_mm": 128005.2,
+ "travel_max_mm": 59.84,
+ "step8_diagnostics": 126969,
+ "b_jumps_gt10": 10722,
+ "dev_median": 3.01,
+ "dev_p95": 13.17,
+ "dev_gt15_pct": 3.41,
+ "dev_gt45_pct": 0.04,
+ "time_nominal_h": 1.927,
+ "time_real_h": 2.295,
+ "time": "2026-10-13 12:09:33",
+ "collision_points": 118,
+ "collision_fraction": 0.0018,
+ "collision_platform": 0,
+ "collision_seconds": 4.7
+}

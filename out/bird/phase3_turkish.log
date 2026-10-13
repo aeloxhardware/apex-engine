@@ -1,0 +1,10 @@
+[bird] Boucle de deformation : res/test_models/turkish.stl
+[bird]   base figee : 46691 cellules, 12510 noeuds
+[bird]   115131 tetraedres
+[bird]   REPLI -- passe rejetee, essai a overhang=35
+[bird]   REPLI -- passe rejetee, essai a overhang=37.5
+[bird]   REPLI -- passe rejetee, essai a overhang=38.75
+[bird]   arret : repli meme avec le plus petit ecart sur overhang (0 passe(s) acceptee(s))
+[bird] Tranchage deforme + lissage non planaire (P2-P5)
+OpenBLAS error: Memory allocation still failed after 10 retries, giving up.
+OpenBLAS error: Memory allocation still failed after 10 retries, 
