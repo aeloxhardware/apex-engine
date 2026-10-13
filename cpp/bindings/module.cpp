@@ -15,10 +15,12 @@
 #include <stdexcept>
 #include <vector>
 
+#include "apex/bird_locate.hpp"
 #include "apex/bird_lsq.hpp"
 #include "apex/bvh.hpp"
 #include "apex/field_solver.hpp"
 #include "apex/gcode_export.hpp"
+#include "apex/gpu/vk_context.hpp"
 #include "apex/geometry2d.hpp"
 #include "apex/kdtree.hpp"
 #include "apex/kinematics.hpp"
@@ -1088,7 +1090,7 @@ PYBIND11_MODULE(apex_core, m) {
         [](const DoubleArray& positions, const DoubleArray& angles, const DoubleArray& extrusion,
            const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& skin,
            const DoubleArray& slow, const DoubleArray& zlow_grid, const DoubleArray& zlow_values,
-           const py::dict& p) {
+           const py::dict& p, const py::object& travel) {
             const auto n = static_cast<std::int64_t>(positions.shape(0));
             if (positions.ndim() != 2 || positions.shape(1) != 3 || angles.ndim() != 2 || angles.shape(1) != 2 ||
                 angles.shape(0) != n || extrusion.shape(0) != n || skin.shape(0) != n ||
@@ -1120,12 +1122,37 @@ PYBIND11_MODULE(apex_core, m) {
                 P.max_tip_deviation = p["max_tip_deviation"].cast<double>();
             std::vector<double> zg(zlow_grid.data(), zlow_grid.data() + zlow_grid.shape(0));
             std::vector<double> zv(zlow_values.data(), zlow_values.data() + zlow_values.shape(0));
+            // Controle des degagements (material_travel_check) : dict de DONNEES
+            // {points (M,3), owners (M,), axis_t (K,), radius, axis_c (3,), axis_b (3,), max_factor}.
+            std::unique_ptr<apex::PastMaterialIndex> material;
+            apex::TravelCheck tc;
+            const apex::TravelCheck* tcp = nullptr;
+            if (!travel.is_none()) {
+                const py::dict t = travel.cast<py::dict>();
+                const auto pts = t["points"].cast<DoubleArray>();
+                const auto own = t["owners"].cast<py::array_t<std::int64_t, py::array::c_style | py::array::forcecast>>();
+                const auto at = t["axis_t"].cast<DoubleArray>();
+                const auto ac = t["axis_c"].cast<DoubleArray>();
+                const auto ab = t["axis_b"].cast<DoubleArray>();
+                if (pts.ndim() != 2 || pts.shape(1) != 3 || own.shape(0) != pts.shape(0) || ac.shape(0) != 3 ||
+                    ab.shape(0) != 3) {
+                    throw std::invalid_argument("formes incoherentes pour le controle des degagements");
+                }
+                material = std::make_unique<apex::PastMaterialIndex>(pts.data(), own.data(),
+                                                                      static_cast<std::int64_t>(pts.shape(0)));
+                tc.material = material.get();
+                tc.axis_t.assign(at.data(), at.data() + at.shape(0));
+                tc.radius = t["radius"].cast<double>();
+                tc.max_factor = t["max_factor"].cast<double>();
+                for (int k = 0; k < 3; ++k) { tc.axis_c[k] = ac.data()[k]; tc.axis_b[k] = ab.data()[k]; }
+                tcp = &tc;
+            }
             apex::GcodeExportStats st;
             std::string body;
             {
                 py::gil_scoped_release release;
                 body = apex::export_gcode_body(positions.data(), angles.data(), extrusion.data(), skin.data(),
-                                               slow.data(), n, zg, zv, P, st);
+                                               slow.data(), n, zg, zv, P, st, tcp);
             }
             py::dict s;
             s["moves"] = st.moves; s["travels"] = st.travels; s["retractions"] = st.retractions;
@@ -1137,10 +1164,13 @@ PYBIND11_MODULE(apex_core, m) {
             s["any"] = st.any;
             s["x"] = py::make_tuple(st.x_min, st.x_max); s["y"] = py::make_tuple(st.y_min, st.y_max);
             s["z"] = py::make_tuple(st.z_min, st.z_max);
+            s["travel_collisions"] = st.travel_collisions;
             return py::make_tuple(py::str(body), s);
         },
         py::arg("positions"), py::arg("angles"), py::arg("extrusion"), py::arg("skin"), py::arg("slow"),
-        py::arg("zlow_grid"), py::arg("zlow_values"), py::arg("params"));
+        py::arg("zlow_grid"), py::arg("zlow_values"), py::arg("params"), py::arg("travel") = py::none());
+    // Capacite : export_gcode_body accepte le controle des degagements (2026-10-13).
+    m.attr("EXPORT_TRAVEL_CHECK") = true;
 
     m.def(
         "feed_plan_caps",
@@ -1380,6 +1410,68 @@ PYBIND11_MODULE(apex_core, m) {
         py::arg("max_nfev"), py::arg("ftol") = 1e-6, py::arg("xtol") = 1e-8, py::arg("gtol") = 1e-8,
         "Rotations de Bird (moindres carres TRF/LSMR, x_scale = 1) : (x, cout, nfev, statut).");
 
+    // Socle Vulkan (phase 1 du plan Bird/Vulkan, 2026-10-13). Jamais d'exception
+    // pour l'absence de GPU : gpu_status() rend la raison.
+    m.def(
+        "gpu_status",
+        []() {
+            const apex::gpu::GpuStatus s = apex::gpu::status();
+            py::dict d;
+            d["ok"] = s.ok; d["reason"] = s.reason; d["device"] = s.device; d["fp64"] = s.fp64;
+            d["timestamp_period_ns"] = s.timestamp_period_ns;
+            d["compiled"] = apex::gpu::compiled_with_vulkan();
+            return d;
+        },
+        "Etat du backend Vulkan : {ok, reason, device, fp64, timestamp_period_ns, compiled}.");
+    m.def(
+        "gpu_saxpy",
+        [](double a, const py::array& x, const py::array& y) -> py::tuple {
+            // y <- a*x + y sur le GPU (fumee) ; float32 ou float64 selon le type de x. Rend (y, temps GPU s).
+            if (py::isinstance<py::array_t<float>>(x)) {
+                auto xf = py::array_t<float, py::array::c_style | py::array::forcecast>::ensure(x);
+                auto yf = py::array_t<float, py::array::c_style | py::array::forcecast>::ensure(y);
+                py::array_t<float> out(yf.size());
+                std::copy(yf.data(), yf.data() + yf.size(), out.mutable_data());
+                if (xf.size() != out.size()) throw std::invalid_argument("x et y de tailles differentes");
+                double t;
+                {
+                    py::gil_scoped_release release;
+                    t = apex::gpu::saxpy_f32(static_cast<float>(a), xf.data(), out.mutable_data(), xf.size());
+                }
+                return py::make_tuple(out, t);
+            }
+            auto xd = py::array_t<double, py::array::c_style | py::array::forcecast>::ensure(x);
+            auto yd = py::array_t<double, py::array::c_style | py::array::forcecast>::ensure(y);
+            py::array_t<double> out(yd.size());
+            std::copy(yd.data(), yd.data() + yd.size(), out.mutable_data());
+            if (xd.size() != out.size()) throw std::invalid_argument("x et y de tailles differentes");
+            double t;
+            {
+                py::gil_scoped_release release;
+                t = apex::gpu::saxpy_f64(a, xd.data(), out.mutable_data(), xd.size());
+            }
+            return py::make_tuple(out, t);
+        },
+        py::arg("a"), py::arg("x"), py::arg("y"));
+
+    m.def("bird_lsq_set_threads", &apex::bird_lsq_set_threads, py::arg("threads"), py::arg("min_parallel") = 4096,
+          "Fils du solveur LSQ de Bird (0 = tous les coeurs, 1 = sequentiel) ; resultat identique au bit.");
+
+    m.def(
+        "bird_lsq_last_profile",
+        []() {
+            const apex::LsqProfile p = apex::bird_lsq_last_profile();
+            py::dict d;
+            d["total_s"] = p.total_s; d["matvec_s"] = p.matvec_s; d["rmatvec_s"] = p.rmatvec_s;
+            d["fun_s"] = p.fun_s; d["jac_s"] = p.jac_s;
+            d["matvec_calls"] = p.matvec_calls; d["rmatvec_calls"] = p.rmatvec_calls;
+            d["fun_calls"] = p.fun_calls; d["jac_calls"] = p.jac_calls;
+            d["lsmr_calls"] = p.lsmr_calls; d["lsmr_iterations"] = p.lsmr_iterations; d["nfev"] = p.nfev;
+            d["rows"] = p.rows; d["cols"] = p.cols; d["nnz"] = p.nnz;
+            return d;
+        },
+        "Compteurs du dernier appel bird_lsq_deform / bird_lsq_rotation (mesure seule).");
+
     m.def(
         "viterbi_choice",
         [](const DoubleArray& mapped, const py::array_t<bool, py::array::c_style | py::array::forcecast>& valid) {
@@ -1397,6 +1489,32 @@ PYBIND11_MODULE(apex_core, m) {
         },
         py::arg("mapped"), py::arg("valid"),
         "Chemin le plus continu parmi k candidats par point (Viterbi de map_polyline), au bit pres.");
+
+    m.def(
+        "tet_barycentric_candidates",
+        [](const DoubleArray& points, const DoubleArray& deformed, const DoubleArray& original, const IntArray& cand,
+           int threads) {
+            if (points.ndim() != 2 || points.shape(1) != 3) throw std::invalid_argument("points doit etre (n,3)");
+            if (deformed.ndim() != 3 || deformed.shape(1) != 4 || deformed.shape(2) != 3)
+                throw std::invalid_argument("deformed doit etre (t,4,3)");
+            if (original.ndim() != 3 || original.shape(0) != deformed.shape(0) || original.shape(1) != 4 ||
+                original.shape(2) != 3)
+                throw std::invalid_argument("original doit etre (t,4,3), comme deformed");
+            if (cand.ndim() != 2 || cand.shape(0) != points.shape(0))
+                throw std::invalid_argument("cand doit etre (n,k)");
+            const auto n = static_cast<py::ssize_t>(points.shape(0)), k = static_cast<py::ssize_t>(cand.shape(1));
+            py::array_t<double> score({n, k});
+            py::array_t<double> mapped({n, k, static_cast<py::ssize_t>(3)});
+            {
+                py::gil_scoped_release release;
+                apex::tet_barycentric_candidates(points.data(), n, deformed.data(), original.data(),
+                                                 static_cast<std::int64_t>(deformed.shape(0)), cand.data(), k,
+                                                 score.mutable_data(), mapped.mutable_data(), threads);
+            }
+            return py::make_tuple(score, mapped);
+        },
+        py::arg("points"), py::arg("deformed"), py::arg("original"), py::arg("cand"), py::arg("threads") = 0,
+        "(score (n,k), mapped (n,k,3)) du retour Bird deforme -> origine ; tolerance declaree vs LAPACK.");
 
     py::class_<apex::SkinCheckIndex>(m, "SkinCheckIndex",
                                      "Controle de collision du lissage Bird (grille incrementale).")
@@ -1428,5 +1546,28 @@ PYBIND11_MODULE(apex_core, m) {
                 return py::make_tuple(plate, dist);
             },
             py::arg("head"), py::arg("axes"), py::arg("pts"), py::arg("starts"), py::arg("cos"), py::arg("sin"),
-            py::arg("tested"), py::arg("plate_radius"), py::arg("margin"), py::arg("reach"), py::arg("step"));
+            py::arg("tested"), py::arg("plate_radius"), py::arg("margin"), py::arg("reach"), py::arg("step"))
+        .def(
+            "check_zone_parallel",
+            [](const apex::SkinCheckIndex& self, const DoubleArray& head, const DoubleArray& axes,
+               const DoubleArray& pts, const IntArray& starts, const DoubleArray& cosv, const DoubleArray& sinv,
+               const IntArray& tested, double plate_radius, double margin, double reach, double step, int threads) {
+                const auto n_tested = static_cast<py::ssize_t>(tested.size());
+                py::array_t<bool> plate(n_tested);
+                py::array_t<double> dist(n_tested);
+                {
+                    py::gil_scoped_release release;
+                    self.check_zone_parallel(head.data(), head.shape(0), axes.data(), axes.shape(0), pts.data(),
+                                             starts.data(), static_cast<std::int64_t>(starts.size()) - 1,
+                                             cosv.data(), sinv.data(), tested.data(), n_tested, plate_radius,
+                                             margin, reach, step,
+                                             reinterpret_cast<std::uint8_t*>(plate.mutable_data()),
+                                             dist.mutable_data(), threads);
+                }
+                return py::make_tuple(plate, dist);
+            },
+            py::arg("head"), py::arg("axes"), py::arg("pts"), py::arg("starts"), py::arg("cos"), py::arg("sin"),
+            py::arg("tested"), py::arg("plate_radius"), py::arg("margin"), py::arg("reach"), py::arg("step"),
+            py::arg("threads") = 0,
+            "Meme resultat que check_zone (au bit), points testes repartis sur `threads` fils (0 = coeurs).");
 }

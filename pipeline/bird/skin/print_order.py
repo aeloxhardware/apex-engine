@@ -161,9 +161,12 @@ def _check_native(native_cls, sequence, body, paths, skin_angles, offset, head, 
         idx = [np.arange(len(p)) if sim.path_sampling_step <= 0 else sample_indices(p, sim.path_sampling_step)
                for p in e["paths"]]
         tested_idx = np.concatenate([i + s for i, s in zip(idx, starts[:-1])]).astype(np.int64) if idx else             np.zeros(0, np.int64)
-        plate, dist = index.check_zone(head, axes, pts, starts, np.ascontiguousarray(np.cos(rad)),
-                                       np.ascontiguousarray(np.sin(rad)), tested_idx, plate_r, sim.safety_margin,
-                                       reach, densify)
+        # Version parallele (2026-10-13) quand le module la porte : meme resultat au bit
+        # (tests/test_bird_skin.py), points testes repartis sur les coeurs.
+        check = getattr(index, "check_zone_parallel", None) or index.check_zone
+        plate, dist = check(head, axes, pts, starts, np.ascontiguousarray(np.cos(rad)),
+                            np.ascontiguousarray(np.sin(rad)), tested_idx, plate_r, sim.safety_margin,
+                            reach, densify)
         tested += len(tested_idx)
         hits["plateau"] += int(plate.sum())
         hits["piece"] += int((dist < reach).sum())

@@ -18,6 +18,7 @@ Derive de S4 Slicer (Joshua Bird, GPL-3.0, https://github.com/jyjblrd/S4_Slicer)
 """
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -106,12 +107,20 @@ class DeformedToOriginal:
 
     def _candidates(self, points, outside_margin=0.1):
         """Pour chaque point : ses k tetraedres candidats, coordonnees barycentriques,
-        points ramenes, score, validite. Calcul point par point (independant du lot)."""
-        _, cand = self.tree.query(points, k=self.k)
-        with np.errstate(all="ignore"):
-            bary = np.stack([barycentric(points, self.tets[cand[:, j]]) for j in range(self.k)], axis=1)
-        score = np.nan_to_num(bary.min(axis=2), nan=-np.inf)
-        mapped = np.einsum("njv,njvk->njk", bary, self.original[self.cells[cand]])
+        points ramenes, score, validite. Calcul point par point (independant du lot) :
+        requete k-NN sur tous les coeurs (`workers=-1`) et barycentriques par paquets
+        de points dans des fils (numpy libere le GIL) -- resultat identique au bit
+        (2026-10-13, x4 mesure sur 200 000 points)."""
+        _, cand = self.tree.query(points, k=self.k, workers=-1)
+        native = _barycentric_native()
+        if native is not None:
+            if getattr(self, "_original_tets", None) is None:
+                self._original_tets = np.ascontiguousarray(self.original[self.cells], dtype=float)
+                self._deformed_tets = np.ascontiguousarray(self.tets, dtype=float)
+            score, mapped = native(np.ascontiguousarray(points, dtype=float), self._deformed_tets,
+                                   self._original_tets, np.ascontiguousarray(cand, dtype=np.int64))
+        else:
+            score, mapped = _parallel_barycentric(points, self.tets, cand, self.original, self.cells)
         valid = score > -1e-6
         none = ~valid.any(axis=1)
         if none.any():
@@ -161,6 +170,53 @@ class DeformedToOriginal:
             out.append(self._viterbi(cand[sl], score[sl], mapped[sl], valid[sl], containing[sl]))
             start += len(p)
         return out
+
+_BARY_CHUNK = 20_000
+_BATCH_POINTS = 200_000
+
+
+def _parallel_barycentric(points, tets, cand, original, cells):
+    """(score (N,k), points ramenes (N,k,3)) : pour chaque candidat j, barycentriques
+    barycentric(points, tets[cand[:, j]]), score = plus petite coordonnee (NaN -> -inf),
+    point ramene = combinaison des sommets d'ORIGINE. Par paquets de points repartis sur
+    des fils ; chaque ligne est calculee exactement comme en serie (meme resolution 3x3
+    par LAPACK, memes operations elementaires) : identique au bit."""
+    n, k = cand.shape
+    score = np.empty((n, k))
+    mapped = np.empty((n, k, 3))
+
+    def block(sl):
+        bary = np.empty((sl.stop - sl.start, k, 4))
+        with np.errstate(all="ignore"):
+            for j in range(k):
+                bary[:, j] = barycentric(points[sl], tets[cand[sl, j]])
+        score[sl] = np.nan_to_num(bary.min(axis=2), nan=-np.inf)
+        mapped[sl] = np.einsum("njv,njvk->njk", bary, original[cells[cand[sl]]])
+
+    chunks = [slice(s, min(n, s + _BARY_CHUNK)) for s in range(0, n, _BARY_CHUNK)]
+    if len(chunks) <= 1:
+        for sl in chunks:
+            block(sl)
+        return score, mapped
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(len(chunks), os.cpu_count() or 1)) as pool:
+        list(pool.map(block, chunks))
+    return score, mapped
+
+
+def _barycentric_native():
+    """apex_core.tet_barycentric_candidates si `APEX_USE_CPP=1`. TOLERANCE DECLAREE (pas le
+    bit) : resolution 3x3 par LU transcrite au lieu de LAPACK, ecart mesure sur le Benchy
+    passe 4 (200 000 points x 24 candidats) <= 4,5e-9 sur le score et 1,2e-10 mm sur le
+    point ramene, aucune decision changee aux seuils +-1e-6 (CLAUDE.md #77).
+    `APEX_NATIVE_BARY=0` garde LAPACK meme avec `APEX_USE_CPP=1` (mesure dos a dos ; lu
+    aussi par les sous-processus de P2)."""
+    from core import _cpp
+    if os.environ.get("APEX_NATIVE_BARY", "1") == "0":
+        return None
+    module = _cpp.module() if _cpp.enabled() else None
+    return getattr(module, "tet_barycentric_candidates", None) if module is not None else None
+
 
 def _viterbi_native():
     """apex_core.viterbi_choice si `APEX_USE_CPP=1` (identique au bit a la boucle numpy)."""
@@ -225,16 +281,40 @@ def run(cells: np.ndarray, original: np.ndarray, deformed: np.ndarray, offset: n
     back = DeformedToOriginal(cells, deformed, original, k=params.candidates)
     step = params.max_segment_mm
 
-    def map_refined(points, result=None):
-        result = back.map_polyline(points) if result is None else result
+    def map_batched(polylines):
+        """map_polylines par lots bornes (~_BATCH_POINTS points) : memoire maitrisee."""
+        mapped_, group, group_size = [], [], 0
+        for poly in polylines:
+            group.append(poly)
+            group_size += len(poly)
+            if group_size >= _BATCH_POINTS:
+                mapped_ += back.map_polylines(group)
+                group, group_size = [], 0
+        return mapped_ + back.map_polylines(group)
+
+    def refine_all(paths, results):
+        """Raffinement de chaque polyligne (milieu insere sur tout segment ramene trop long,
+        jusqu'a refine_rounds tours) ; les polylignes a raffiner d'un MEME tour sont
+        ramenees en un lot. Chaque polyligne evolue exactement comme seule (calcul par
+        point independant, map_polylines identique au bit a des appels separes) ; avant
+        le 2026-10-13, un appel par polyligne et par tour (4 383 appels sur le dino)."""
+        paths, results = list(paths), list(results)
+        active = list(range(len(paths)))
         for _ in range(params.refine_rounds):
-            lengths = np.linalg.norm(np.diff(result[0], axis=0), axis=1)
-            long = np.flatnonzero(lengths > 2 * step)
-            if not len(long):
+            todo = []
+            for i in active:
+                lengths = np.linalg.norm(np.diff(results[i][0], axis=0), axis=1)
+                long = np.flatnonzero(lengths > 2 * step)
+                if len(long):
+                    pts = paths[i]
+                    paths[i] = np.insert(pts, long + 1, (pts[long] + pts[long + 1]) / 2, axis=0)
+                    todo.append(i)
+            if not todo:
                 break
-            points = np.insert(points, long + 1, (points[long] + points[long + 1]) / 2, axis=0)
-            result = back.map_polyline(points)
-        return (points, *result)
+            for i, r in zip(todo, map_batched([paths[i] for i in todo])):
+                results[i] = r
+            active = todo
+        return [(p, *r) for p, r in zip(paths, results)]
 
     def outside_distance(points, tets, score):
         dist = np.zeros(len(points))
@@ -248,12 +328,28 @@ def run(cells: np.ndarray, original: np.ndarray, deformed: np.ndarray, offset: n
         return dist
 
     out_layers, n_pts, n_out, n_amb, n_cut, n_jump = [], 0, 0, 0, 0, 0
+    # Premier retour de TOUTES les couches (trajectoires puis contours) en UN lot : le
+    # calcul des candidats est independant par point (resultat identique au bit a des
+    # lots par couche), et un grand lot occupe tous les coeurs (2026-10-13).
+    all_dense = [[densify(_lift_to_3d(np.asarray(t), L.local_frame), step) for t in (L.toolpath_2d or [])]
+                 for L in layers]
+    flat = [p for paths in all_dense for p in paths] + [c for L in layers for c in L.contour_3d]
+    flat_mapped = map_batched(flat)
+    cursor = 0
+    first_by_layer = []
+    for paths in all_dense:
+        first_by_layer.append(flat_mapped[cursor:cursor + len(paths)])
+        cursor += len(paths)
+    contours_by_layer = []
     for L in layers:
+        contours_by_layer.append(flat_mapped[cursor:cursor + len(L.contour_3d)])
+        cursor += len(L.contour_3d)
+    flat_paths = [p for paths in all_dense for p in paths]
+    refined_all = iter(refine_all(flat_paths, [r for firsts in first_by_layer for r in firsts]))
+    for L, dense_paths, contour_maps in zip(layers, all_dense, contours_by_layer):
         tp3, tps = [], []
-        dense_paths = [densify(_lift_to_3d(np.asarray(t), L.local_frame), step) for t in (L.toolpath_2d or [])]
-        first_pass = back.map_polylines(dense_paths)          # premier retour en un lot par couche
-        for dense_path, first in zip(dense_paths, first_pass):
-            refined, mapped, tet, score, containing = map_refined(dense_path, first)
+        for _ in dense_paths:
+            refined, mapped, tet, score, containing = next(refined_all)
             score = outside_distance(refined, tet, score)
             n_pts += len(mapped)
             n_out += int((score > 0).sum())
@@ -269,7 +365,7 @@ def run(cells: np.ndarray, original: np.ndarray, deformed: np.ndarray, offset: n
                     if len(piece) >= 2:
                         tp3.append(piece + offset)
                         tps.append(piece_score)
-        contours = [r[0] + offset for r in back.map_polylines(L.contour_3d)]
+        contours = [r[0] + offset for r in contour_maps]
         out_layers.append({"contour_3d": contours, "isovalue": L.isovalue,
                            "toolpath_2d": [np.asarray(t) for t in (L.toolpath_2d or [])],
                            "toolpath_3d": tp3, "toolpath_score": tps})

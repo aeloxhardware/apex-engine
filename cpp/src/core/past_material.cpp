@@ -99,6 +99,33 @@ double PastMaterialIndex::min_past_distance(const double* queries, std::int64_t 
     return found ? std::sqrt(best_sq) : std::numeric_limits<double>::infinity();
 }
 
+bool PastMaterialIndex::search_any(std::int32_t ni, const double* q, std::int64_t limit, double radius_sq) const {
+    if (ni < 0) return false;
+    const Node& n = nodes_[static_cast<std::size_t>(ni)];
+    if (n.min_owner >= limit) return false;
+    double box_sq = 0.0;
+    for (int a = 0; a < 3; ++a) {
+        const double d = q[a] < n.lo[a] ? n.lo[a] - q[a] : (q[a] > n.hi[a] ? q[a] - n.hi[a] : 0.0);
+        box_sq += d * d;
+    }
+    if (box_sq > radius_sq) return false;
+    if (owners_[n.point] < limit) {
+        const double* p = &points_[static_cast<std::size_t>(n.point) * 3];
+        const double dx = q[0] - p[0], dy = q[1] - p[1], dz = q[2] - p[2];
+        if (dx * dx + dy * dy + dz * dz <= radius_sq) return true;
+    }
+    return search_any(n.left, q, limit, radius_sq) || search_any(n.right, q, limit, radius_sq);
+}
+
+bool PastMaterialIndex::any_past_within(const double* queries, std::int64_t query_count, std::int64_t limit,
+                                        double radius) const {
+    if (root_ < 0) return false;
+    const double radius_sq = radius * radius;
+    for (std::int64_t i = 0; i < query_count; ++i)
+        if (search_any(root_, queries + i * 3, limit, radius_sq)) return true;
+    return false;
+}
+
 void PastMaterialIndex::min_past_distance_batch(const double* queries, std::int64_t pose_count,
                                                 std::int64_t samples, const std::int64_t* limits, double reach,
                                                 double* out, int threads) const {

@@ -43,8 +43,10 @@ class BirdLoopParams:
     # Si le volume moyen d'un tetraedre depasse `max_mean_tet_volume` (mm3), on refait la
     # tetraedrisation avec `refine_tet_volume`. References de la recherche : Benchy
     # 0,63 mm3 en moyenne (inchange par cette regle), real_overhang deforme a 0,5 mm3.
-    # None = desactive.
-    max_mean_tet_volume: Optional[float] = 2.0
+    # None = desactive. DESACTIVEE PAR DEFAUT depuis le 2026-10-13 (decision de
+    # l'utilisateur, CLAUDE.md #77) : jamais validee (#75), elle retetraedrisait le dino
+    # de 4 263 a 151 695 tetraedres (calcul arrete, risque memoire de turkish).
+    max_mean_tet_volume: Optional[float] = None
     refine_tet_volume: float = 0.5
     reachable_tilt: bool = False           # rotations positives interdites (MAX_POS_ROTATION_DEG = 0)
     reachable_normal_weight: float = 0.0   # contrainte de normale atteignable (0 = desactivee)
@@ -64,6 +66,19 @@ class BirdLoopResult:
     report: list[dict]
     final_max_overhang: Optional[float]
     final_rotation_multiplier: float
+
+
+def from_saved_passes(cells: np.ndarray, original_points: np.ndarray, final_points: np.ndarray,
+                      reason: str = "passe enregistree") -> BirdLoopResult:
+    """Resultat de boucle reconstruit a partir d'une passe DEJA calculee (par exemple
+    `loop_<m>_pin_pass<k>.npy` de la chaine de recherche) : le reste de la voie Bird
+    repart exactement de cette deformation, sans relancer la boucle. Sert a comparer
+    les chaines a entree identique, ou a reutiliser une passe validee."""
+    original = bd.BirdTet(points=np.asarray(original_points, dtype=float), cells=np.asarray(cells))
+    final = original.with_points(final_points)
+    return BirdLoopResult(original=original, final=final, passes=[original.points, final.points], topology=None,
+                          base_node_mask=None, lowest_overhang_z=None, stop_reason=reason, report=[],
+                          final_max_overhang=None, final_rotation_multiplier=0.0)
 
 
 def run(stl_path: str, params: BirdLoopParams = BirdLoopParams(),

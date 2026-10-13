@@ -25,17 +25,33 @@ from pipeline.step8_machine_toolpath import Step8Params, _RawPoints, resolve_raw
 
 
 def locate(points: np.ndarray, original: np.ndarray, cells: np.ndarray, centroid_tree: cKDTree, k: int = 12):
-    """Tetraedre d'origine contenant chaque point (sinon le moins exterieur des k candidats)."""
+    """Tetraedre d'origine contenant chaque point (sinon le moins exterieur des k candidats).
+
+    EX AEQUO : un point de paroi est SUR la frontiere de plusieurs tetraedres (scores ~0 a
+    quelques ULP pres) ; le premier maximum strict dependait alors de l'arrondi de la
+    resolution 3x3 (LAPACK ou natif), et la normale de couche -- donc B -- avec (jusqu'a
+    20 deg sur 0,055 % des points du Benchy). Regle explicite depuis le 2026-10-13 : parmi
+    les candidats a moins de `LOCATE_TIE` du meilleur score, le premier dans l'ordre k-NN
+    (centre le plus proche). Memes decisions dans les deux chemins (CLAUDE.md #77)."""
     _d, cand = centroid_tree.query(points, k=k)
-    best = cand[:, 0].copy()
-    score = np.full(len(points), -np.inf)
-    for j in range(k):
-        with np.errstate(all="ignore"):
-            b = barycentric(points, original[cells[cand[:, j]]])
-        s = np.nan_to_num(b.min(axis=1), nan=-np.inf)
-        better = s > score
-        best[better], score[better] = cand[better, j], s[better]
-    return best
+    from pipeline.bird.deformed_slicing import _barycentric_native
+    native = _barycentric_native()
+    if native is not None:   # tolerance declaree sur le score (CLAUDE.md #77)
+        tets = np.ascontiguousarray(original[cells], dtype=float)
+        score, _ = native(np.ascontiguousarray(points, dtype=float), tets, tets,
+                          np.ascontiguousarray(cand, dtype=np.int64))
+    else:
+        score = np.empty(cand.shape)
+        for j in range(k):
+            with np.errstate(all="ignore"):
+                b = barycentric(points, original[cells[cand[:, j]]])
+            score[:, j] = np.nan_to_num(b.min(axis=1), nan=-np.inf)
+    best = score.max(axis=1, keepdims=True)
+    first = (score >= best - LOCATE_TIE).argmax(axis=1)     # tout -inf : -inf >= -inf, rang 0
+    return cand[np.arange(len(points)), first]
+
+
+LOCATE_TIE = 1e-9
 
 
 def layer_normals(cells: np.ndarray, original: np.ndarray, deformed: np.ndarray) -> np.ndarray:

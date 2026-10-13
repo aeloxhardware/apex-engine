@@ -312,6 +312,60 @@ def clearance_move(position, b_deg, params, head_zlow: Optional[Callable[[float]
     return "none", np.asarray(position, dtype=float)
 
 
+def material_travel_check(toolpath: dict, machine, params: "GcodeParams", densify_step: float = 0.25,
+                          axis_samples: int = 16) -> Callable[[int, np.ndarray, float], bool]:
+    """`travel_check(i, point, B)` de la chaine de recherche (export_gcode.py,
+    2026-10-06), devenu fonction du moteur : un point de degagement est en contact
+    si de la matiere deposee AVANT le point de trajectoire i (cordons densifies a
+    `densify_step`, positions de `toolpath` non decalees) est a <= rayon de buse
+    d'un des `axis_samples` points de l'axe de la tete, de la pointe au pivot
+    (tete orientee par C = atan2(x, -y) et B). Porte ses donnees en attribut
+    `.native` : l'export natif fait le meme controle sans rappel Python. `.hits`
+    garde les contacts vus par le chemin Python."""
+    from scipy.spatial import cKDTree
+    from pipeline import step9_collision_sim as s9
+
+    pos = np.asarray(toolpath["position"], dtype=float)
+    ext = np.asarray(toolpath["extrusion"], dtype=float)
+    # Densification vectorisee (2026-10-13 ; 9,7 s -> moins d'une seconde sur le Benchy) :
+    # memes operations que la boucle d'origine (k/m puis a + t*seg), points identiques au bit.
+    seg_ids = np.flatnonzero(ext[1:] > 0) + 1
+    if len(seg_ids):
+        seg = pos[seg_ids] - pos[seg_ids - 1]
+        m = np.maximum(1, np.ceil(np.linalg.norm(seg, axis=1) / densify_step).astype(np.int64))
+        order = np.repeat(seg_ids, m)
+        first = np.cumsum(m) - m
+        k = np.arange(len(order)) - np.repeat(first, m) + 1
+        t = (k / np.repeat(m, m))[:, None]
+        dense = pos[order - 1] + t * seg[np.repeat(np.arange(len(seg_ids)), m)]
+    else:
+        dense, order = np.zeros((0, 3)), np.zeros(0, dtype=np.int64)
+    tree = cKDTree(dense) if len(dense) else None
+    radius = machine.nozzle_diameter / 2
+    axis_t = np.linspace(0.0, params.pivot_to_tip, axis_samples)
+    hits = []
+
+    def travel_check(i, point, b):
+        if tree is None:
+            return False
+        c = float(np.degrees(np.arctan2(point[0], -point[1])))
+        axis_pts = s9._positioned_toolhead_vertices(np.column_stack([0 * axis_t, 0 * axis_t, axis_t]), point,
+                                                    [c, b], machine.rotation_axes)
+        for lst in tree.query_ball_point(axis_pts, radius):
+            if lst and (order[lst] < i).any():
+                hits.append((i, np.asarray(point).tolist(), b))
+                return True
+        return False
+
+    axes = [np.asarray(a.axis, dtype=float) / np.linalg.norm(a.axis) for a in machine.rotation_axes]
+    travel_check.hits = hits
+    if len(axes) == 2:
+        travel_check.native = {"points": np.ascontiguousarray(dense), "owners": order.astype(np.int64),
+                               "axis_t": axis_t, "radius": float(radius), "axis_c": axes[0], "axis_b": axes[1],
+                               "max_factor": float(params.travel_clearance_max_factor)}
+    return travel_check
+
+
 def head_zlow_from_table(grid: np.ndarray, values: np.ndarray) -> Callable[[float], float]:
     """`head_zlow` tabule (valeur au point de grille de B le plus proche,
     premier en cas d'egalite) ; porte sa table en attribut `.table`, ce qui
@@ -368,11 +422,15 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
 
     # Pas 24 du portage C++ : corps du fichier en natif, texte identique ligne
     # a ligne (tests/test_cpp_equivalence.py), decoupage `max_tip_deviation`
-    # compris depuis le 2026-10-07. Hors de portee du natif : un `travel_check`
-    # (rappel Python) ou un `head_zlow` sans table.
+    # compris depuis le 2026-10-07, controle des degagements depuis le 2026-10-13
+    # (`material_travel_check`, porte en donnees). Hors de portee du natif : un
+    # `travel_check` quelconque (rappel Python sans `.native`) ou un `head_zlow` sans table.
     from core import _cpp
     table = getattr(head_zlow, "table", None) if head_zlow is not None else (np.zeros(0), np.zeros(0))
-    if (_cpp.enabled() and hasattr(_cpp.module(), "export_gcode_body") and travel_check is None
+    travel_native = getattr(travel_check, "native", None) if travel_check is not None else None
+    if (_cpp.enabled() and hasattr(_cpp.module(), "export_gcode_body")
+            and (travel_check is None
+                 or (travel_native is not None and getattr(_cpp.module(), "EXPORT_TRAVEL_CHECK", False)))
             and table is not None and n):
         body, st = _cpp.module().export_gcode_body(
             np.ascontiguousarray(pos), np.ascontiguousarray(ang[:, :2]), np.ascontiguousarray(ext),
@@ -387,8 +445,10 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
              "platform_margin": params.platform_margin, "singularity_radius": params.singularity_radius,
              "tilt_sign": params.tilt_sign, "b_sign": params.b_sign, "z_reference": params.z_reference,
              "decimals": dec,
-             "fil_area": fil_area, "max_tip_deviation": params.max_tip_deviation})
+             "fil_area": fil_area, "max_tip_deviation": params.max_tip_deviation},
+            *(() if travel_native is None else (travel_native,)))
         _z_offset(1.0, params.z_reference)   # meme erreur que le chemin Python si z_reference est inconnu
+        rep.travel_collisions = int(st.get("travel_collisions", 0))
         out += body.split(chr(10))
         rep.moves, rep.travels, rep.retractions = st["moves"], st["travels"], st["retractions"]
         rep.subdivided_moves = st["subdivided_moves"]

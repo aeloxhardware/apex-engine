@@ -102,3 +102,39 @@ def test_native_skin_check_matches_brute_force():
     assert np.allclose(dist[finite], expected[finite], rtol=0, atol=1e-12)
     assert np.array_equal(plate, ((head[None, :, 2] + zpts[:, None, 2] < 1.0)
                                   & (np.linalg.norm(head[None, :, :2] + zpts[:, None, :2], axis=2) < 151.0)).any(axis=1))
+
+
+def test_native_skin_check_parallel_identical_to_sequential():
+    """check_zone_parallel (2026-10-13) : chaque point teste ne voit que le PREFIXE de la
+    zone qui lui revient (bizarrerie des blocs de 256 points comprise) ; resultat
+    IDENTIQUE AU BIT a check_zone, quel que soit le nombre de fils. Lignes de plus de
+    512 points (deux debuts de bloc), points testes en debut de ligne, ligne d'un point,
+    axes de rotation reels."""
+    import pytest
+    from core import _cpp
+    if not _cpp.available() or not hasattr(_cpp.module().SkinCheckIndex(1.0), "check_zone_parallel"):
+        pytest.skip("noyau natif sans check_zone_parallel")
+    rng = np.random.default_rng(11)
+    step, reach = 0.25, 1.2
+    index = _cpp.module().SkinCheckIndex(reach + 1.0)
+    body = [np.cumsum(rng.normal(scale=0.3, size=(200, 3)), axis=0) + [5, 5, 1] for _ in range(3)]
+    pts = np.vstack(body)
+    index.add_polylines(pts, np.r_[0, np.cumsum([len(b) for b in body])].astype(np.int64), step)
+    zone = [np.cumsum(rng.normal(scale=0.15, size=(n, 3)), axis=0) * [1, 1, 0.3] + [5, 5, 2]
+            for n in (600, 1, 300, 45)]
+    zone[3] += [60.0, 60.0, 0.0]          # ligne isolee : son premier point ne voit aucun obstacle
+    zpts = np.vstack(zone)
+    zstarts = np.r_[0, np.cumsum([len(z) for z in zone])].astype(np.int64)
+    axes = np.array([[0.0, 0.0, 1.0], [1.0, 0.0, 0.0]])
+    rad = np.radians(np.column_stack([rng.uniform(0, 360, len(zpts)), rng.uniform(0, 90, len(zpts))]))
+    head = rng.normal(scale=1.5, size=(60, 3))
+    all_idx = np.arange(len(zpts), dtype=np.int64)
+    sampled = np.unique(np.r_[zstarts[:-1], 256, 512, 600 + 1 + 256, rng.choice(len(zpts), 200, replace=False)])
+    for tested in (all_idx, sampled.astype(np.int64)):
+        args = (head, axes, zpts, zstarts, np.cos(rad), np.sin(rad), tested, 150.0, 1.0, reach, step)
+        plate0, dist0 = index.check_zone(*args)
+        assert np.isfinite(dist0).sum() > 50 and np.isinf(dist0).any()      # garde : cas varies
+        for threads in (1, 3, 0):
+            plate1, dist1 = index.check_zone_parallel(*args, threads=threads)
+            assert np.array_equal(plate1, plate0)
+            assert np.array_equal(dist1, dist0)

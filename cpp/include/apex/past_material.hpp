@@ -37,9 +37,16 @@ public:
     void min_past_distance_batch(const double* queries, std::int64_t pose_count, std::int64_t samples,
                                  const std::int64_t* limits, double reach, double* out, int threads = 0) const;
 
+    // Vrai si un point d'owner < `limit` est a distance <= `radius` d'une des
+    // `query_count` requetes (meme test que scipy query_ball_point puis
+    // `(owner < limit).any()`). Arret au premier point trouve.
+    bool any_past_within(const double* queries, std::int64_t query_count, std::int64_t limit,
+                         double radius) const;
+
     std::int64_t size() const { return count_; }
 
 private:
+    bool search_any(std::int32_t node, const double* q, std::int64_t limit, double radius_sq) const;
     struct Node {
         std::int32_t left = -1, right = -1, point = -1;
         std::int8_t axis = 0;

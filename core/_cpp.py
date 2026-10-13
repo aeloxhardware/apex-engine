@@ -91,6 +91,40 @@ def set_enabled(value: Optional[bool]) -> Optional[bool]:
     return previous
 
 
+# --- Backend GPU (Vulkan), phase 1 du plan « Bird entier en C++, puis Vulkan » ---
+# Meme discipline que le natif : DESACTIVE par defaut (`APEX_USE_GPU`), jamais
+# une erreur s'il manque (module construit sans Vulkan, pas de pilote, pas de
+# GPU) : `gpu_status()` dit pourquoi, et chaque site d'appel retombe sur le CPU.
+_gpu_forced: Optional[bool] = None
+
+
+def gpu_status() -> dict:
+    """{ok, reason, device, fp64, timestamp_period_ns, compiled} ; ok = False avec
+    la raison si le module natif est absent ou anterieur au socle Vulkan."""
+    if _module is None:
+        return {"ok": False, "reason": f"module natif absent ({_load_error})", "compiled": False}
+    if not hasattr(_module, "gpu_status"):
+        return {"ok": False, "reason": "module natif anterieur au socle Vulkan", "compiled": False}
+    return dict(_module.gpu_status())
+
+
+def gpu_enabled() -> bool:
+    """Faut-il emprunter le chemin GPU ? Exige le natif actif ET un GPU utilisable."""
+    if not enabled():
+        return False
+    wanted = _gpu_forced if _gpu_forced is not None else (
+        os.environ.get("APEX_USE_GPU", "").strip().lower() in _TRUE_VALUES)
+    return bool(wanted) and bool(gpu_status().get("ok"))
+
+
+def set_gpu_enabled(value: Optional[bool]) -> Optional[bool]:
+    """Force ou libere le choix GPU (tests) ; rend l'ancienne valeur."""
+    global _gpu_forced
+    previous = _gpu_forced
+    _gpu_forced = value
+    return previous
+
+
 #: Modes de requete de `apex_core.PrintedGrid` — voir cpp/include/apex/printed_index.hpp.
 GRID_MODE_FAITHFUL = 0
 GRID_MODE_STAMPED = 1

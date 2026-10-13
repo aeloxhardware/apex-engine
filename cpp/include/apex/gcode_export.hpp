@@ -8,8 +8,9 @@
 //     std::to_chars (arrondi EXACT, comme le dtoa de Python) ;
 //   - norme de (X, Y, Z, B) firmware a QUATRE composantes pour l'avance ;
 //   - accumulation sequentielle de E, dans l'ordre des mouvements.
-// En-tete, pied de fichier et appels de rappel Python (`travel_check`) restent
-// cote Python ; `head_zlow` est passe sous forme de TABLE (grille de B, valeur).
+// En-tete et pied de fichier restent cote Python ; `head_zlow` est passe sous
+// forme de TABLE (grille de B, valeur) et le controle des degagements sous
+// forme de DONNEES (`TravelCheck`), jamais de rappel Python.
 // Precalculs numpy passes tels quels : positions decalees au sommet du cordon,
 // facteur de ralentissement `feed_plan`, section du filament.
 
@@ -19,7 +20,24 @@
 #include <string>
 #include <vector>
 
+#include "apex/past_material.hpp"
+
 namespace apex {
+
+// Controle des degagements (`travel_check` de file_io/gcode_export.py,
+// `material_travel_check`) : un point de degagement est en contact si un point
+// de matiere deposee AVANT le point de trajectoire courant est a <= `radius`
+// d'un des points de l'axe de la tete (pointe + `axis_t` le long de l'axe,
+// tete orientee par C = atan2(x, -y) et B). Meme formule de Rodrigues que
+// step9._positioned_toolhead_vertices (axe B d'abord, puis C).
+struct TravelCheck {
+    const PastMaterialIndex* material = nullptr;
+    std::vector<double> axis_t;
+    double radius = 0.0;
+    double axis_c[3] = {0, 0, 1};   // unitaires, repere machine
+    double axis_b[3] = {1, 0, 0};
+    double max_factor = 4.0;        // GcodeParams.travel_clearance_max_factor
+};
 
 struct GcodeExportParams {
     double layer_height, skin_thickness, line_width, flow;
@@ -44,6 +62,7 @@ struct GcodeExportStats {
     bool any = false;
     std::int64_t subdivided_moves = 0;
     double max_tip_deviation_before = 0.0;
+    std::int64_t travel_collisions = 0;   // degagements restes en contact (si TravelCheck)
 };
 
 // `positions` n*3 (deja decalees), `angles` n*2 (C, B), `extrusion` n,
@@ -53,7 +72,8 @@ struct GcodeExportStats {
 std::string export_gcode_body(const double* positions, const double* angles, const double* extrusion,
                               const std::uint8_t* skin, const double* slow, std::int64_t n,
                               const std::vector<double>& zlow_grid, const std::vector<double>& zlow_values,
-                              const GcodeExportParams& params, GcodeExportStats& stats);
+                              const GcodeExportParams& params, GcodeExportStats& stats,
+                              const TravelCheck* travel = nullptr);
 
 // `feed_plan` (meme fichier Python) : plafonds de vitesse angulaire par passes
 // avant puis arriere, remise a zero a chaque changement de signe (np.sign).

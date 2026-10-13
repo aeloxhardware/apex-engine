@@ -35,6 +35,8 @@ pybind11_add_module(apex_core
   src/core/scheduling.cpp
   src/core/bird_lsq.cpp
   src/core/skin_check.cpp
+  src/core/bird_locate.cpp
+  src/gpu/vk_context.cpp
   third_party/clipper2/src/clipper.engine.cpp
   third_party/clipper2/src/clipper.offset.cpp
   third_party/clipper2/src/clipper.rectclip.cpp
@@ -52,6 +54,39 @@ target_include_directories(apex_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_p
 # Clipper2 2.0.1 (Boost Software License 1.0), vendore : offsets polygonaux de
 # step6 (pas 15), a la place de shapely/GEOS.
 target_include_directories(apex_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/clipper2/include)
+
+# Backend Vulkan compute (phase 1 du plan « Bird entier en C++, puis Vulkan »,
+# 2026-10-13). OPTIONNEL : sans lui, src/gpu/vk_context.cpp rend un statut
+# « non construit » et tout reste sur CPU. Aucun lien avec vulkan-1.lib : volk
+# (MIT) charge vulkan-1.dll a l'execution, le module s'importe donc sur une
+# machine sans pilote Vulkan. VMA (MIT) pour la memoire. Shaders compiles en
+# SPIR-V par glslc (SDK) au build, inclus comme listes de nombres (-mfmt=num).
+option(APEX_WITH_VULKAN "Backend Vulkan compute" OFF)
+if(APEX_WITH_VULKAN)
+  enable_language(C)
+  find_package(Vulkan REQUIRED COMPONENTS glslc)
+  set(APEX_SHADER_OUT ${CMAKE_CURRENT_BINARY_DIR}/shaders)
+  file(MAKE_DIRECTORY ${APEX_SHADER_OUT})
+  file(GLOB APEX_SHADER_SOURCES ${CMAKE_CURRENT_SOURCE_DIR}/shaders/*.comp)
+  set(APEX_SPIRV_INCS)
+  foreach(src ${APEX_SHADER_SOURCES})
+    get_filename_component(name ${src} NAME_WE)
+    set(out ${APEX_SHADER_OUT}/${name}.spv.inc)
+    add_custom_command(OUTPUT ${out}
+      COMMAND Vulkan::glslc --target-env=vulkan1.3 -O -mfmt=num -o ${out} ${src}
+      DEPENDS ${src} VERBATIM)
+    list(APPEND APEX_SPIRV_INCS ${out})
+  endforeach()
+  add_custom_target(apex_shaders DEPENDS ${APEX_SPIRV_INCS})
+  add_dependencies(apex_core apex_shaders)
+  target_sources(apex_core PRIVATE third_party/volk/volk.c src/gpu/vma_impl.cpp)
+  target_include_directories(apex_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/volk
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/vma/include
+    ${APEX_SHADER_OUT})
+  target_link_libraries(apex_core PRIVATE Vulkan::Headers)
+  target_compile_definitions(apex_core PRIVATE APEX_WITH_VULKAN=1 VK_NO_PROTOTYPES)
+endif()
 
 if(MSVC)
   # /fp:precise est OBLIGATOIRE et non negociable : tout le portage repose sur

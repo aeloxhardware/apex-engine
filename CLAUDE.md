@@ -3015,6 +3015,133 @@ pour affichage/validation avant export G-code.
     - **Suite complète : 495/495 dans les deux positions de `APEX_USE_CPP`**
       (243 s en Python, 226 s en natif). Test : `test_place_on_platform_translates_in_z_only`.
 
+77. **Chantier « Bird entier en C++, puis Vulkan » (plan
+    `~/.claude/plans/port-e-tout-bird-hidden-nygaard.md`, approuvé le 2026-10-13).
+    Étape −1 faite : la production des G-code Bird passe de la chaîne de recherche
+    à `main.py --method bird`.**
+
+    - **Contrôle des dégagements dans le moteur** :
+      - `file_io.gcode_export.material_travel_check` reprend le `travel_check` de
+        `research/S4_Slicer/export_gcode.py` (matière densifiée à 0,25 mm, axe de la
+        tête en 16 points de la pointe au pivot, rayon de buse) ;
+      - il porte ses données (`.native`), et l'export natif fait le même contrôle
+        sans rappel Python : `TravelCheck` dans `apex/gcode_export.hpp`,
+        `PastMaterialIndex::any_past_within`, capacité `apex_core.EXPORT_TRAVEL_CHECK` ;
+      - **texte identique ligne à ligne** au chemin Python (test
+        `test_gcode_export_native_travel_check_identical_text`, avec un cas construit
+        où les dégagements sont réellement bloqués) ;
+      - `main.export_gcode_checked(check_travel=True)` l'active par défaut.
+    - **Défaut hérité, NON corrigé** (la recherche sert d'oracle) : 16 points sur
+      46 mm d'axe (un tous les ~3 mm) pour un rayon de 0,2 mm. Un cordon qui passe
+      entre deux échantillons n'est pas vu. Le contrôle est donc grossier ; à
+      reprendre (capsule axe / matière) avec mesure.
+    - **Repartir d'une passe enregistrée** : `pipeline.bird.loop.from_saved_passes`,
+      argument `loop_result` de `run_bird_pipeline`, option `main.py --from-pass=<préfixe>,<k>`
+      (aussi dans `scripts/measure_bird_vs_fem.py` et `scripts/profile_bird.py`).
+    - **Comparaison à entrée identique** (passes 4 et 5 de la recherche,
+      `out/bird/compare_chains_fixed_2026-10-13.jsonl`) :
+
+      | | Benchy recherche | Benchy `main.py` | dino recherche | dino `main.py` |
+      |---|---:|---:|---:|---:|
+      | temps de calcul | 580 s | **250 s** | 1 067 s | **383 s** |
+      | points de collision par tour de lissage | 275/17/11/1/0 | 278/17/11/1/0 | 233/17/8/0 | 240/17/7/0 |
+      | zones exclues après vérification | — | — | [4] | [4] |
+      | collisions restantes (étape 9) | 11 | 11 | 0 | 0 |
+      | dégagements en contact | 0 | 0 | 0 | 0 |
+      | tours de Y / filament | 31,3 / 4,57 m | 31,3 / 4,57 m | 620,5 / 6,42 m | 620,5 / 6,42 m |
+      | mouvements | 1 082 707 | 1 043 039 | 969 146 | 916 024 |
+      | temps d'impression (Z recommandé) | 1,89 h | 1,78 h | 2,62 h | 2,45 h |
+
+      Écarts de mouvements et de temps : le **filtre médian de B** (actif par défaut
+      depuis la limite #71), que la chaîne de recherche n'applique pas (elle appelle
+      `_resolve_all_axis_angles_coupled` directement). Écart favorable, géométrie
+      identique. **G-code de production `_v7`** : `out/share/benchy_pass4_v7.zip`,
+      `dino_pass5_v7.zip` (fichiers sur `H:/apex_bird_compare_2026-10-13/fixed`).
+    - **Avec la boucle de `main.py`** (sans passe enregistrée) :
+      - Benchy : 4 passes acceptées comme la recherche, 339 s, mais 7 collisions au lieu
+        de 11 (la déformation native diffère de quelques dixièmes de micron, et le
+        lissage diverge dès le 2ᵉ tour) ;
+      - **dino : arrêté**. La règle du maillage grossier (`BirdLoopParams.max_mean_tet_volume
+        = 2`, active par défaut alors que la limite #75 la dit « non validée ») le
+        retétraédrise de 4 263 à **151 695** tétraèdres. Ce n'est plus comparable, et le
+        risque mémoire est celui de turkish. **Tranché (utilisateur, 2026-10-13) :
+        règle désactivée par défaut** (`max_mean_tet_volume = None`).
+    - **Profil par phase** : `scripts/profile_bird.py` (chronométrage en temps réel par
+      enveloppe des fonctions de chaque phase, compteurs natifs du solveur LSQ via
+      `apex_core.bird_lsq_last_profile`, option `--gcode=` pour le contrôle d'identité).
+    - **Phase 0, profil de référence** (`out/bird/profile_bird_2026-10-13.jsonl`, CPU
+      seul, `main.py --method bird`) : l_shape 29 s, l-triple ~40 s, **Benchy 300,6 s**,
+      **dino 373 s** (depuis la passe 5), **death 714 s**. Postes dominants :
+
+      | poste | Benchy | dino | death |
+      |---|---:|---:|---:|
+      | contrôle P5 natif (un seul cœur) | 47,7 s | 113 s | 93 s |
+      | LSQ déformation (J·x + Jᵀ·u : 53-55 %) | 44,6 s | — | 206 s |
+      | LSQ rotations (dont champ initial Python ~9 s / 27 s) | 19,2 s | — | 106 s |
+      | tranchage déformé (dont candidats barycentriques) | 61 s (21 s) | 128 s (52 s) | 108 s (30 s) |
+      | P2 dernier moment accessible | 20,7 s | 20,4 s | 55 s |
+      | étape 8 Bird (dont boucle d'objets Python) | 23,5 s | 16,9 s | 15,3 s |
+      | Dijkstra ×2 + topologie | 17 s | — | 63 s |
+
+    - **Premiers gains, tous IDENTIQUES AU BIT** (G-code complet du Benchy comparé
+      octet par octet, avec et sans boucle de déformation) :
+      - **P5 en parallèle** (`SkinCheckIndex.check_zone_parallel`) : la matière visible
+        depuis un point testé est un PRÉFIXE de la zone dans l'ordre d'insertion
+        (bizarrerie des blocs de 256 points comprise) ; chaque point de la zone porte son
+        rang, les points testés se répartissent sur les cœurs. Benchy **47,7 → 8,4 s**.
+        Test `test_native_skin_check_parallel_identical_to_sequential` (1, 3, tous les fils) ;
+      - **solveur LSQ parallèle** (pool persistant `apex/internal/parallel_pool.hpp`) :
+        J·x par lignes, Jᵀ·u par colonnes sommées dans l'ordre croissant des lignes
+        (transposée construite une fois), résidus et jacobienne par tétraèdre ;
+        réductions séquentielles. Déformation Benchy **44,6 → 25,8 s**.
+        `apex_core.bird_lsq_set_threads(threads, min_parallel)` ; test
+        `test_native_least_squares_threads_bit_identical` (seuil 1 : chemin parallèle exercé) ;
+      - densification du contrôle des dégagements vectorisée : **9,7 → 0,5 s** ;
+      - candidats barycentriques : k-NN sur tous les cœurs (`workers=-1`), lots de
+        ~200 000 points toutes couches confondues, barycentriques par fils :
+        **20,3 → 16,4 s seulement**. La résolution 3×3 de numpy se partage mal entre fils.
+      - **Benchy complet : 300,6 → 226,8 s** ; depuis la passe 4 : 166,9 s.
+    - **Barycentriques en natif (accord de l'utilisateur, TOLÉRANCE DÉCLARÉE)** :
+      `apex_core.tet_barycentric_candidates` (`apex/bird_locate.hpp`, LU à pivot partiel,
+      pool persistant). Le k-NN reste scipy (0,11 s pour 200 000 points, indices au bit) ;
+      le temps était dans la résolution 3×3 (1,74 s). **×20** (1,80 → 0,09 s). Pas le bit :
+      une LU transcrite ne coïncide avec LAPACK/OpenBLAS que sur 53 % des cas (15 % avec
+      FMA) ; écart mesuré (Benchy passe 4, 200 000 × 24) score ≤ 4,5e-9, point ramené
+      ≤ 1,2e-10 mm, 0 décision changée aux seuils ±1e-6. Sert les trois appelants :
+      candidats du tranchage déformé, `machine_toolpath.locate`, `PrintedSolid.phi_at` (P2).
+      `APEX_NATIVE_BARY=0` garde LAPACK (mesure dos à dos, lu aussi par les sous-processus).
+    - **Ex aequo de `locate` : règle explicite** (`machine_toolpath.LOCATE_TIE = 1e-9`,
+      changement de comportement des DEUX chemins). Un point de paroi est sur la frontière
+      de plusieurs tétraèdres (scores ~0 à quelques ULP) : le premier maximum strict
+      dépendait de l'arrondi, donc la normale, donc B. Natif contre LAPACK SANS la règle :
+      0,055 % des points du Benchy à |ΔB| > 0,5°, jusqu'à 20°. Règle : premier candidat
+      dans l'ordre k-NN parmi ceux à moins de 1e-9 du meilleur. AVEC la règle, natif contre
+      LAPACK : 846 lignes sur 1 048 653, 3 points à |ΔB| > 0,5° (max 3,1°), pointe ≤ 5,5 µm,
+      même nombre de mouvements. Effet de la règle elle-même contre `_v7` : 0,23 % des
+      points à |ΔB| > 0,5° (max 21°), collisions (11), longueur extrudée et temps identiques.
+    - **Bout en bout, depuis les passes enregistrées** : Benchy, collisions par tour
+      278/17/11/1/0 et 11 à l'étape 9, comme la référence ; dino, 240/17/7/0, zone [4]
+      exclue, étape 9 157 → 158 collisions toutes résolues par les paliers (0 restante).
+    - **Raffinement du retour par lots** (`deformed_slicing.run`, `refine_all`) : les
+      polylignes à raffiner d'un même tour sont ramenées en un appel (4 383 appels → 34 sur
+      le dino). G-code **identique à l'octet** (Benchy et dino). Candidats : Benchy
+      16,4 → 1,2 s, dino 15,2 → 3,4 s ; localisation de l'étape 8 5,5 → 1,3 s ; dernier
+      moment accessible (P2) 22 → 15 s. Benchy depuis la passe 4 : 166,9 → ~150 s
+      (variance ~10 %) ; dino depuis la passe 5 : 373 → 256 s (P5 parallèle compris).
+      Reste dans le tranchage déformé du dino ~70 s non attribuées par le profil (99,6 s
+      au total) : à instrumenter (creusement P3 probable).
+    - **Socle Vulkan (phase 1)** : `cpp/CMakeLists.txt` option `APEX_WITH_VULKAN`
+      (`scripts/build_cpp.py --vulkan`), volk `vulkan-sdk-1.4.363.0` et VMA v3.3.0
+      vendorés (MIT, `cpp/third_party/volk|vma`, fichiers `VERSION.txt` : un fichier
+      `VERSION` sans extension est pris pour l'en-tête standard `<version>` par MSVC,
+      Windows ignorant la casse). Shaders `cpp/shaders/*.comp` → SPIR-V par `glslc`.
+      Runtime `apex/gpu/vk_context.hpp` + `vk_internal.hpp` (contexte paresseux, buffers
+      VMA, noyaux en cache, dispatch chronométré par timestamps). `core._cpp.gpu_status()`,
+      `gpu_enabled()` (`APEX_USE_GPU`, désactivé par défaut), `set_gpu_enabled()`.
+      **RTX 3090 détectée, float64 actif, `saxpy` identique au bit au CPU en float32 et
+      float64** (`tests/test_gpu_runtime.py`). Aucun noyau métier encore : la phase 3
+      n'écrit un noyau que si le C++ multithread laisse plus de 1 s par appel.
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.

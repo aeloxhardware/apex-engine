@@ -1,0 +1,66 @@
+[bird] Boucle de deformation : res/test_models/death.stl
+[bird]   base figee : 1710 cellules, 547 noeuds
+[bird]   93417 tetraedres
+[bird]   passe 1 : acceptee -> MAX_OVERHANG 20 (depl. 2.772 mm, zone 18.5 mm2)
+[bird]   passe 2 : acceptee -> MAX_OVERHANG 10 (depl. 2.001 mm, zone 18.5 mm2)
+[bird]   REPLI -- passe rejetee, essai a overhang=15
+[bird]   REPLI -- passe rejetee, essai a overhang=17.5
+[bird]   REPLI -- passe rejetee, essai a overhang=18.75
+[bird]   arret : repli meme avec le plus petit ecart sur overhang (2 passe(s) acceptee(s))
+[bird] Tranchage deforme + lissage non planaire (P2-P5)
+[skin] tour 1 : 306 point(s) de collision, 25 zone(s) en contact ; P4 cache 0 reprise(s) / 43 calcul(s)
+[skin] tour 2 : 22 point(s) de collision, 4 zone(s) en contact ; P4 cache 14 reprise(s) / 57 calcul(s)
+[skin] tour 3 : 9 point(s) de collision, 1 zone(s) en contact ; P4 cache 36 reprise(s) / 60 calcul(s)
+[skin] tour 4 : 0 point(s) de collision, 0 zone(s) en contact ; P4 cache 60 reprise(s) / 61 calcul(s)
+[skin] verification sur le corps creuse : 64 point(s) -> zones retirees
+[skin] exclusion 1 : zones retirees [1], points restants 0
+[bird] Etape 8 : 525047 point(s), 259600 orientation(s) inatteignable(s)
+[bird]   borne de B selon la hauteur : 1952 point(s)
+[bird] Etape 9 : 15 collision(s)
+[bird]   paliers : 15/15 resolu(s), 3 restante(s)
+[bird]   paliers : 3/3 resolu(s), 2 restante(s)
+[bird]   paliers : 2/2 resolu(s), 2 restante(s)
+[bird]   paliers : 2/2 resolu(s), 0 restante(s)
+[bird] Etape 10 : converged=True, 0 collision(s) non resolue(s)
+
+death.stl : 714.1 s au total ; {'tetrahedra': 93417, 'nodes': 25416, 'accepted_passes': 2, 'toolpath_points': 525047}
+phase                                                              s  appels
+boucle                                                        359.74       1  <-- > 1 s
+lissage                                                       319.67       1  <-- > 1 s
+boucle/LSQ deformation                                        205.91       6  <-- > 1 s
+lissage/tranchage deforme                                     107.78       3  <-- > 1 s
+boucle/LSQ rotations                                          106.26       6  <-- > 1 s
+lissage/P5 ordre + collisions                                  97.47       6  <-- > 1 s
+lissage/P5/controle natif                                      93.49       6  <-- > 1 s
+lissage/P2 zones                                               79.91       4  <-- > 1 s
+lissage/P2/dernier moment accessible                           54.93       1  <-- > 1 s
+lissage/P4 trajectoires                                        34.49       4  <-- > 1 s
+lissage/tranchage/candidats barycentriques                     29.81    2412  <-- > 1 s
+boucle/gradient (Dijkstra 2, plans)                            26.86       6  <-- > 1 s
+boucle/attributs (Dijkstra 1)                                  22.90       7  <-- > 1 s
+lissage/P2/fusion des micro-zones                              18.97       4  <-- > 1 s
+etape 8 Bird                                                   15.26       2  <-- > 1 s
+etape 9                                                        14.21       5  <-- > 1 s
+boucle/topologie                                               13.33       1  <-- > 1 s
+lissage/P4/doublons                                            12.23       4  <-- > 1 s
+boucle/maillage                                                10.74       1  <-- > 1 s
+lissage/tranchage/etape 6                                       7.16       3  <-- > 1 s
+paliers de reorientation                                        6.23       4  <-- > 1 s
+lissage/tranchage/Viterbi                                       4.79   11967  <-- > 1 s
+etape 8 Bird/IK                                                 4.22       1  <-- > 1 s
+export                                                          3.80       1  <-- > 1 s
+etape 8 Bird/localisation                                       3.15       1  <-- > 1 s
+lissage/P5/angles de tete                                       2.52    1292  <-- > 1 s
+borne de B                                                      2.34       1  <-- > 1 s
+lissage/P5/planification d'avance                               1.35    1292  <-- > 1 s
+lissage/tranchage/etape 5                                       1.21       3  <-- > 1 s
+boucle/juge des replis                                          0.50       6
+lissage/P2/decoupe par niveau                                   0.44     157
+etape 10                                                        0.29       1
+export/controle des degagements (index)                         0.28       1
+boucle/surface                                                  0.03       6
+lissage/P3 creusement (construction)                            0.00       2
+
+boucle/LSQ rotations (natif) : 79.28 s ; produits J.x 19.74 s (25 %), J^T.u 26.12 s (33 %), residus 0.26 s, jacobienne 0.25 s ; nfev 236, iterations LSMR 48277 ; J 175390 x 91707, nnz 340264
+
+boucle/LSQ deformation (natif) : 205.43 s ; produits J.x 55.42 s (27 %), J^T.u 58.45 s (28 %), residus 19.61 s, jacobienne 22.26 s ; nfev 6000, iterations LSMR 46960 ; J 93417 x 74607, nnz 1099956

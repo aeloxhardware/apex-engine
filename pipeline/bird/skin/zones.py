@@ -111,6 +111,23 @@ class PrintedSolid:
             return out
         dist, cand = self.tree.query(points[idx_box], k=self.k)
         pending = dist[:, 0] <= self.reach
+        from pipeline.bird.deformed_slicing import _barycentric_native
+        native = _barycentric_native()
+        if native is not None:   # tolerance declaree (CLAUDE.md #77) : premier candidat contenant le point
+            idx = np.flatnonzero(pending)
+            if not len(idx):
+                return out
+            if getattr(self, "_phi_tets", None) is None:
+                self._tets_c = np.ascontiguousarray(self.tets, dtype=float)
+                self._phi_tets = np.zeros_like(self._tets_c)
+                self._phi_tets[:, :, 0] = self.phi
+            score, mapped = native(np.ascontiguousarray(points[idx_box[idx]], dtype=float), self._tets_c,
+                                   self._phi_tets, np.ascontiguousarray(cand[idx], dtype=np.int64))
+            inside = score >= self.tolerance
+            first = inside.argmax(axis=1)
+            hit = inside[np.arange(len(idx)), first]
+            out[idx_box[idx[hit]]] = mapped[np.flatnonzero(hit), first[hit], 0]
+            return out
         for j in range(self.k):
             idx = np.flatnonzero(pending)
             if not len(idx):

@@ -1933,6 +1933,62 @@ def test_gcode_export_native_identical_text(restore_switch, variant):
         assert ra.retractions > 5 and ra.clearance_axes["R"] + ra.clearance_axes["Z"] > 5   # garde
 
 
+def _overhang_travel_toolpath():
+    """Cordons en porte-a-faux a z = 5 puis trajets a vide SOUS eux a z = 1-1.5,
+    tete verticale (B = 0) : l'axe de la tete traverse la matiere deja deposee,
+    les degagements sont donc reellement bloques (un cordon court laisse R
+    s'echapper, un long bloque tout)."""
+    pts, ext = [], []
+
+    def line(a, b, step=0.5):
+        a, b = np.asarray(a, float), np.asarray(b, float)
+        m = max(1, int(np.ceil(np.linalg.norm(b - a) / step)))
+        for k in range(m + 1):
+            pts.append(a + (b - a) * k / m)
+            ext.append(0.0 if k == 0 else 1.0)
+
+    line([20, 0, 5], [30, 0, 5])            # long porte-a-faux le long de +R
+    line([25, 2, 1], [25, 4, 1])            # sous le porte-a-faux mais a cote
+    line([24, 0, 1.5], [24, -2, 1.5])       # trajet vers un point SOUS le cordon
+    line([12, 0, 5], [12.6, 0, 5])          # porte-a-faux court
+    line([12, 0, 1], [12, 3, 1])            # sous lui : R s'echappe
+    line([27, 0, 1], [27, -3, 1])           # de nouveau sous le long cordon
+    pos = np.array(pts)
+    c = (np.degrees(np.arctan2(pos[:, 1], pos[:, 0])) + 90.0) % 360.0
+    return {"position": pos, "axis_angles": np.column_stack([c, np.zeros(len(pos))]),
+            "extrusion": np.array(ext), "is_skin": np.zeros(len(pos), dtype=bool)}
+
+
+def test_gcode_export_native_travel_check_identical_text(restore_switch):
+    """Controle des degagements (`material_travel_check`) porte en DONNEES dans
+    l'export natif (2026-10-13) : texte identique ligne a ligne et memes contacts
+    restants que le chemin Python (rappel scipy de la chaine de recherche)."""
+    core = _cpp.module()
+    if not getattr(core, "EXPORT_TRAVEL_CHECK", False):
+        pytest.skip("module natif anterieur au controle des degagements")
+    import main
+    from file_io.gcode_export import GcodeParams, export_gcode, head_zlow_from_table, material_travel_check
+    machine = main._default_machine_profile()
+    machine.nozzle_model = None
+    hz = head_zlow_from_table(np.arange(0, 185.5, 0.5), -np.linspace(1, 30, 371))
+    changed = hits = 0
+    for tp in [_overhang_travel_toolpath()] + [_random_machine_toolpath(seed) for seed in range(2)]:
+        for params in (GcodeParams(max_tip_deviation=None), GcodeParams()):
+            check = material_travel_check(tp, machine, params)
+            _cpp.set_enabled(False)
+            a, ra = export_gcode(tp, machine, params, head_zlow=hz, travel_check=check)
+            plain, rp = export_gcode(tp, machine, params, head_zlow=hz)
+            _cpp.set_enabled(True)
+            b, rb = export_gcode(tp, machine, params, head_zlow=hz, travel_check=check)
+            assert a == b
+            for k in ("moves", "travels", "retractions", "clearance_axes", "travel_collisions", "filament_mm",
+                      "tip_z_min", "head_z_min", "fw_x_range", "fw_y_range", "fw_z_range", "subdivided_moves"):
+                assert getattr(ra, k) == getattr(rb, k), k
+            changed += int(a != plain)
+            hits += len(check.hits)
+    assert hits > 0 and changed >= 2             # garde : contacts vus, degagements reellement deplaces
+
+
 def test_feed_plan_native_bit_exact(restore_switch):
     core = _cpp.module()
     if not hasattr(core, "feed_plan_caps"):
