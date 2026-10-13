@@ -27,9 +27,11 @@ struct GcodeExportParams {
     double retract_length, retract_speed, retract_min_travel, travel_clearance;
     double pivot_to_tip, platform_margin, singularity_radius;
     double tilt_sign;
+    double b_sign;          // B firmware = b_sign * B d'Apex
     bool z_reference_tip;   // true = "tip", false = "pivot"
     int decimals;
     double fil_area;        // pi * (d/2)^2, calcule cote Python
+    double max_tip_deviation = 0.0;   // <= 0 : pas de decoupage (None cote Python)
 };
 
 struct GcodeExportStats {
@@ -40,6 +42,8 @@ struct GcodeExportStats {
     std::int64_t tip_below_plate = 0, head_below_margin = 0;
     double x_min = 0, x_max = 0, y_min = 0, y_max = 0, z_min = 0, z_max = 0;
     bool any = false;
+    std::int64_t subdivided_moves = 0;
+    double max_tip_deviation_before = 0.0;
 };
 
 // `positions` n*3 (deja decalees), `angles` n*2 (C, B), `extrusion` n,

@@ -247,6 +247,9 @@ slicer_engine/
 │   └── schema.py                    #   (de)sérialisation JSON <-> dataclasses, pont avec l'UI TS
 ├── pipeline/
 │   ├── __init__.py
+│   ├── bird/                        # FAIT (phase 1) — voie Bird (GPL-3.0, Joshua Bird), limite #75 :
+│   │                                 #   deformation, loop, fold_judge, deformed_slicing, machine_toolpath,
+│   │                                 #   skin/ (zones P2, skin_carve P3, paths P4, print_order P5, chain)
 │   ├── step1_ingest.py              # FAIT — ingestion mesh + tétraédrisation (+ détection
 │   │                                 #   automatique des cavités internes pour tetgen, voir limite #7 ;
 │   │                                 #   + raffinement local près du plateau via add_region, limite #36)
@@ -284,6 +287,8 @@ slicer_engine/
 ├── file_io/                          # renommé depuis `io/` — collision avec le module
 │   │                                 #   standard Python `io` (voir limite #20)
 │   ├── mesh_loader.py                # FAIT — load_toolhead_mesh (GLB -> Trimesh mm, scene-space)
+│   ├── pivot_length.py               # FAIT — longueur pivot-pointe L courante (config/pivot_to_tip.json),
+│   │                                 #   lue par l'export (limite #74)
 │   ├── visualization_export.py       # FAIT — export_visualization_glb (scène GLB : mesh + couches ;
 │   │                                 #   trajectoire OMISE par défaut, `show_toolpath=True` la rétablit)
 │   └── gcode_export.py               # PAS ENCORE ÉCRIT
@@ -2116,6 +2121,18 @@ pour affichage/validation avant export G-code.
         bascule sur l'autre axe ;
       - un contrôle optionnel (`travel_check`) compte les dégagements en
         contact.
+    - **Signe de B (2026-10-06) — CORRIGÉ le jour même.** `GcodeParams.b_sign = +1`
+      (B firmware = B d'Apex) : B POSITIF penche le corps de la tête vers +R (la buse
+      vers le centre), B NÉGATIF envoie la pointe vers l'EXTÉRIEUR (croquis de
+      l'utilisateur et aperçu de `slicer_ux`). Une première version posait `−1` : c'était
+      un CONTRESENS sur la phrase « B négatif = vers l'avant », qui décrit le sens de
+      l'axe et non une inversion à appliquer ; les limites mesurées de B sont [0°, 185°]
+      (jamais négatif), cohérentes avec +1. Tous les G-code produits avec `−1` (B
+      négatif) sont inutilisables. Géométrie (X, Z, collisions) inchangée, en B d'Apex.
+      Présent dans les chemins Python et natif ; `firmware_to_machine` l'inverse. Axe de
+      rotation actif à l'impression : **Y** (pas C). Les fichiers RRF
+      (`research/printers/aetheris-4/gen0/v0.0.4`) décrivent une imprimante bac à sable
+      aux limites volontairement larges.
     - `parse_gcode` et `firmware_to_machine` servent à l'aperçu
       (`scripts/preview_gcode_file.py`) et au contrôle aller-retour.
     - Tests : `tests/test_gcode_export.py`.
@@ -2486,6 +2503,517 @@ pour affichage/validation avant export G-code.
       sans extrusion de 0,5 à 2,5 mm SANS rétraction (sauts d'un anneau à
       l'autre) ; 41 % des mouvements extrudés font moins de 0,05 mm
       (découpage `max_tip_deviation`, fichier lourd : 1,07 M de mouvements).
+
+69. **Normale par point ACTIVÉE par défaut (2026-10-06, décision de
+    l'utilisateur), réglable : `Step8Params.per_point_normal` (défaut `True`).**
+    La cible de l'IK est le gradient LOCAL du champ en chaque point, et non la
+    normale du plan moyen de la couche. Mesuré sur les 4 modèles de
+    `res/test_models/` (`scripts/measure_matrix.py`, variantes `ref` / `ppn`,
+    résultats `out/measure_ppn_2026-10-06.jsonl`) :
+
+    | | l_shape | l-triple | death | turkish |
+    |---|---:|---:|---:|---:|
+    | écart médian tête/normale | 5,8 → 2,8° | 4,1 → 1,9° | 6,1 → 2,6° | 4,7 → 1,7° |
+    | points à plus de 15° | 24,1 → 3,9 % | 10,3 → 0,6 % | 12,0 → 2,6 % | 14,7 → 4,5 % |
+    | temps d'impression | 0,16 → 0,26 h | 0,18 → 0,30 h | 1,93 → 4,40 h | 5,01 → 8,40 h |
+    | `step8_diagnostics` | 15 300 → 7 000 | 8 560 → 5 330 | 0 → 111 400 | 24 400 → 195 100 |
+    | sauts de B > 10° | 708 → 2 291 | 7 → 1 430 | 0 → 19 730 | 1 → 44 120 |
+
+    Matière sans appui (step9b) strictement inchangée : la géométrie des
+    couches ne change pas, seule l'orientation de la tête. **Coût** : temps
+    d'impression +65 à +130 %, car le firmware coordonne les axes et ralentit
+    à chaque saut de B ; sur death et turkish les orientations inatteignables
+    augmentent beaucoup. **Non mesuré** : `ppn` combiné au filtre médian
+    (limite #63, `free_axis_median_window`, variante `ppn_radial_median9`),
+    remède identifié pour les sauts de B. Suite : 466/466 dans les deux
+    positions de `APEX_USE_CPP`.
+
+    **Mesure du filtre médian (2026-10-06)**, `ppn` contre `ppn_median9`
+    (`out/measure_ppn_b360_2026-10-06.jsonl`) : temps d'impression −19 / −20 /
+    −31 / −21 % (l_shape / l-triple / death / turkish), sauts de B > 10° en
+    baisse partout (death 19 730 → 10 720, turkish 44 120 → 26 870) ; coût :
+    écart médian +0,2 à +0,4°, points à > 15° +0,2 à +1,2 point,
+    `step8_diagnostics` +8 à +16 %. Matière sans appui inchangée. **Non
+    mesuré : les collisions de la tête avec les angles filtrés** (le filtre doit
+    s'appliquer AVANT le contrôle de collision, limite #63) : le filtre reste
+    donc opt-in (`free_axis_median_window = 0`).
+
+    **Limites de B réconciliées (2026-10-06)** : `main._default_machine_profile`
+    passe de 750 à 360 °/s (vitesse) et reste à 300 °/s² (accélération) : minimum
+    des limites de l'utilisateur et des fichiers RRF (`4axisinput.g` : 360 °/s,
+    2000 °/s² ; `config.g` : 1667 °/s, 1300 °/s², unités supposées en degrés).
+    Effet mesuré sur le temps d'impression estimé : nul (4,40 h et 8,40 h
+    identiques à 750 °/s) : l'accélération est le facteur limitant.
+
+    **SDK Vulkan 1.4.363.0 installé (2026-10-06)** via winget
+    (`KhronosGroup.VulkanSDK`, hachage vérifié), `VULKAN_SDK=C:\VulkanSDK\1.4.363.0`,
+    GPU vu : NVIDIA GeForce RTX 3090. Aucun code GPU écrit.
+70. **Trois chantiers du 2026-10-06 : collisions avec le filtre médian,
+    dégagements de trajet à vide, détection de collision de la chaîne Bird par
+    le step9 rapide d'Apex.**
+
+    **Filtre médian de B et collisions** (`scripts/measure_step9.py --median=N`,
+    step9 rapide natif, normale par point active, limite #69) : événements de
+    collision `printed_part`, sans filtre → avec filtre de 9 points : l_shape 0 → 0,
+    l-triple 0 → 0, death 137 → 118 (−14 %), turkish 1 613 → 1 406 (−13 %) ;
+    pénétration maximale inchangée (≈ 1,17-1,19 mm). Le filtre ne dégrade donc
+    pas les collisions : il les réduit. Il reste opt-in
+    (`free_axis_median_window = 0`) : à activer sur décision de l'utilisateur
+    (−19 à −31 % de temps d'impression, +0,2 à +0,4° d'écart médian, +8 à +16 %
+    d'orientations inatteignables).
+
+    **Dégagements de trajet à vide** : `clearance_move(..., blocked=...)`
+    (`file_io/gcode_export.py`). Quand le contrôle de contact `travel_check` est
+    fourni, un dégagement en contact avec la matière déjà déposée est repris avec
+    l'autre axe, puis avec un pas double, jusqu'à
+    `travel_clearance * travel_clearance_max_factor` (4 par défaut) ; si tout est
+    bloqué, le premier candidat sûr est conservé (jamais pire qu'avant). Mesure
+    (G-code Bird régénérés) : dégagements en contact Benchy 3 → 0, dino 3 → 0 (le
+    fichier du dino en contenait 3 et non 1). Le chemin natif n'est pas concerné
+    (il n'est emprunté que sans `travel_check`). Test :
+    `test_clearance_avoids_blocked_points`.
+
+    **Chaîne Bird : détection par le step9 rapide d'Apex** (option
+    `full_step89.py --apex-detect`, désactivée par défaut). Le step9 rapide natif
+    détecte les points en collision en 9-10 s ; la boucle Python existante (paliers
+    45/90/181°) ne traite plus que ces points. Mesure sur le dino : étape 9 de la
+    chaîne **855 s → 74 s** (×11,6), mêmes résultats (195 points en collision au
+    tour 1, 195/195 résolus, paliers [95, 86, 14], 3 708 points modifiés, 0 au
+    tour 2) et trajectoire machine **identique au bit** à celle de la chaîne
+    Python actuelle (0 point différent sur 862 241). Sur le Benchy, mêmes 11
+    événements que la chaîne Bird, pénétration identique.
+
+    **Découverte : le plateau de step9 a sa surface à z = +0,5 mm.**
+    `_platform_mesh_at_angle` / `_check_platform_disc` modélisent un disque de
+    1 mm d'épaisseur CENTRÉ sur `platform_origin` : la surface du plateau est à
+    +0,5 mm, alors que les pièces (step3) et la chaîne Bird la placent à z = 0.
+    Step9 est donc 0,5 mm plus strict que la marge annoncée (Benchy : 62
+    événements « plateau » en plus ; dino : 38). L'option `--apex-detect`
+    compense en décalant l'origine de 0,5 mm vers le bas
+    (`PLATFORM_HALF_HEIGHT`) ; avec ce décalage les événements sont identiques à
+    ceux de la chaîne Bird (Benchy 11/11, dino 0/0). **Corrigé le même jour
+    dans step9** (limite #71) : surface à z = origine.
+
+    **Écart avec l'ancien poste** : 94 points de corps (0,011 %) du dino ont un B
+    différent (jusqu'à 10,8°) de la trajectoire produite sur l'autre poste ; la
+    chaîne Python actuelle donne la même différence : elle vient de l'évolution du
+    code depuis, pas de `--apex-detect`.
+
+    **ATTENTION : les valeurs de B ci-dessous (−129,5° à 0°, −114° à 0°, −64° à 0°) viennent de
+    la version erronée `b_sign = −1`, corrigée le jour même (limite #61) : ces fichiers sont à
+    REGÉNÉRER avec `b_sign = +1` avant toute impression.**
+
+    **G-code régénérés (2026-10-06)** avec B inversé, pivot à 46 mm et dégagements
+    contrôlés (`export_gcode.py --strict`) : Benchy 1 070 769 mouvements, 4,57 m,
+    1,64 h nominal / 3,32 h avec les limites de B, B firmware −129,5° à 0°,
+    pointe la plus basse 0,139 mm, 0 dégagement en contact ; dino 973 269
+    mouvements, 6,40 m, 2,24 h / 4,28 h, B −114° à 0°, 0,176 mm, 0 en contact.
+    **Y cumulé : Benchy ≈ 32 tours, dino ≈ 621 tours** (à valider côté câblage).
+    Fichiers d'essai : `scripts/gen_b_direction_test.py` (essai à SEC du sens de B :
+    la pointe reste immobile, sans extrusion) et `scripts/export_model_gcode.py`
+    (STL → G-code par le pipeline FEM, avec comptage des collisions de la vraie
+    tête) ; `out/test_l_shape.gcode` : 0,28 m, 0,26 h, B −64° à 0°, aucune
+    collision. Archives dans `out/share/*_v4.zip` (Deflate, les fichiers font
+    ≈ 65 Mo : un canal qui tronque à 1 Mo les corrompt). **Non fait : le sens
+    physique de B n'est pas encore confirmé sur la machine.**
+
+    **Fichier manquant** : `research/S4_Slicer/safe_io.py` (réessai des écritures
+    sur verrou Windows) est absent de la branche alors que 7 scripts l'importent ;
+    ces scripts ne démarrent pas sans lui. Les essais de cette session ont utilisé
+    un équivalent minimal hors dépôt (dossier temporaire de session).
+
+71. **Suite autonome du 2026-10-06 (hors UI) : sept points traités.**
+
+    - **`research/S4_Slicer/safe_io.py` restauré** (absent de la branche ; 7 scripts de
+      recherche l'importent : `bird_slice_deformed`, `export_gcode`, `full_step89`,
+      `skin_loop`, `skin_paths`, `skin_print`, `surface_skin`). Comportement reconstruit
+      d'après sa description : réessai de `open` en écriture pendant 5 s au plus.
+    - **`--apex-detect` activé dans `out/run_bird_chain.sh`** (chemin corrigé : le script
+      pointait vers `slicer_alg`, l'autre poste). Gain mesuré ×10, trajectoire identique au bit.
+    - **Cumul de rotation de Y** : `GcodeReport.y_turns` (étendue de Y déroulé, en tours) et
+      `GcodeParams.max_y_turns` (`None` = aucune limite) ; avec `strict`, un dépassement
+      refuse d'écrire le fichier. Affiché par `export_gcode.py` et `export_model_gcode.py`.
+      Valeurs : Benchy ≈ 32 tours, l_shape ≈ 240, dino ≈ 621. Test :
+      `test_y_turns_reported_and_limit_refuses_write` (chemins Python et natif).
+    - **Échec de test isolé** (`test_export_extrusion_and_retraction`, `APEX_USE_CPP=0`, une
+      seule fois, pendant un calcul en parallèle) : **non reproductible** (46 exports sous 8
+      fils de charge CPU, 0 échec ; cinq passages complets propres depuis). Cause inconnue.
+    - **Filtre médian de B ACTIVÉ par défaut** (`Step8Params.free_axis_median_window = 9`) :
+      mesuré sur les 4 modèles (limite #69/#70 : temps −19 à −31 %, collisions en baisse,
+      matière sans appui inchangée, écart médian +0,2 à +0,4°). Réversible : valeur 0.
+    - **Plateau de step9 : surface à z = origine** (`PLATFORM_CENTER_OFFSET`). Le disque était
+      centré sur `platform_origin` (surface à +0,5 mm : step9 plus strict de 0,5 mm que la
+      marge annoncée). Corrigé dans `_check_platform_disc`, `_platform_disc_batch` et
+      `_platform_mesh_at_angle` (Python seul : le chemin natif n'en contient pas). Mesure :
+      événements du pipeline FEM identiques sur les 4 modèles (0, 0, 118, 1 406) ;
+      chaîne Bird : les 62 (Benchy) et 38 (dino) faux événements « plateau » disparaissent
+      (11/11 et 0/0, comme la chaîne Bird) sans le décalage de contournement, retiré de
+      `full_step89.py --apex-detect`. Test : `test_platform_surface_is_at_origin_z`.
+    - **Contours « invalides » des tranches Bird : pas de correction à faire.** Mesure en pièce
+      RÉELLE (`machine_toolpath`, cordons densifiés à 0,2 mm, doublon = autre cordon, non voisin
+      sur le trajet, à moins de 0,10 mm) : part de longueur extrudée en double 0,3 à 1,5 %
+      (death 0,72 %, Squirtle 1,46 %, Benchy 0,39 %, dino 0,32 %, l_shape 0,68 %, l-triple
+      0,42 %), SANS corrélation avec la part d'aire à contours invalides (death 53,5 %,
+      Squirtle 27 %, Benchy 4,6 %). Le remplissage supplémentaire des couches invalides
+      (13-27 %) ne se traduit donc pas par des cordons superposés : un pli recouvre deux endroits
+      réels distincts, c'est légitime. Lissage : 1 à 5 % de doublons (non analysé).
+    - **Non traités (UI)** : config UI (`config/params.py`, `config/schema.py`, pont JSON),
+      sélecteur graphique d'angle, conseil « ne pas centrer les modèles », rendu de l'aperçu
+      (rétrécissements à B > 90°).
+
+72. **Points 6 a 9 du DT (2026-10-06, `config.g` confirme actif par l'utilisateur).**
+
+    - **Limites de B** (`main._default_machine_profile`) : 1667 deg/s et 1300 deg/s2 (M203 B100000
+      /min, M201 B1300 de `config.g`). Les 360 / 300 de la limite #69 etaient un minimum
+      prudent entre deux fichiers dont un n'est pas actif.
+    - **Z et Y ne sont PAS modelises par `feed_plan`** (seul B l'est). `config.g` donne Z =
+      400 mm/min (6,7 mm/s) et 70 mm/s2 : le pivot de B couple Z a B (Z = z + 46 (cos B - 1)), donc
+      chaque saut de B est un saut de Z. Mesure (vitesses seules, B 1667, Y 600, accelerations
+      ignorees : borne basse) : Benchy 1,66 h nominal -> 9,7 h a Z = 6,7 mm/s, 4,1 h a 20, 2,5 h a 50,
+      2,0 h a 100, 1,9 h a 133 mm/s ; test_l_shape 0,13 -> 1,35 / 0,50 / 0,27 / 0,21 / 0,20 h. Vitesse de Z
+      demandee (Benchy, ponderee par le temps) : p50 4,8 / p90 80 / p99 553 mm/s. **Recommande a
+      l'utilisateur : `M203 Z8000` et `M201 Z1500` dans `config.g` (valeurs de `4axisinput.g`) ; a faire
+      par lui, rappel a repeter jusqu'a confirmation** (le 400 ressemble aux 400 pas/mm de M92).
+      `GcodeParams.fw_axis_speeds` (X, Y, Z, B ; defaut = valeurs recommandees) alimente
+      `GcodeReport.print_time_fw_s` (`firmware_time_estimate`) ; mettre (1666.7, 600.0, 6.67, 1666.7)
+      pour l'etat actuel. Outil : `scripts/estimate_gcode_time.py`. Test :
+      `test_firmware_time_estimate_slows_on_z_limit`.
+    - **Doublons du lissage Bird** (cordons a moins de 0,10 mm d'un autre non voisin sur le trajet, part de
+      la longueur de lissage) : Benchy 1,0 %, dino 2,0 %, Squirtle 5,3 %. 43 a 60 % des voisins sont du
+      lissage, le reste du corps. Benchy : 62 % de la longueur en croisements de moins de 0,6 mm ;
+      Squirtle : courses jusqu'a 70 mm (0,02-0,03 mm de distance, ecart de rang ~17 000 points), soit 3 % de
+      la longueur de lissage dans des courses de plus de 5 mm. **Cause trouvee** (`skin_paths_pass8.pkl`) : des
+      ZONES VOISINES du lissage tracent chacune leur passe de bord le long de leur frontiere commune
+      (zones 7 et 10 : 373 paires de points a moins de 0,06 mm, ~75 mm ; zones 7 et 11 : 134 ; zones 0 et 14 :
+      100 ; seulement 31 paires au sein d'une meme zone). **Remede applique** (recherche,
+      `skin_paths.dedupe_shared_passes`, actif par defaut, `--no-dedupe` pour l'ancien comportement) : une
+      zone ne retrace pas une passe deja deposee par une zone imprimee avant elle (moins de w/2, meme
+      normale). Squirtle passe 8 rejoue (P4, P5 final, step8+9, export) : lissage 5 724 -> 5 641 mm
+      (-83 mm), paires entre zones 719 -> 0, **doublons 5,29 -> 2,28 %** (plus longue course 69,8 -> 2,0 mm ;
+      le reste est du croisement avec le corps) ; collisions non resolues 9 -> 10 (corps, z median 3,7 mm,
+      reference produite par l'ancien poste : ecart non isole). Benchy et dino : 9 et 7 points retires
+      (0,02 %), G-code non regeneres. Ancien etat : `H:/apex_untracked_backup_2026-10-06/squirtle_pass8_before_dedupe`.
+    - **Couverture de la peau** (surface de l'original echantillonnee contre les cordons densifies a
+      0,15 mm) : dino 0,69 % a plus de 0,3 mm et 0,11 % a plus de 0,6 mm (un amas de 3,5 mm pres de
+      (-7, -16, 50)) ; Squirtle 3,3 % / 0,61 % (deux plaques de ~6 mm vers z = 31, a 0,7 mm,
+      faces tournees vers le haut). **Le « 6,2 % » de la limite #68 ne se reproduit pas** sur les
+      trajectoires actuelles. Les 4 plaques sont a 0,7-2,2 mm de points de coupe du lissage
+      (`skin_trim`) : hypothese, non demontree.
+    - **Decalage du modele sur le plateau** (`out/run_offset.sh`, `out/offset/measure_offset.jsonl`, defauts
+      actuels, modele centre sur x = 0 / 60 / 100 mm) :
+
+      | modele | orientations inatteignables | matiere sans appui | collisions |
+      |---|---|---|---|
+      | l_shape | 3344 -> ~950 | 2,2 -> 3,1 % | 0 |
+      | l-triple | 3415 -> ~1950 | 2,5 -> 4,5-4,7 % | 0 |
+      | death | 138k -> 128-131k | 0,54 -> 0,16-0,23 % | 1,5 -> 0,4 % |
+      | turkish | 222k -> 202k (60 mm) / 226k (100 mm) | 1,03 -> 0,59 / 0,52 % | 28 % -> 28 / 26 % |
+
+      **Pas de regle nette** : le decalage reduit toujours les orientations inatteignables, aide death et
+      turkish, degrade l_shape et l-triple. Ne pas en faire une consigne a l'utilisateur sur cette base.
+      Mesure geometrique grossiere (`scripts/measure_offset_reach.py`, normale de surface prise pour la
+      direction de depot) : centrer donne le MOINS de flancs inatteignables a plus de 45 deg (47 % contre
+      72 % decale, Benchy) ; proxy faible (un flanc vertical se depose verticalement).
+    - **Fragilite d'ingestion (trouvee en decalant turkish)** : `turkish.stl` echoue a l'ingestion
+      (auto-intersections, `pymeshfix` effondre) pour 3 decalages sur 4 en x (20, 40, 70 mm ; 50 et la
+      position d'origine passent), a la precision flottante pres : ce n'est PAS la position mais
+      l'arrondi float32 des sommets qui fait basculer un maillage deja marginal. Arrondir les sommets au
+      micron repare 2 cas sur 3 (pas 40 mm) : pas un correctif fiable. Cause localisee : selon l'arrondi,
+      `resolve_self_intersections` laisse 8 (origine) ou 20 (decale) auto-intersections residuelles, et
+      `_repair_local_self_intersections` abandonne dans le second cas. **Correctif** :
+      `_tetrahedralize_with_translation_retry` (step1) rejoue la cascade, APRES un echec seulement, sur le
+      maillage translate EN MEMOIRE (centre de la boite en x, y = 0, puis +0,37/+0,21 mm) et ramene les
+      noeuds a leur place. Les trois cas en echec passent (20, 40, 70 mm). Pas de repli quand des zones de
+      jonction sont fournies (coordonnees absolues). Test :
+      `test_translation_retry_recovers_and_moves_nodes_back`.
+    - **Backend Vulkan de `MeshDistance` : pas de gain mesurable aujourd'hui.** CPU parallele : 2 M de points
+      en 1,03 s sur turkish (10 180 faces ; serie 7,9 s). La couleur de step7 en demande moins de 1 M par
+      modele : au mieux ~1 s a gagner. Non construit ; a rouvrir si une etape demande des centaines de
+      millions de requetes.
+
+73. **Pipeline complet de death : 124 s -> 37 s (2026-10-06), resultats identiques.** Mesure `main.run_pipeline`, defauts (resolution 1,5), `APEX_USE_CPP=1`. Le
+    « 20 s » cite jusqu'ici dans le DT etait celui de step1->8 @ 0,8 d'une session anterieure, AVANT la
+    normale par point et le filtre median : il ne valait plus pour le pipeline complet.
+    - **step10 : 81 -> 6 s.** `point_index in diagnostic_indices` sur une LISTE de ~115 000 diagnostics
+      d'etape 8, une fois par point a traiter : boucle quadratique (73 s de temps propre). Ensembles a la
+      place ; journal identique (115 312 `fallback_support`, 17 `local_reorientation`).
+    - **step8 : 17 -> 6,6 s.** `_median_filter_free_axes` recalculait l'ecart residuel point par point
+      (Rodrigues scalaire, 718 000 appels). Par lots, memes operations dans le meme ordre ; 115 192
+      diagnostics identiques. Test : `test_median_filter_residuals_match_pointwise_rodrigues`.
+    - **Controleur de collision rapide construit une fois (step9 + step10 : 5 constructions -> 1).**
+      `FastCollisionChecker` construisait AUSSI l'arbre scipy, inutile en mode natif (arbre desormais
+      paresseux), et step10 le reconstruisait a chaque iteration alors que la matiere ne depend que des
+      positions. `step9.fast_checker_for` le met en cache (une entree, comparee par valeur). Test :
+      `test_fast_checker_is_reused_while_material_is_unchanged`. step10 6 -> 1,7 s, step9 7 -> 5 s.
+    - Repartition finale (51 s -> 37 s apres le cache) : step1 12,3 s (TetGen ~12 s d'attente de
+      sous-processus), step9 5,1, step8 4,7, step5b 3,9, step4 3,7, step6 3,6, step10 1,7, step5 1,4.
+      Plus aucun poste Python isole au-dessus de ~2,5 s : le reste est eparpille.
+    - **Constat, non tranche** : step10 range CHAQUE diagnostic d'etape 8 en « support de secours »
+      (115 312 entrees sur death). Avec la normale par point, ces diagnostics sont des ecarts
+      d'orientation, pas des collisions : le rapport annonce donc ~115 000 points « a supporter » qui
+      n'en ont pas besoin. A decider avec l'utilisateur (seuil de diagnostic, ou ne pas basculer les
+      diagnostics d'orientation en support).
+
+74. **Session autonome du 2026-10-07 (sans essai machine) : supports de l'étape 10,
+    calibrage de L, pièce du direct, échec de test expliqué.**
+
+    - **`Step10Params.orientation_support_min_residual_deg`** (défaut : voir la décision
+      ci-dessous). Un diagnostic d'étape 8 (écart tête / direction visée, SANS
+      collision) dont l'écart est sous ce seuil est journalisé `orientation_deviation` et
+      n'est plus compté comme support ; au-dessus, il suit la voie historique. Une collision
+      réelle au même point suit toujours la voie normale (test
+      `test_orientation_threshold_never_hides_a_real_collision`). Mesure (défauts, rejeu de
+      step10 sur les trajectoires du pipeline complet) :
+
+      | modèle | diagnostics | > 45° | > 60° | supports : `None` / 45 / 60 / `inf` |
+      |---|---:|---:|---:|---|
+      | l_shape | 8 107 | 0 | 0 | 8 107 / 0 / 0 / 0 |
+      | l-triple | 5 853 | 0 | 0 | 5 853 / 0 / 0 / 0 |
+      | death | 115 192 | 187 | 28 | 115 312 / 396 / 237 / 209 |
+      | turkish | 184 932 | 510 | 100 | 185 658 / 1 735 / 1 332 / 1 244 |
+
+      Colonne `inf` = « jamais ». Il ne reste alors que les vraies collisions non
+      réorientables (death 209, turkish 1 244) ; aucun diagnostic ne dépasse 90° sauf 1 sur
+      turkish. step10 : death 2,3 → 0,9 s. **Décision de l'utilisateur (2026-10-07) : jamais.
+      Nouveau défaut `None` = jamais ; `0.0` rend le comportement historique** (l'infini n'est
+      pas représentable dans le JSON de l'interface).
+    - **L (pivot -> pointe) réglable** (`file_io/pivot_length.py`, `config/pivot_to_tip.json`) :
+      dernière valeur enregistrée, sinon 46 mm. Le firmware ne fait aucune cinématique (#61) :
+      L est appliqué dans le G-code, qui est à RÉGÉNÉRER après tout changement de L.
+      `export_model_gcode.py`, `gen_b_direction_test.py` et `estimate_gcode_time.py` le lisent
+      (ou `--pivot-to-tip=`). Sans valeur enregistrée, `out/test_b_direction.gcode` régénéré est
+      identique. Toute méthode de mesure de L est CONFIDENTIELLE et reste hors du dépôt
+      (décision de l'utilisateur du 2026-10-07). Tests : `tests/test_pivot_length.py`.
+    - **Pièce du direct** (`out/salon/`, pipeline FEM, résolution 0,8, step9 rapide) :
+
+      | pièce | collisions tête | Y cumulé | temps : Z recommandé / `config.g` actuel |
+      |---|---|---:|---|
+      | l-triple | aucune | 68,5 tours | 0,22-0,23 h / 0,80 h |
+      | l_shape | aucune | 239 tours | 0,19-0,20 h / 1,15 h |
+      | real_overhang | 1 701 plateau | — | refusé (`strict`) |
+
+      Recommandée : **l-triple** (4 fois moins de tours de Y). `real_overhang.stl` a son
+      minimum à z = −15 mm : le pipeline ne pose pas le modèle sur le plateau, et l'export
+      refuse à raison. À traiter : poser automatiquement le modèle à z = 0 à l'ingestion.
+    - **Échec isolé de `test_export_extrusion_and_retraction` (2026-10-06) : cause trouvée.**
+      La session `slicer_ux` a édité `file_io/gcode_export.py` à 10:29:20 (marqueur
+      `apex_sliced` inséré en tête de l'en-tête, déplacé à 10:29:44) ; la suite
+      `APEX_USE_CPP=0` lancée à 10:29:29 a importé la version intermédiaire, d'où l'assertion
+      d'en-tête en échec. Ce n'est pas un défaut du code. **Leçon : d'autres sessions
+      (interface) modifient les fichiers du moteur ; ne pas lancer de mesure ou de suite de
+      tests pendant qu'une autre session édite.**
+
+75. **Voie Bird intégrée à Apex, phase 1 (2026-10-07) : déformation, boucle, juge des
+    replis et tranchage déformé portés dans `pipeline/bird/` (versionné, GPL-3.0, attribution
+    à Joshua Bird).** Demande de l'utilisateur : porter Bird et tous les modules R&D en C++
+    et les intégrer à l'algorithme principal. Plan : `~/.claude/plans/bird-into-apex-cpp.md`
+    (phase 0 mesure, phase 1 Python versionné = référence, phase 2 C++ guidé par le profil,
+    phase 3 mesure sur les 4 modèles et choix du défaut). La recherche reste la source ;
+    `research/` reste non versionné.
+
+    - **Phase 0** (journaux existants, Benchy passe 4 / dino passe 5) : boucle de déformation
+      ~12 min (7 essais de 80-110 s, `least_squares`) ; lissage P2→P5 384 / 285 s (P2 3-15 s,
+      P3 ~55 s : déjà accélérés depuis la feuille de route) ; étapes 8-9 259 / 363 s ; export
+      ~20 s. Total ~23 min par modèle. Premier poste : la déformation.
+    - **`pipeline/bird/deformation.py`** : `bird_core` SANS pyvista (l'environnement d'Apex
+      ne l'a pas). Topologie réécrite en numpy (voisins par sommet / arête / face par le
+      produit d'incidence, surface extérieure orientée sur la géométrie d'origine) ;
+      optimisations reprises à l'identique (résidus au CARRÉ, jacobiennes en float32 :
+      comportement validé par l'utilisateur, conservé). TetGen en sous-processus
+      (`_tetgen_worker.py`, jamais lié au noyau). Le lissage initial répétait 30 fois le même
+      calcul (variable réaffectée après la boucle) : un seul, résultat identique.
+      **Équivalence** (Benchy, 24 345 tétraèdres, passe 1, base figée, environnement de
+      recherche contre Apex) : topologie identique au bit (42 676 / 178 521 / 642 746 paires),
+      attributs à 3e-8 rad, déformation à 0,3 µm en médiane (12,6 µm max) pour 0,99 mm de
+      déplacement — solveur itératif et versions de numpy/scipy légèrement différentes ;
+      62,6 s contre 69,8 s.
+    - **`loop.py`** (boucle automatique, `BirdLoopParams`), **`fold_judge.py`** (le juge lit la
+      surface comme la recherche : coordonnées float32 du STL, sommets fusionnés).
+    - **`deformed_slicing.py`** (`bird_to_apex` + `bird_slice_deformed`, sans les contrôles
+      affichés) : **identique au bit** à la recherche sur le Benchy passe 4 (313 couches,
+      334 006 points), 28 s contre 31 s. Points d'entrée `carve` / `first_layer` pour le lissage.
+    - Piège Windows : `np.load` d'un `.npz` garde le fichier ouvert ; fermer explicitement
+      avant de supprimer un dossier temporaire.
+    - **Lissage non planaire porté** (`pipeline/bird/skin/`) : `surface_paths`, `surface_patterns`,
+      `skin_carve` copiés tels quels ; `zones.compute` (P2), `paths.trace` (P4),
+      `print_order.order_and_check` (P5) = les `main()` de la recherche en mémoire ; `chain.run`
+      = `skin_loop` + le `--skin`/`--first-layer` de `bird_slice_deformed`. **Benchy passe 4 :
+      P2, P3, P4 et P5 IDENTIQUES AU BIT à la recherche** (P2 24 s contre 28, P3 123 s contre
+      113, P4 8 s contre 10, P5 12,6 s contre 14).
+    - **Étape 8 Bird** (`pipeline/bird/machine_toolpath.py`) : direction = gradient normalisé
+      de φ sur le tétraèdre d'origine ; résolution par `step8.resolve_raw_points`, extraite de
+      `step8.run` sans changement (33 tests de step8 verts) ; lissage : angles de P5 tels quels.
+      La borne de B et la réorientation par paliers de `full_step89` existaient déjà dans Apex
+      (`clamp_head_height`, `reorient_coupled_tiers`) : réutilisées.
+    - **`main.py`** : `run_bird_pipeline(mesh, PipelineParams, BirdPipelineParams)` (voie
+      séparée, la voie FEM et `PipelineResult` sont inchangés) ; CLI `--method bird` et
+      `--output-gcode` (export contrôlé `export_gcode_checked`, aussi pour la voie FEM).
+      Défauts de `BirdPipelineParams` = chaîne de recherche (`out/run_bird_chain.sh`) : borne
+      de B, paliers 45/90/181 (4 tours), lissage actif (rectiligne, première couche
+      `concentric_conform`).
+    - **Essai de bout en bout, corps seul (Benchy)** : boucle identique à la recherche
+      (4 passes, mêmes déplacements et zones de repli à 1e-3 près), 313 couches, 333 837
+      points ; 64 % des points du corps à plus de 5° de la normale (recherche : 35 à 69 % selon
+      le modèle ; le filtre médian de B d'Apex, absent de la recherche, en ajoute) ;
+      20 collisions → 15 après paliers → 0 après l'étape 10.
+    - **Piège Windows** : `zones.compute` et le creusement lancent des processus ; un script
+      appelant SANS garde `if __name__ == "__main__"` se bloque (mesuré : 1,5 s de CPU en
+      10 min, aucun fils). `main.py` a la garde.
+    - **Phase 2, premier pas : moindres carrés de Bird en C++** (`apex/bird_lsq.hpp`,
+      `bird_lsq_deform`, `bird_lsq_rotation`). Profil d'une passe (Benchy, 73 s profilées) :
+      déformation 63 s, toujours au plafond de 1 000 itérations ; produits matrice-vecteur
+      23 s (déjà natifs), construction de la jacobienne en Python 16 s (structure FIXE,
+      reconstruite à chaque itération), surcoût Python de TRF/LSMR ~10 s. Transcription de
+      `trf_no_bounds` (lsmr, regularize) et de `lsmr` de scipy ; jacobienne en float32 et
+      échelle `jac` sommée en float32 comme scipy ; QR de Householder (Eigen) et racines
+      du quartique par valeurs propres du compagnon (comme `np.roots`). **Tolérance déclarée** :
+      écart à scipy médian 0,15 µm, max 25 µm pour 0,99 mm de déplacement (l'écart entre deux
+      versions de scipy est du même ordre : 0,3 / 12,6 µm) ; coût final à 5e-5 relatif.
+      **Passe Benchy 62,6 s → 9,9 s (×6,3).** Dispatch par `APEX_USE_CPP` ; variante
+      « normale atteignable » (non utilisée par défaut) restée en Python.
+    - **Boucle complète native (Benchy)** : mêmes 7 essais et mêmes décisions que la recherche
+      (4 passes acceptées, repli à 0 / 2,5 / 3,75°), déplacements et zones à quelques
+      centièmes ; **111,5 s contre ~12 min**.
+    - **Bout en bout avec lissage, `main.py --method bird --output-gcode`** (Benchy, avant le
+      solveur natif) : rognage en 5 tours jusqu'à zéro contact, 1 zone retirée au contrôle
+      sur le corps creusé ; étape 8 : 982 793 points ; étape 9 : 16 collisions → 13 après
+      paliers → 0 après l'étape 10 ; G-code de 1 036 228 mouvements, 1,78 h (Z recommandé),
+      Y cumulé 30,4 tours (référence `_v5` de la recherche : 1 070 769 mouvements, ~32 tours).
+    - **Profil de la voie Bird complète après le solveur natif** (Benchy, 632,8 s) : boucle
+      79,6 s ; **lissage 437,3 s (69 %)** ; étape 8 15,3 s ; borne + étape 9 10,7 s ; paliers
+      28,0 s ; étape 10 2,6 s ; export 59,4 s. Dans le lissage (profil 396 s) : P5 223 s,
+      tranchage creusé 79 s (dont `map_polyline` 76 s sur 126 s d'un P3), P4 57 s, P2 37 s.
+    - **`map_polyline` : Viterbi en C++** (`apex_core.viterbi_choice`, transcription terme à
+      terme, NaN et premier minimum comme numpy) + `densify` vectorisé : **P3 123 s → 61 s,
+      IDENTIQUE AU BIT** (313 couches, 930 876 points).
+    - **P5 en C++** (`apex/skin_check.hpp`, `SkinCheckIndex`) : la recherche reconstruisait un
+      arbre k-d du début de ligne À CHAQUE point testé ; grille incrémentale de pas reach + 1,
+      même distance bornée, même densification, même particularité des blocs de 256 points
+      (l'arbre du bloc contient le point courant quand il tombe sur un début de bloc).
+      **Mêmes zones exclues, mêmes points de collision, mêmes compteurs** que la boucle Python ;
+      pénétration à 6e-15 mm. 31,3 → 2,4 s (un point / 2 mm), 161 → 39 s (exhaustif).
+    - **Export G-code : découpage `max_tip_deviation` en natif** (pas 24 étendu). Le chemin
+      natif n'était emprunté que sans découpage, donc jamais par défaut : l'export du Benchy
+      Bird prenait 131,8 s en Python (conversion firmware 32 s, `emit` 49 s, bisection 31 s).
+      Bisection transcrite terme à terme (milieu firmware, retour vers la pointe, profondeur
+      10, extrusion au prorata) : **131,8 s → 7,1 s, texte identique ligne à ligne
+      (1 076 351 lignes) et rapport identique**. Test d'équivalence : variante `decoupage`.
+    - **Paliers de réorientation** (voies Bird et FEM) : arrêt dès qu'un tour ne résout aucun
+      point (trajectoire inchangée, tour suivant identique) ; Benchy : 3 tours inutiles sur 4.
+    - **Étape 8 Bird** : `locate` en un seul appel pour tous les points au lieu d'un par
+      polyligne (3 685) : 21,5 → 14,6 s, identique au bit.
+    - **P4 : cache par zone** dans la boucle de rognage (`paths.trace(cache=...)`), clé =
+      empreinte de tout ce que lit le calcul d'une zone ; résultat identique par construction.
+    - **Tranchage déformé : candidats calculés par lot de couche** (`map_polylines`), Viterbi
+      ensuite polyligne par polyligne : P3 identique au bit (gain à mesurer hors charge).
+    - **Chronométrage propre de la voie Bird (Benchy, seule sur la machine)** : 632,8 →
+      **381,7 s** (boucle 95 s, lissage 212 s, étape 8 21 s, borne + étape 9 18 s, paliers
+      24 s, étape 10 2,5 s, export 10 s). Chaîne de lissage seule (274 s) : P3 73 s
+      (creusement parallèle 22 s, sérialisation vers les processus 8 s, candidats
+      barycentriques 24 s, Viterbi 4 s), P2 62 s (5 tours), P4 54 s (cache : 5, 22, 27, 28
+      zones reprises aux tours 2 à 5), P5 exhaustif 50 s, P5 en boucle 18 s, tranchage non
+      creusé 16 s. Plus aucun poste dominant.
+    - **Maillage Bird trop grossier** (trouvé à la phase 3) : TetGen par défaut donne
+      **30 tétraèdres** sur l_shape (24 faces). Règle `BirdLoopParams.max_mean_tet_volume = 2`
+      mm³ : au-delà, retétraédrisation à `refine_tet_volume = 0,5` mm³ (valeur de la recherche
+      pour real_overhang) ; le Benchy (0,63 mm³ en moyenne) n'est pas touché. Même à 30
+      tétraèdres, Bird battait FEM sur l_shape : matière sans appui 2,74 → 1,01 %, Y 253 → 19
+      tours, impression 0,19 → 0,09 h, 0 collision des deux côtés.
+    - **Phase 3 lancée** (`scripts/measure_bird_vs_fem.py`, `out/bird/phase3.jsonl`) : step9b,
+      collisions, diagnostics, temps de calcul et d'impression, tours de Y, sur les 4 modèles.
+    - **Ingestion Bird robuste** (`deformation._tetrahedralize_repaired`) : APRÈS un refus de
+      TetGen seulement, cascade de step1 (nettoyage, union booléenne des coques qui se
+      traversent, résolution géométrique avec TetGen pour oracle, pymeshfix), avec un
+      garde-fou d'ÉTENDUE (pymeshfix gardait une seule de deux boîtes croisées : 12/24 faces,
+      exactement au seuil des 50 % de step1, qui a le MÊME défaut, non corrigé côté FEM).
+      death 93 417 tétraèdres (12 s), turkish 115 131 (19 s). Test
+      `test_self_intersecting_surface_is_repaired_before_tetgen`.
+    - **Creusement P3 par morceaux** au-delà de `MAX_REFINE_TRIANGLES` (pile de travail,
+      ordre inchangé sous la limite) au lieu de lever `MemoryError` (turkish : 547 304
+      triangles à la 1re couche). Insuffisant pour turkish : un processus de creusement a
+      ensuite manqué de mémoire (OpenBLAS) et le pool s'est bloqué.
+    - **PLACEMENT : les mesures FEM de death et turkish étaient hors plateau.** La voie FEM
+      garde les coordonnées du STL : death est centré à ~376 mm de l'axe, turkish à ~150 mm
+      (bord à 200 mm), pour un plateau de 150 mm de rayon. Les chiffres FEM de ces deux
+      modèles dans les limites #64 à #74 décrivent donc une pièce imprimable nulle part
+      (Y ≈ 0 tour, orientations quasi constantes). La voie Bird recentre. Copies recentrées :
+      `out/bird/centered/`.
+    - **Phase 3, à placement égal** (`out/bird/phase3_centered.jsonl` ; death Bird :
+      `out/bird/phase3.jsonl`), défauts actuels :
+
+      | modèle | voie | sans appui | collisions (= supports) | impression | Y | calcul |
+      |---|---|---:|---:|---:|---:|---:|
+      | l_shape | FEM | 2,74 % | 0 | 0,19 h | 253 | 3 s |
+      | l_shape | Bird (2 102 tét.) | 2,58 % | 77 | 0,09 h | 16 | 29 s |
+      | l-triple | FEM | 2,55 % | 0 | 0,23 h | 50 | 3 s |
+      | l-triple | Bird | 2,41 % | 102 | 0,13 h | 3 | 48 s |
+      | death | FEM centré | 0,54 % | 42 | 2,06 h | 124 | 34 s |
+      | death | Bird | **0,42 %** | **0** | **1,50 h** | 121 | 988 s |
+      | turkish | FEM centré | 1,10 % | **30 012** | 5,03 h | 78 | 112 s |
+      | turkish | Bird | — | — | — | — | non applicable |
+
+      Bird : impression 27 à 53 % plus rapide partout, sans appui légèrement meilleur sur les
+      3 modèles mesurés ; collisions pires sur les deux pièces fines (aucune réorientée par
+      l'étape 10), nulles sur death. Turkish : la boucle n'accepte AUCUNE passe (repli dès
+      30°), Bird n'y apporte rien. FEM turkish centré : 30 012 points en collision (~28 %,
+      cohérent avec #72) — **turkish n'est imprimable par aucune voie aujourd'hui**.
+      Règle du maillage grossier NON validée : à 30 tétraèdres, Bird l_shape faisait 1,01 %
+      et 0 collision. **Choix de la voie par défaut : à l'utilisateur.**
+    - Tests : `tests/test_bird.py` (9, dont l'équivalence native), `tests/test_bird_skin.py`
+      (6, dont l'index natif contre un calcul brut). **Reste** : export du
+      Benchy et du dino par `main.py --method bird` comparé aux G-code `_v5` du salon ;
+      phase 2 (C++, d'abord la déformation : ~12 min par modèle) ; phase 3 (Bird contre FEM
+      sur les 4 modèles).
+
+76. **Pose du modèle sur le plateau à l'ingestion (`place_on_platform`, 2026-10-13,
+    ACTIVÉ par défaut) et régénération des G-code.**
+
+    - **Constat** : la voie FEM gardait les coordonnées du STL. `platform_z` était
+      bien détecté (min z), mais le plateau de la machine et de step9 est à z = 0 :
+      `res/test_models/death.stl` a son minimum à **z = 51,4 mm**, `turkish.stl` à
+      **30,3 mm**, `real_overhang.stl` à −15 mm (refusé par l'export). Les deux
+      premiers flottaient au-dessus du plateau : collision plateau jamais exercée,
+      et un G-code qui aurait démarré en l'air.
+    - **Mécanisme** : `step1_ingest.run(place_on_platform=True)` translate le
+      maillage nettoyé en z SEUL (min z → `platform_z`, ou 0 si `None`) ;
+      `IngestReport.placement_offset_z` rend le décalage. `PipelineParams.place_on_platform`
+      (défaut `True`) le transmet aux deux ingestions de `main.run_pipeline` (passe
+      légère des jonctions comprise) et de `scripts/export_slicing_preview.py`
+      (synchronisés d'emblée). La voie Bird pose déjà son plateau à z = 0.
+      `config/params.schema.json` et `params.hpp` régénérés.
+    - **Mesure, 4 modèles** (`out/measure_placed_2026-10-13.jsonl`, résolution 0,8,
+      variante `placed` de `scripts/measure_matrix.py`) : l_shape et l-triple, déjà
+      à z = 0, **identiques au bit** ; death 0,22 → 0,21 % de matière sans appui,
+      collisions de tête 118 → 116 ; turkish 0,17 → 0,19 % (défauts d'ordre 132 →
+      223, 313 → 312 couches), collisions 1 406 → 1 431 ; **0 collision plateau**
+      sur les deux. Mixte et de l'ordre du bruit (même géométrie, autre origine :
+      les isovaleurs et TetGen s'arrondissent autrement). Activé quand même : c'est
+      une normalisation de repère, pas un mécanisme, et sans elle l'impression
+      démarre à 30-51 mm du plateau. Réversible : `place_on_platform=False`.
+    - **À savoir côté interface** : un modèle posé plus haut dans le STL est
+      redescendu ; l'UI doit lire `placement_offset_z` pour ne pas désaligner son
+      aperçu.
+    - **G-code régénérés** (même jour, code actuel) : pièces FEM du salon
+      (l-triple, l_shape) **identiques au bit** aux versions du 2026-10-07 ;
+      Benchy et dino par la chaîne Bird de recherche (`out/run_bird_chain.sh`,
+      `--apex-detect`) → `out/share/benchy_pass4_v6.zip`, `dino_pass5_v6.zip`.
+      Benchy : 1 082 707 mouvements, 31,3 tours de Y, 11 collisions non résolues
+      (comme avant, z médian 38,2 mm) ; dino : 969 146 mouvements, **620,5 tours**,
+      0 collision. Différents des `_v5` (coordonnées déplacées par la boucle et
+      les évolutions de code depuis ; lignes quasi toutes différentes, ±1 % de
+      longueur). Anciens fichiers sauvegardés sur
+      `H:/apex_backup_2026-10-13/gcode_before_regen`.
+    - **Temps d'impression réestimés** (`scripts/estimate_gcode_time.py`, borne
+      basse, accélérations ignorées) :
+
+      | pièce | nominal | Z recommandé (8000 mm/min) | `config.g` actuel (Z 400) |
+      |---|---:|---:|---:|
+      | Benchy | 1,64 h | 1,89 h | 9,76 h |
+      | dino | 2,24 h | 2,62 h | 14,90 h |
+      | l-triple | 0,18 h | 0,23 h | 0,80 h |
+      | l_shape | 0,12 h | 0,20 h | 1,15 h |
+    - **Suite complète : 495/495 dans les deux positions de `APEX_USE_CPP`**
+      (243 s en Python, 226 s en natif). Test : `test_place_on_platform_translates_in_z_only`.
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
@@ -2888,6 +3416,39 @@ step4/5/6), step3, step4, step5, step7.
   #26 et #27 : le pas d'échantillonnage du modèle de tête confondu avec
   `nozzle_diameter`, et une boucle de distance point-capsule non
   vectorisée. Les deux corrigés dans `pipeline/step9_collision_sim.py`.
+
+## Dev Tracker (convention de rédaction du suivi de développement)
+
+Le « Dev Tracker » (« DT ») est la liste de suivi de ce qui a été développé et de
+ce qui reste à faire. **À rédiger dans deux cas seulement** : quand c'est
+nécessaire (fin d'un chantier, changement d'état important, reprise après une
+interruption, décision de l'utilisateur qui déplace une priorité), ou quand
+l'utilisateur le demande (« écris le DT »). Pas à chaque message.
+
+**Marqueurs, un par ligne, toujours en tête :**
+- 🟢 **résolu** : fait, ou question tranchée par l'utilisateur ;
+- ⏳ **en cours** : tâche commencée et non terminée (au plus une ou deux à la fois) ;
+- ⬛ **non traité, sans successeur** : rien ne dépend de ce point, il ne bloque rien ;
+- ♦️ **à résoudre avant de continuer** : bloquant, c'est ce qui conditionne la suite.
+
+**Structure (dans cet ordre) :**
+1. *Ce qui a été développé* : 🟢 (correctifs, puis nouvelles fonctions) ;
+2. *Réponses de l'utilisateur* : 🟢 ce qui est tranché ;
+3. *À résoudre avant de continuer* : ♦️ ;
+4. *Sans bloquer* : ⬛ ;
+5. *Fait* : rappel condensé des 🟢 inchangés.
+
+**Où il vit** : `DT.md` à la racine du projet (version courante, à mettre à jour à chaque
+rédaction) ; `LAST_SESSION.md` en garde le contexte de session.
+
+**Règles de rédaction :**
+- **Vérifier avant de classer.** Un point n'est 🟢 que si le code ou une mesure le
+  confirme, jamais sur la foi d'un document : `LAST_SESSION.md` a déjà annoncé
+  « non commités » des correctifs qui l'étaient (vérifié le 2026-10-06).
+- **Un point ♦️ dit pourquoi il bloque** et ce qui le débloquera.
+- **Actualiser la liste existante** (changer les marqueurs, ajouter les nouveautés)
+  plutôt que la réécrire d'un autre style.
+- Citer les chiffres mesurés et les limites (#NN) plutôt que des généralités.
 
 ## Conventions de code à respecter
 
@@ -4767,6 +5328,21 @@ correction du signal — non traité, à chiffrer/prioriser séparément.
 
 Ce qui reste, hors cœur algorithmique :
 
+- **Champ scalaire multibranche** (mis en feuille de route par l'utilisateur le
+  2026-10-07) : une branche de champ par partie portée, chacune croissant depuis son
+  attache, raccordées aux jonctions. Seule piste restante contre le défaut de fond du
+  champ unique (surplombs qui doivent croître vers le bas, limites #51 à #54) ; le
+  « flip conditionnel » est clos. Aucune mesure encore.
+
+- **Lier Bird à l'algorithme C++ et inclure la citation** (demande de l'utilisateur,
+  rétablie le 2026-10-07 après avoir été perdue des documents). La voie Bird
+  (`research/S4_Slicer`, local) contourne le défaut de fond du champ FEM unique (voir
+  « État du chantier dépôt sans support ») : elle est la voie d'impression des pièces
+  suspendues (limite #64). La porter dans le cœur C++, accélérée (P2/P3, voir la feuille
+  de route). **S4 Slicer (Joshua Bird) est sous GPL-3.0** (compatible avec la décision de
+  licence, limite #56) et demande à être cité (`CITATION.cff`) : notice de licence et
+  attribution conservées dans tout code dérivé, citation dans le README et l'interface.
+  Préalable : comparer Bird et FEM sur les 4 modèles (step9b et collisions).
 - **Un `resegmentation_hook` réel pour l'étape 10** — `main.py` le laisse
   à `None` pour l'instant (voir détail ci-dessus). L'implémenter
   demanderait de re-jouer step3→step8 avec une contrainte d'angle

@@ -28,7 +28,12 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, field, replace
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:  # annotations seulement : la voie Bird est importee a la demande
+    from pipeline.bird.deformed_slicing import DeformedSlicingParams
+    from pipeline.bird.loop import BirdLoopParams
+    from pipeline.bird.skin.chain import SkinParams
 
 import numpy as np
 
@@ -135,12 +140,15 @@ def _default_machine_profile() -> MachineProfile:
         platform_origin=np.array([0.0, 0.0, 0.0]),
         nozzle_model=nozzle_model,
         nozzle_diameter=0.4,
-        # Limites de la tete (axe B) donnees par l'utilisateur le 2026-09-28 :
-        # 750 deg/s, 300 deg/s2. Le profil n'a qu'une valeur pour tous les
-        # axes de rotation ; C, couple a la position, n'est jamais lisse
-        # (limite #59), elles ne s'appliquent donc qu'a B.
-        max_angular_velocity=float(np.radians(750.0)),
-        max_angular_acceleration=float(np.radians(300.0)),
+        # Limites de la tete (axe B). Fichier RRF ACTIF : config.g (confirme par
+        # l'utilisateur, 2026-10-06), M203 B100000 (/min) = 1667 deg/s et M201 B1300
+        # = 1300 deg/s2 (unites supposees en degres). 4axisinput.g (360 deg/s,
+        # 2000 deg/s2) et les valeurs de 2026-09-28 (750, 300) ne sont pas actifs.
+        # Le profil n'a qu'une valeur pour tous les axes de rotation ; C, couple a la
+        # position, n'est jamais lisse (limite #59) : elles ne s'appliquent qu'a B.
+        # Non modelises : Y (600 deg/s, 4000 deg/s2) et Z (6,7 mm/s, 70 mm/s2).
+        max_angular_velocity=float(np.radians(1666.7)),
+        max_angular_acceleration=float(np.radians(1300.0)),
         # Machine ACTUELLE : R C Z B, pas d'axe Y -- C est impose par la
         # position du point (limite #59). +R = -Y a angles nuls : B > 0 (axe
         # X) penche la normale de couche vers -Y, c'est-a-dire vers +R (le
@@ -189,6 +197,17 @@ class PipelineParams:
     junction_refinement_resolution: Optional[float] = None
     junction_refinement_angle_deg: float = 30.0
     junction_refinement_margin: float = 3.0
+    # Pose le modele sur le plateau (translation en z seule, min(z) -> 0) a
+    # l'ingestion : le plateau de la machine est a z = 0 et l'export refuse
+    # une pointe sous 0. Voir step1_ingest.run(place_on_platform=...).
+    # ACTIVE par defaut (2026-10-13) : mesure sur les 4 modeles de
+    # res/test_models/ (out/measure_placed_2026-10-13.jsonl) - l_shape et
+    # l-triple deja a z = 0 (identiques au bit), death (min z = 51,4 mm)
+    # 0,22 -> 0,21 % de matiere sans appui, turkish (30,3 mm) 0,17 -> 0,19 %,
+    # collisions de la tete 118 -> 116 et 1406 -> 1431, 0 collision plateau.
+    # Sans pose, death et turkish flottaient au-dessus du plateau : collision
+    # plateau jamais exercee, et un G-code qui demarre en l'air.
+    place_on_platform: bool = True
     overhang: OverhangParams = field(default_factory=OverhangParams)
     # anchor_growth_weight VOLONTAIREMENT NON ACTIVE ici (defaut de la
     # dataclass = None). Il l'a ete brievement, puis retire APRES MESURE sur
@@ -368,6 +387,134 @@ class PipelineResult:
     adjustment_report: AdjustmentReport
 
 
+@dataclass
+class BirdPipelineParams:
+    """Voie Bird (pipeline/bird, CLAUDE.md limite #75). Les etapes 5 a 10 reprennent
+    `PipelineParams` (couches, etape 6, etape 8, collision, ajustement, machine) ;
+    ici, seulement ce qui est propre a Bird. Defauts = chaine de recherche validee
+    par l'utilisateur (out/run_bird_chain.sh : --height-clamp --apply, paliers 45/90/181)."""
+    loop: "BirdLoopParams" = field(default_factory=lambda: _bird_loop_params())
+    slicing: "DeformedSlicingParams" = field(default_factory=lambda: _bird_slicing_params())
+    height_clamp: bool = True
+    reorientation_tiers: Optional[tuple[float, ...]] = (45.0, 90.0, 181.0)
+    reorientation_rounds: int = 4
+    # Lissage non planaire P2-P5 (pipeline/bird/skin). None = corps seul.
+    skin: Optional["SkinParams"] = field(default_factory=lambda: _bird_skin_params())
+
+
+def _bird_loop_params():
+    from pipeline.bird.loop import BirdLoopParams
+    return BirdLoopParams()
+
+
+def _bird_skin_params():
+    from pipeline.bird.skin.chain import SkinParams
+    return SkinParams()
+
+
+def _bird_slicing_params():
+    from pipeline.bird.deformed_slicing import DeformedSlicingParams
+    return DeformedSlicingParams()
+
+
+@dataclass
+class BirdPipelineResult:
+    loop: object                               # pipeline.bird.loop.BirdLoopResult
+    slicing: object                            # DeformedSlicingResult (corps seul) ou SkinResult (lissage)
+    toolpath: ToolpathMachine                  # AVANT ajustement step10
+    step8_diagnostics: list[Step8Diagnostic]
+    collision_report: CollisionReport
+    adjusted_toolpath: ToolpathMachine
+    adjustment_report: AdjustmentReport
+
+
+def run_bird_pipeline(mesh_path: str, params: PipelineParams,
+                      bird: Optional[BirdPipelineParams] = None) -> BirdPipelineResult:
+    """
+    Voie Bird de bout en bout (limite #75) : boucle de deformation -> tranchage
+    dans l'espace deforme (etapes 5-6 d'Apex) -> etape 8 (normale de couche Bird
+    dans la piece reelle) -> borne de B et etape 9 -> reorientation par paliers
+    -> etape 10. Repere de sortie : repere Bird = repere machine (piece centree
+    sur l'axe du plateau, plateau a z = 0). Lissage non planaire P2-P5 si
+    `bird.skin` (defaut). Ne remplace PAS la voie FEM (`run_pipeline`).
+    """
+    from dataclasses import replace as _replace
+    from pipeline.bird import deformed_slicing, loop as bird_loop, machine_toolpath as bird_step8
+
+    bird = bird or BirdPipelineParams()
+    check_model_fits_machine(mesh_path, params.machine_profile)
+    print(f"[bird] Boucle de deformation : {mesh_path}")
+    loop_result = bird_loop.run(mesh_path, bird.loop, log=lambda m: print(f"[bird]   {m}"))
+    print(f"[bird]   arret : {loop_result.stop_reason} ({len(loop_result.passes) - 1} passe(s) acceptee(s))")
+
+    original, final = loop_result.original, loop_result.final
+    slicing_params = _replace(bird.slicing, layers=params.layers, toolpath2d=params.toolpath2d)
+    if bird.skin is None:
+        slicing = deformed_slicing.run(original.cells, original.points, final.points, np.zeros(3), slicing_params)
+        print(f"[bird] Tranchage deforme : {slicing.stats}")
+        toolpath, step8_diagnostics = bird_step8.run(slicing.layers, original.cells, original.points, final.points,
+                                                     params.machine_profile, params.machine_toolpath)
+    else:
+        from pipeline.bird.skin import chain as skin_chain
+        print("[bird] Tranchage deforme + lissage non planaire (P2-P5)")
+        slicing = skin_chain.run(original.cells, original.points, final.points, np.zeros(3), params.machine_profile,
+                                 params.collision, slicing_params, bird.skin, log=True)
+        toolpath, step8_diagnostics = bird_step8.run_from_passes(
+            slicing.print_order["passes"], original.cells, original.points, final.points,
+            params.machine_profile, params.machine_toolpath)
+    print(f"[bird] Etape 8 : {len(toolpath.points)} point(s), {len(step8_diagnostics)} orientation(s) inatteignable(s)")
+
+    if bird.height_clamp:
+        toolpath, clamped, _dev = clamp_head_height(toolpath, params.machine_profile, params.collision)
+        print(f"[bird]   borne de B selon la hauteur : {clamped} point(s)")
+    collision_report = collision_run(toolpath, params.machine_profile, params.collision)
+    print(f"[bird] Etape 9 : {len(collision_report.events)} collision(s)")
+    if bird.reorientation_tiers and collision_report.events:
+        for _round in range(bird.reorientation_rounds):
+            contacts = sorted({e.point_index for e in collision_report.events})
+            toolpath, log_ = reorient_coupled_tiers(toolpath, contacts, params.machine_profile, params.collision,
+                                                    tiers_deg=tuple(bird.reorientation_tiers))
+            collision_report = collision_run(toolpath, params.machine_profile, params.collision)
+            print(f"[bird]   paliers : {sum(1 for _i, b, _t in log_ if b is not None)}/{len(contacts)} resolu(s), "
+                  f"{len(collision_report.events)} restante(s)")
+            if not collision_report.events:
+                break
+            if not any(found is not None for _i, found, _t in log_):
+                break   # aucun point resolu : trajectoire inchangee, le tour suivant serait identique
+    adjusted_toolpath, adjustment_report = adjustment_run(
+        toolpath, collision_report, params.machine_profile, params.collision, params.adjustment,
+        step8_diagnostics=step8_diagnostics, resegmentation_hook=None)
+    print(f"[bird] Etape 10 : converged={adjustment_report.converged}, "
+          f"{len(adjustment_report.unresolved_collisions)} collision(s) non resolue(s)")
+    return BirdPipelineResult(loop=loop_result, slicing=slicing, toolpath=toolpath,
+                              step8_diagnostics=step8_diagnostics, collision_report=collision_report,
+                              adjusted_toolpath=adjusted_toolpath, adjustment_report=adjustment_report)
+
+
+def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_path: str,
+                         pivot_to_tip: Optional[float] = None):
+    """Export G-code controle (comme scripts/export_model_gcode.py) : pointe jamais
+    sous le plateau (`strict`), hauteur mini de la VRAIE tete selon B pour les
+    degagements, L = derniere valeur de config/pivot_to_tip.json sinon 46 mm."""
+    from file_io.gcode_export import GcodeParams, export_gcode, head_zlow_from_table, toolpath_arrays
+    from file_io.pivot_length import current_pivot_to_tip
+    from pipeline import step9_collision_sim as s9
+    machine, sim = params.machine_profile, params.collision
+    if pivot_to_tip is None:
+        pivot_to_tip, _origin = current_pivot_to_tip()
+    head_zlow = None
+    if machine.nozzle_model is not None:
+        head = s9._filter_nozzle_contact_zone(s9._surface_sample_points(machine.nozzle_model, sim.toolhead_sample_spacing),
+                                              sim.nozzle_contact_clearance)
+        lo_b, hi_b = machine.rotation_axes[1].angle_range_deg
+        grid_b = np.arange(lo_b, hi_b + 1e-9, 0.5)
+        zlow = np.array([s9._positioned_toolhead_vertices(head, np.zeros(3), [0.0, float(b)], machine.rotation_axes)
+                         [:, 2].min() for b in grid_b])
+        head_zlow = head_zlow_from_table(grid_b, zlow)
+    gp = GcodeParams(pivot_to_tip=pivot_to_tip, strict=True)
+    return export_gcode(toolpath_arrays(toolpath), machine, gp, out_path, head_zlow=head_zlow)
+
+
 def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
     """
     Enchaine step1 a step10 dans l'ordre exact du pipeline. Trois
@@ -400,6 +547,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
         print(f"[main] Passe legere - detection des zones de jonction : {mesh_path}")
         light_mesh_data, light_tet_mesh, light_ingest_report = ingest_run(
             mesh_path, resolution=params.resolution, allow_multi_mesh=params.allow_multi_mesh,
+            place_on_platform=params.place_on_platform,
         )
         light_overhang_map = overhang_run(light_mesh_data, params.overhang)
         light_segmentation_params = (
@@ -427,6 +575,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
         near_platform_margin=params.near_platform_margin,
         junction_zones=junction_zones,
         junction_refinement_resolution=params.junction_refinement_resolution,
+        place_on_platform=params.place_on_platform,
     )
     print(
         f"[main]   watertight avant/apres reparation : "
@@ -544,6 +693,8 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
                   f"/{len(contacts)} point(s) resolu(s) ; {len(collision_report.events)} collision(s) restante(s)")
             if not collision_report.events:
                 break
+            if not any(found is not None for _i, found, _t in reorient_log):
+                break   # aucun point resolu : trajectoire inchangee, le tour suivant serait identique
 
     print("[main] Etape 10/10 - ajustement")
     adjusted_toolpath, adjustment_report = adjustment_run(
@@ -605,12 +756,32 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--show-toolpath", action="store_true",
         help="Reaffiche la trajectoire finale ajustee dans le GLB (desactivee par defaut).",
     )
+    parser.add_argument(
+        "--output-gcode", default=None,
+        help="G-code a produire (trajectoire ajustee, export controle : pointe jamais sous le plateau).",
+    )
+    parser.add_argument(
+        "--method", choices=("fem", "bird"), default="fem",
+        help="Voie de tranchage : fem (champ scalaire, defaut) ou bird (deformation, limite #75).",
+    )
     args = parser.parse_args(argv)
 
     params = PipelineParams(resolution=args.resolution)
     params.layers = LayerParams(layer_height_base=args.layer_height)
 
+    if args.method == "bird":
+        # Voie Bird (limite #75) : pas de GLB pour l'instant (le visualiseur lit un PipelineResult FEM).
+        bird_result = run_bird_pipeline(args.mesh_path, params)
+        if args.output_gcode:
+            _lines, report = export_gcode_checked(bird_result.adjusted_toolpath, params, args.output_gcode)
+            print(f"[main] G-code ecrit : {args.output_gcode} ({report.moves} mouvements, "
+                  f"{report.print_time_fw_s / 3600:.2f} h tous axes, Y cumule {report.y_turns:.1f} tours)")
+        return 0
+
     result = run_pipeline(args.mesh_path, params)
+    if args.output_gcode:
+        _lines, report = export_gcode_checked(result.adjusted_toolpath, params, args.output_gcode)
+        print(f"[main] G-code ecrit : {args.output_gcode} ({report.moves} mouvements)")
 
     if args.output_glb:
         from file_io.visualization_export import export_visualization_glb

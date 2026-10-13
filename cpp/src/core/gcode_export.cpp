@@ -7,6 +7,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <functional>
 #include <limits>
 
 namespace apex {
@@ -81,7 +82,7 @@ std::string export_gcode_body(const double* pos, const double* ang, const double
         const double br = b * kDegToRad;
         const double sr = std::sin(br), cz = std::cos(br);
         const double zoff = P.z_reference_tip ? (cz - 1.0) : cz;
-        return Fw{r + P.tilt_sign * P.pivot_to_tip * sr, fy, z + P.pivot_to_tip * zoff, b};
+        return Fw{r + P.tilt_sign * P.pivot_to_tip * sr, fy, z + P.pivot_to_tip * zoff, P.b_sign * b};
     };
 
     bool have_prev = false;
@@ -89,7 +90,7 @@ std::string export_gcode_body(const double* pos, const double* ang, const double
     double tip[3] = {0, 0, 0};
     double e = 0.0;
 
-    auto move = [&](const double* point, double b, double tip_speed, double e_add, const std::string& comment) {
+    auto emit = [&](const double* point, double b, double tip_speed, double e_add, const std::string& comment) {
         const Fw fw = to_fw(point, b, have_prev ? &prev.y : nullptr);
         const double tz = point[2];
         st.tip_z_min = std::min(st.tip_z_min, tz);
@@ -123,6 +124,65 @@ std::string export_gcode_body(const double* pos, const double* ang, const double
         have_prev = true;
         tip[0] = point[0]; tip[1] = point[1]; tip[2] = point[2];
         st.moves += 1;
+    };
+
+    // firmware_to_machine (apercu du milieu interpole par le firmware)
+    auto from_fw = [&](const Fw& f, double* out3) {
+        const double br = (f.b * P.b_sign) * kDegToRad;
+        const double sr = std::sin(br), cz = std::cos(br);
+        const double r = f.x - P.tilt_sign * P.pivot_to_tip * sr;
+        const double zoff = P.z_reference_tip ? (cz - 1.0) : cz;
+        const double z = f.z - P.pivot_to_tip * zoff;
+        const double a = f.y * kDegToRad;
+        out3[0] = r * std::cos(a);
+        out3[1] = r * std::sin(a);
+        out3[2] = z;
+    };
+
+    struct Piece { double p[3]; double b; };
+    std::vector<Piece> pieces;
+    // split() de move() en Python : bisection jusqu'a ce que le milieu interpole par le
+    // firmware reste a max_tip_deviation de la droite visee (profondeur 10 au plus).
+    std::function<Fw(const double*, double, const Fw&, const double*, double, int)> split =
+        [&](const double* p0, double b0, const Fw& fw0, const double* p1, double b1, int depth) -> Fw {
+        const Fw fw1 = to_fw(p1, b1, &fw0.y);
+        const Fw mid{(fw0.x + fw1.x) / 2.0, (fw0.y + fw1.y) / 2.0, (fw0.z + fw1.z) / 2.0, (fw0.b + fw1.b) / 2.0};
+        double mt[3];
+        from_fw(mid, mt);
+        const double dev = norm3(mt[0] - (p0[0] + p1[0]) / 2.0, mt[1] - (p0[1] + p1[1]) / 2.0,
+                                 mt[2] - (p0[2] + p1[2]) / 2.0);
+        if (depth == 0) st.max_tip_deviation_before = std::max(st.max_tip_deviation_before, dev);
+        if (dev <= P.max_tip_deviation || depth >= 10) {
+            pieces.push_back(Piece{{p1[0], p1[1], p1[2]}, b1});
+            return fw1;
+        }
+        const double pm[3] = {(p0[0] + p1[0]) / 2.0, (p0[1] + p1[1]) / 2.0, (p0[2] + p1[2]) / 2.0};
+        const double bm = (b0 + b1) / 2.0;
+        const Fw fwm = split(p0, b0, fw0, pm, bm, depth + 1);
+        return split(pm, bm, fwm, p1, b1, depth + 1);
+    };
+
+    auto move = [&](const double* point, double b, double tip_speed, double e_add, const std::string& comment) {
+        if (!(P.max_tip_deviation > 0.0) || !have_prev) {
+            emit(point, b, tip_speed, e_add, comment);
+            return;
+        }
+        const double a_tip[3] = {tip[0], tip[1], tip[2]};
+        const double a_b = prev.b * P.b_sign;
+        pieces.clear();
+        split(a_tip, a_b, prev, point, b, 0);
+        if (pieces.size() > 1) st.subdivided_moves += 1;
+        const double total = norm3(point[0] - a_tip[0], point[1] - a_tip[1], point[2] - a_tip[2]);
+        double start[3] = {a_tip[0], a_tip[1], a_tip[2]};
+        const std::vector<Piece> local = pieces;
+        for (std::size_t k = 0; k < local.size(); ++k) {
+            const Piece& pc = local[k];
+            const double share = total > 1e-12
+                ? norm3(pc.p[0] - start[0], pc.p[1] - start[1], pc.p[2] - start[2]) / total
+                : 1.0 / static_cast<double>(local.size());
+            emit(pc.p, pc.b, tip_speed, e_add * share, k + 1 == local.size() ? comment : std::string());
+            start[0] = pc.p[0]; start[1] = pc.p[1]; start[2] = pc.p[2];
+        }
     };
 
     auto retract = [&](double sign) {

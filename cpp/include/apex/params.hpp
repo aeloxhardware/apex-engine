@@ -179,8 +179,8 @@ struct Step8Params {
     double default_feedrate{1000.0};
     double max_unreachable_angular_error_deg{5.0};
     bool clamp_angle_rates{false};
-    int free_axis_median_window{0};
-    bool per_point_normal{false};
+    int free_axis_median_window{9};
+    bool per_point_normal{true};
     bool per_point_normal_nodal{false};
 };
 
@@ -201,6 +201,7 @@ struct Step10Params {
     double max_direction_deviation_deg{45.0};
     double excluded_range_half_width_deg{15.0};
     int rate_limit_neighbor_margin{1};
+    std::optional<double> orientation_support_min_residual_deg{std::nullopt};
 };
 
 struct AABB {
@@ -260,6 +261,7 @@ struct PipelineParams {
     std::optional<double> junction_refinement_resolution{std::nullopt};
     double junction_refinement_angle_deg{30.0};
     double junction_refinement_margin{3.0};
+    bool place_on_platform{true};
     OverhangParams overhang{OverhangParams{.overhang_angle_threshold_deg = 45.0, .bridge_detection_ray_density = 4, .bridge_support_ratio_threshold = 0.7, .bridge_max_gap_distance = 2.0, .bridge_horizontal_angle_tolerance_deg = 10.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
     SegmentationParams segmentation{SegmentationParams{.direction_candidate_count = 26, .max_angle_from_direction_deg = 45.0, .max_region_merge_angle_deg = std::nullopt, .platform_z = std::nullopt, .platform_contact_tolerance = 0.5, .rotation_axes = std::nullopt, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .anchor_growth_weight = std::nullopt, .branch_cut_threshold = std::nullopt}};
     FieldSolverParams field_solver{FieldSolverParams{.laplacian_smoothness_weight = 1.0, .gradient_overhang_weight = 5.0, .resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .gradient_baseline_weight = 1.0, .overhang_influence_depth = 1, .enable_platform_anchor = true, .platform_anchor_weight = 1000000.0, .platform_anchor_value = 0.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .direction_blend_radius = 10.0, .direction_blend_power = 2.0, .direction_blend_min_norm = 0.1, .enforce_upward_growth = true, .upward_growth_epsilon = 1e-09, .max_downward_growth_angle_deg = std::nullopt, .use_geodesic_directions = false, .geodesic_source_weight = 0.0, .geodesic_saddle_threshold_deg = 100.0, .geodesic_smoothing_iterations = 0, .geodesic_smoothing_step = 0.5, .support_feedback_iterations = 0, .radial_tilt_origin = std::nullopt, .support_feedback_min_improvement = 0.02, .support_feedback_threshold_deg = 45.0, .support_feedback_weight = 4.0, .support_feedback_use_geodesic_target = false, .smoothness_modulation_strength = 0.0, .smoothness_modulation_floor = 0.02, .transition_distance_mm = std::nullopt, .heat_method_time_factor = 100.0, .use_heat_geodesic_field = false}};
@@ -268,13 +270,13 @@ struct PipelineParams {
     Step6Params toolpath2d{Step6Params{.nozzle_width = 0.4, .wall_count = 2, .infill_density = 0.2, .infill_pattern = InfillPattern::CROSSED_ZIGZAG, .bridge_contour_ratio_threshold = 0.05, .bridge_anchor_extra_walls = 2, .degenerate_area_ratio = 1e-06, .out_of_plane_interpolation_power = 2.0, .split_rings_into_runs = true, .split_open_polylines = false, .continuous_rings = true}};
     Step7Params scheduling{Step7Params{.surface_color_distance = 0.5, .hole_cost_model = HoleCostModel{.reheat_penalty = 1.0, .adhesion_risk_weight = 1.0}, .purge_cost_model = PurgeCostModel{.volume_per_purge = 1.0, .time_per_purge = 1.0}, .max_open_holes = 4, .escape_direction_count = 16, .rotation_axes = std::nullopt, .deadline_ray_samples = 24}};
     std::optional<ColorMap> color_map{std::nullopt};
-    Step8Params machine_toolpath{Step8Params{.ik_samples_per_axis = 10, .ik_refine_iterations = 8, .ik_refine_step_multiplier = 0.5, .singularity_radius_epsilon = 0.001, .travel_feedrate = 0.0, .default_feedrate = 1000.0, .max_unreachable_angular_error_deg = 5.0, .clamp_angle_rates = false, .free_axis_median_window = 0, .per_point_normal = false, .per_point_normal_nodal = false}};
+    Step8Params machine_toolpath{Step8Params{.ik_samples_per_axis = 10, .ik_refine_iterations = 8, .ik_refine_step_multiplier = 0.5, .singularity_radius_epsilon = 0.001, .travel_feedrate = 0.0, .default_feedrate = 1000.0, .max_unreachable_angular_error_deg = 5.0, .clamp_angle_rates = false, .free_axis_median_window = 9, .per_point_normal = true, .per_point_normal_nodal = false}};
     CollisionSimParams collision{CollisionSimParams{.path_sampling_step = 2.0, .safety_margin = 1.0, .max_adjustment_iterations = 3, .grid_cell_size_multiplier = 4.0, .toolhead_sample_spacing = 5.0, .nozzle_contact_clearance = 3.0, .fast_kdtree = true, .fast_densify_step = 0.25}};
-    Step10Params adjustment{Step10Params{.max_adjustment_iterations = 3, .reorientation_samples_per_axis = 12, .max_direction_deviation_deg = 45.0, .excluded_range_half_width_deg = 15.0, .rate_limit_neighbor_margin = 1}};
+    Step10Params adjustment{Step10Params{.max_adjustment_iterations = 3, .reorientation_samples_per_axis = 12, .max_direction_deviation_deg = 45.0, .excluded_range_half_width_deg = 15.0, .rate_limit_neighbor_margin = 1, .orientation_support_min_residual_deg = std::nullopt}};
     bool height_clamp{false};
     std::optional<std::vector<double>> coupled_reorientation_tiers{std::nullopt};
     int coupled_reorientation_rounds{3};
-    MachineProfile machine_profile{MachineProfile{.rotation_axes = std::vector<RotationAxisSpec>{RotationAxisSpec{.axis = std::vector<double>{0.0, 0.0, 1.0}, .angle_range_deg = std::array<double, 2>{0.0, 360.0}}, RotationAxisSpec{.axis = std::vector<double>{1.0, 0.0, 0.0}, .angle_range_deg = std::array<double, 2>{0.0, 185.0}}}, .platform_origin = std::vector<double>{0.0, 0.0, 0.0}, .nozzle_diameter = 0.4, .max_angular_velocity = 13.08996938995747, .max_angular_acceleration = 5.235987755982989, .build_volume = std::nullopt, .z_clearance_min = 0.0, .platform_radius = 150.0, .position_coupled_axes = std::vector<int>{0}, .radial_direction = std::vector<double>{0.0, -1.0, 0.0}}};
+    MachineProfile machine_profile{MachineProfile{.rotation_axes = std::vector<RotationAxisSpec>{RotationAxisSpec{.axis = std::vector<double>{0.0, 0.0, 1.0}, .angle_range_deg = std::array<double, 2>{0.0, 360.0}}, RotationAxisSpec{.axis = std::vector<double>{1.0, 0.0, 0.0}, .angle_range_deg = std::array<double, 2>{0.0, 185.0}}}, .platform_origin = std::vector<double>{0.0, 0.0, 0.0}, .nozzle_diameter = 0.4, .max_angular_velocity = 29.08940264298949, .max_angular_acceleration = 22.689280275926283, .build_volume = std::nullopt, .z_clearance_min = 0.0, .platform_radius = 150.0, .position_coupled_axes = std::vector<int>{0}, .radial_direction = std::vector<double>{0.0, -1.0, 0.0}}};
     std::optional<TravelRoutingParams> travel_routing{std::nullopt};
     std::optional<CollisionOrderParams> collision_order{CollisionOrderParams{.pose_spacing = 3.0, .material_spacing = 1.5, .head_sample_spacing = 6.0, .margin = 1.0, .nozzle_contact_clearance = 3.0, .neighbours = 4, .support_depth = 0.3, .support_radius = 0.6}};
     std::optional<SupportCheckParams> support_check{std::nullopt};
@@ -296,14 +298,19 @@ struct GcodeParams {
     double retract_speed{35.0};
     double retract_min_travel{2.0};
     double travel_clearance{1.0};
+    double travel_clearance_max_factor{4.0};
     double pivot_to_tip{46.0};
     double tilt_sign{1.0};
     std::string z_reference{"tip"};
+    double b_sign{1.0};
     bool tip_at_bead_top{true};
     bool strict{false};
+    std::optional<double> max_y_turns{std::nullopt};
     double platform_margin{1.0};
     double singularity_radius{1e-06};
     int decimals{4};
+    std::optional<std::vector<double>> fw_axis_speeds{std::vector<double>{1666.7, 600.0, 133.3, 1666.7}};
+    std::optional<double> max_tip_deviation{0.05};
 };
 
 }  // namespace apex::params

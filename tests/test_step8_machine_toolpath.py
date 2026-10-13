@@ -768,3 +768,25 @@ def test_nodal_direction_field_is_exact_on_linear_field_and_continuous():
     line = np.column_stack([np.linspace(2, 8, 400), np.full(400, 5.0), np.full(400, 5.0)])
     jump = lambda d: np.degrees(np.arccos(np.clip(np.einsum("ij,ij->i", d[1:], d[:-1]), -1, 1))).mean()  # noqa: E731
     assert jump(gradient_direction_field(tm, sf2, nodal=True)(line)) < jump(gradient_direction_field(tm, sf2)(line))
+
+
+def test_median_filter_residuals_match_pointwise_rodrigues():
+    """Le residuel recalcule par lots apres le filtre median (2026-10-06) egale la
+    boucle point par point d'origine, a la precision machine pres."""
+    from core.geometry_utils import _rodrigues_rotate_single
+    from pipeline.step8_machine_toolpath import _median_filter_free_axes
+    rng = np.random.default_rng(3)
+    machine = _coupled_machine(extra_head_axis=True)
+    n = 400
+    angles = np.column_stack([rng.uniform(0, 360, n), rng.uniform(0, 185, n), rng.uniform(-90, 90, n)])
+    pts = [_raw(rng.uniform(-20, 20, 3), rng.normal(size=3)) for _ in range(n)]
+    for k, p in enumerate(pts):
+        p.layer_id = k // 50
+    out_angles, residual = _median_filter_free_axes(angles.tolist(), pts, machine.rotation_axes, machine, _Z, 9)
+    units = [np.asarray(s.axis, float) / np.linalg.norm(s.axis) for s in machine.rotation_axes]
+    for i in range(n):
+        d = _Z.copy()
+        for u, a in zip(reversed(units), reversed(out_angles[i])):
+            d = _rodrigues_rotate_single(d, u, np.radians(a))
+        ref = float(np.arccos(np.clip(d @ pts[i].desired_direction, -1.0, 1.0)))
+        assert residual[i] == pytest.approx(ref, abs=1e-9)

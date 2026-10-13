@@ -1901,7 +1901,7 @@ def _random_machine_toolpath(seed, n=3000):
     return {"position": pos, "axis_angles": np.column_stack([c, b]), "extrusion": ext, "is_skin": skin}
 
 
-@pytest.mark.parametrize("variant", ["defaut", "pivot", "sans_table"])
+@pytest.mark.parametrize("variant", ["defaut", "pivot", "sans_table", "decoupage"])
 def test_gcode_export_native_identical_text(restore_switch, variant):
     core = _cpp.module()
     if not hasattr(core, "export_gcode_body"):
@@ -1910,10 +1910,12 @@ def test_gcode_export_native_identical_text(restore_switch, variant):
     from file_io.gcode_export import GcodeParams, export_gcode, head_zlow_from_table
     machine = main._default_machine_profile()
     machine.nozzle_model = None
-    # max_tip_deviation=None : sinon le decoupage desactive le chemin natif et le
-    # test comparerait Python a lui-meme
-    params = (GcodeParams(max_tip_deviation=None) if variant != "pivot"
-              else GcodeParams(z_reference="pivot", tilt_sign=-1.0, max_tip_deviation=None))
+    if variant == "decoupage":       # bisection max_tip_deviation en natif (2026-10-07)
+        params = GcodeParams()
+    elif variant == "pivot":
+        params = GcodeParams(z_reference="pivot", tilt_sign=-1.0, max_tip_deviation=None)
+    else:
+        params = GcodeParams(max_tip_deviation=None)
     hz = None if variant == "sans_table" else head_zlow_from_table(np.arange(0, 185.5, 0.5), -np.linspace(1, 30, 371))
     for seed in range(3):
         tp = _random_machine_toolpath(seed)
@@ -1924,8 +1926,10 @@ def test_gcode_export_native_identical_text(restore_switch, variant):
         assert a == b
         for k in ("moves", "travels", "retractions", "clearance_axes", "filament_mm", "c_mismatch_deg",
                   "tip_z_min", "head_z_min", "tip_below_plate", "head_below_margin", "fw_x_range",
-                  "fw_y_range", "fw_z_range", "print_time_s"):
+                  "fw_y_range", "fw_z_range", "print_time_s", "subdivided_moves", "max_tip_deviation_before"):
             assert getattr(ra, k) == getattr(rb, k), k
+        if variant == "decoupage":
+            assert ra.subdivided_moves > 50                                  # garde : le decoupage agit
         assert ra.retractions > 5 and ra.clearance_axes["R"] + ra.clearance_axes["Z"] > 5   # garde
 
 

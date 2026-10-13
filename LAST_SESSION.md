@@ -6,6 +6,87 @@ rendu est dans le commit `2b7edc9`). **Plan approuvé en cours d'exécution :**
 
 CODE SECRET : 7489
 
+## >>> SUITE DU 2026-10-06 (soir, autonome hors UI) — LIRE D'ABORD <<<
+
+Détail dans CLAUDE.md, limites #72 et #73 ; état courant dans `DT.md`. Rien n'est commité.
+
+- **`config.g` est le fichier RRF actif.** Limites de B : 1667 °/s et 1300 °/s². **Rappeler à
+  l'utilisateur, jusqu'à confirmation, de passer Z à `M203 Z8000` / `M201 Z1500`** (400 mm/min actuels :
+  Benchy ~1,7 h -> ~9,7 h). Mémoire `nag-config-g-z-limits`.
+- Estimation du temps tous axes : `GcodeReport.print_time_fw_s`, `GcodeParams.fw_axis_speeds`.
+- Points 6 à 8 du DT mesurés (couverture, décalage sur le plateau, doublons du lissage).
+- Doublons du lissage de Squirtle : `skin_paths.dedupe_shared_passes` (recherche), Squirtle rejoué,
+  5,29 -> 2,28 %. Ancien état sur H: (`squirtle_pass8_before_dedupe`).
+- step1 : repli `_tetrahedralize_with_translation_retry` (turkish décalé échouait selon l'arrondi).
+- Performances, pipeline complet death **124 -> 37 s**, résultats identiques : boucle quadratique de
+  step10, résiduel par lots dans step8, contrôleur de collision rapide mis en cache.
+- **♦️ ouvert** : step10 range chaque diagnostic d'orientation de step8 en « support de secours »
+  (115 312 sur death) : décision utilisateur.
+- Tests : 473/473 dans les deux positions.
+
+## >>> SESSION DU 2026-10-06 (ancien poste `slicer_engine`, utilisateur présent) — LIRE D'ABORD <<<
+
+**Le suivi à jour est dans `DT.md` (Dev Tracker). Détail technique : CLAUDE.md, limites #69 à #71.**
+
+**Contexte** : retour sur l'ancien poste (`R:\APEX_NEW_VERSION\slicer_engine`, utilisateur `test_`, disque H: présent).
+`main` local a été REMPLACÉ par `origin/session-2026-10-01` (historique sans ancêtre commun avec
+`origin/main`) ; l'ancien `main` est dans la branche locale `backup-main-2026-10-06`. Les fichiers
+non versionnés d'origine (`build/`, `out/`, `.vscode/`, `settings.fr-code`) sont dans
+`H:/apex_untracked_backup_2026-10-06/`, avec les anciennes trajectoires Bird du Benchy et du dino
+(`bird_outputs/`). **RIEN n'est commité ni poussé.** Les deux `.venv` ont été retirés de l'INDEX git
+(`git rm --cached`), pas du disque. R: avait 0 octet libre au départ (partition étendue par l'utilisateur).
+
+**Environnement à recréer sur un nouveau poste** : `python -m venv .venv`, puis
+`pip install cmake==4.4.3 ninja==1.13.2 numpy==2.5.2 scipy==1.18.0 trimesh==5.0.0 tetgen==0.8.4
+rtree==1.4.1 manifold3d==3.5.2 networkx==3.6.1 shapely==2.1.2 pytest==9.1.1 pymeshfix==0.18.1
+pybind11==3.1.0 matplotlib==3.11.2 pillow==12.3.0 libigl==2.6.3 potpourri3d==1.4.0` ;
+noyau natif : `.venv/Scripts/python.exe scripts/build_cpp.py`. Toute modification de dataclass de
+paramètres exige `scripts/gen_params.py` PUIS un rebuild (le test `test_generated_files_up_to_date`
+échoue sinon : arrivé 3 fois dans la session).
+
+**Résultats de la session (tous mesurés, détail en limites #69-#71)**
+1. **Signe de B : ERREUR PUIS CORRECTION.** J'ai d'abord posé `b_sign = -1` en lisant « B négatif =
+   vers l'avant » comme une inversion à appliquer. Faux : c'est le sens de l'axe. Croquis de
+   l'utilisateur + aperçu : B négatif envoie la pointe vers l'EXTÉRIEUR. `b_sign = +1` (B firmware =
+   B d'Apex, limites réelles 0-185°). Tout G-code produit avec B négatif est inutilisable.
+2. **Normale par point activée par défaut** (#69) : écart tête/normale médian ÷2 à ÷3, temps d'impression
+   +65 à +130 %. **Filtre médian de B (9) activé par défaut** : −19 à −31 % de temps, collisions en baisse.
+3. **Limites de B** réconciliées avec les fichiers RRF : 360 °/s, 300 °/s² (aucun effet sur le temps).
+4. **Chaîne Bird** : `full_step89.py --apex-detect` (détection par le step9 rapide natif) : dino 855 → 74 s,
+   Benchy 496 → 50 s, trajectoires identiques AU BIT ; activé dans `out/run_bird_chain.sh`.
+5. **Plateau de step9 : surface à z = origine** (elle était à +0,5 mm : disque centré sur l'origine).
+6. **Dégagements de trajet à vide** : essai de l'autre axe puis pas double si contact (Benchy 3 → 0, dino 3 → 0).
+7. **Export** : `GcodeReport.y_turns`, `GcodeParams.max_y_turns` (Benchy ≈ 32 tours de plateau, l_shape ≈ 240,
+   dino ≈ 621), `GcodeParams.travel_clearance_max_factor`.
+8. **Contours « invalides » Bird : pas de correction** (doublons de cordons 0,3-1,5 %, sans corrélation).
+9. **SDK Vulkan 1.4.363.0** installé (winget) ; aucun code GPU écrit.
+10. **`research/S4_Slicer/safe_io.py` recréé** (absent de la branche ; 7 scripts l'importent).
+
+**Fichiers d'essai et livrables** (`out/`) : `test_b_direction.gcode` (À SEC, pointe immobile, sans
+chauffe : le seul à lancer en premier sur la machine), `test_l_shape.gcode`, `test_b_preview*.gcode` et
+`test_y_ring_preview.gcode` (aperçu UNIQUEMENT : ils chauffent et extrudent, ne PAS les lancer sur la
+machine). G-code : `research/S4_Slicer/output_models/loop_tilted_benchy_undertriangulated_repaired_pin_pass4.gcode`,
+`loop_dino_pin_pass5.gcode`. Archives Deflate `out/share/*_v5.zip` (les fichiers font ~65 Mo : un canal
+qui tronque à 1 Mo les corrompt). Scripts ajoutés : `scripts/gen_b_direction_test.py`
+(`--preview`, `--ring`, `--b-max`), `scripts/export_model_gcode.py` (STL → G-code par le pipeline FEM).
+
+**Pièges rencontrés (à ne pas refaire)**
+- Un `git checkout -B` échoue si des fichiers non versionnés seraient écrasés : les déplacer d'abord.
+- Les calculs lancés en parallèle d'une modification de `main.py` lisent la NOUVELLE valeur (une mesure
+  de temps a dû être refaite) : ne rien modifier pendant qu'une mesure tourne.
+- `python - <<EOF` avec des chaînes contenant des antislashs : `"\1"` devient un caractère de contrôle
+  (CLAUDE.md a dû être réparé) ; utiliser `chr(92)` ou ne pas écrire de chemins Windows en clair.
+- `scripts/gen_params.py --help` ÉCRIT les fichiers générés (pas d'aide) ; `--check` seul est inoffensif.
+- Les fichiers du projet peuvent être en CRLF : lire avec `newline=''` pour comparer.
+- Un échec de test isolé (`test_export_extrusion_and_retraction`, `APEX_USE_CPP=0`, pendant un calcul
+  en parallèle) est NON REPRODUCTIBLE (46 exports sous charge, 0 échec) ; cause inconnue.
+
+**En attente de l'utilisateur** : essai à sec de `test_b_direction.gcode` sur la machine (sens de B,
+pointe immobile), puis l_shape, puis le Benchy ; validation du Y cumulé côté câblage ; tout ce qui touche
+l'UI est réservé à la toute fin (config UI, sélecteur d'angle, conseil « ne pas centrer »).
+
+**Suite de tests : 469/469 dans les deux positions de `APEX_USE_CPP`** (noyau reconstruit).
+
 ## >>> RÉCAPITULATIF DU 2026-10-01 (nuit + journée) — LIRE D'ABORD <<<
 
 **Résultats principaux (détail plus bas et dans CLAUDE.md, limites #56 et #59 à #67)** :
