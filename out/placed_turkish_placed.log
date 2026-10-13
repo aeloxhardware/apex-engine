@@ -1,0 +1,50 @@
+[preview] Etape 1/8 - ingestion : res/test_models/turkish.stl
+[step1] tetraedrisation reussie apres translation de [-150.0, -150.0] mm (repli d'arrondi flottant), noeuds ramenes a leur place
+[preview] Etape 2/8 - detection des surplombs
+[preview] Etape 3/8 - segmentation en regions
+[preview] Etape 4/8 - resolution du champ scalaire
+[preview] Etape 5/8 - extraction des couches courbes
+[preview]   ordre contraint par la tete : 44594 contrainte(s), 312 couche(s) deplacee(s), 493 violee(s)
+[preview]   312 couche(s)
+[preview] Etape 6/8 - remplissage 2D par couche
+[preview] Etape 7/8 - couleur + ordonnancement
+[preview]   312 passe(s) d'impression
+[preview] Etape 8/8 - trajectoire machine (resolution IK)
+[preview]   731252 point(s) de trajectoire, 214192 orientation(s) inatteignable(s)
+[preview] Etape 8c/8 - verification du support de depot
+[preview]   1250 depot(s) sans support (0.19% de la matiere extrudee) : 223 defaut(s) d'ordre, 0 surplomb(s) reel(s)
+[preview] step1->step8 termine en 81.5s
+[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)
+{
+ "model": "turkish.stl",
+ "variant": "placed",
+ "resolution": 0.8,
+ "layer_height_base": 0.2,
+ "apex_use_cpp": "1",
+ "seconds": 81.5,
+ "layers": 312,
+ "points": 731252,
+ "layer_thickness_measured": 0.2449,
+ "tested": 660483,
+ "unsupported": 1250,
+ "unsupported_fraction": 0.0018925543882280088,
+ "ordering_defects": 223,
+ "tilt_resolved": 1027,
+ "true_overhang": 0,
+ "extruded_mm": 343022.8,
+ "travel_total_mm": 343989.9,
+ "travel_max_mm": 133.82,
+ "step8_diagnostics": 214192,
+ "b_jumps_gt10": 27459,
+ "dev_median": 1.96,
+ "dev_p95": 15.56,
+ "dev_gt15_pct": 5.48,
+ "dev_gt45_pct": 0.12,
+ "time_nominal_h": 5.006,
+ "time_real_h": 5.514,
+ "time": "2026-10-13 12:13:18",
+ "collision_points": 1431,
+ "collision_fraction": 0.0094,
+ "collision_platform": 0,
+ "collision_seconds": 10.9
+}

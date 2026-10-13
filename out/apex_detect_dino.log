@@ -1,0 +1,24 @@
+##### dino 5 
+  20000/87701 points testes, 69 s, 0 evenements
+  40000/87701 points testes, 140 s, 19 evenements
+  60000/87701 points testes, 227 s, 71 evenements
+  80000/87701 points testes, 310 s, 195 evenements
+tour 1 : 195 points en contact ; resolus par un autre B : 195/195 (paliers 45/90/181 deg : [95, 86, 14])
+  applique a 3708 points (lissage +-1 / 3 mm)
+  20000/87701 points testes, 476 s, 0 evenements
+  40000/87701 points testes, 551 s, 0 evenements
+  60000/87701 points testes, 641 s, 0 evenements
+  80000/87701 points testes, 731 s, 0 evenements
+tour 2 : 0 points en contact ; resolus par un autre B : 0/0 (paliers 45/90/181 deg : [0, 0, 0])
+etape 9 : 87701 echantillons (1 sur 1) en 828 s ; 0 evenements sur 0 points ; par type : {}
+  duree 855 s
+##### dino 5 --apex-detect
+etape 8 : 862241 points (3281 polylignes) en 16 s ; corps : ecart tete / normale de couche median 3.4 deg, 95e 16.3, max 76.5 ; > 5 deg 35.5%, > 45 deg 0.1%
+borne de B selon la hauteur : 1082 points ramenes (0.13%) ; |dB| median 39.0 deg, max 111.0
+  detection Apex : 195 points en collision en 9 s
+tour 1 : 195 points en contact ; resolus par un autre B : 195/195 (paliers 45/90/181 deg : [95, 86, 14])
+  applique a 3708 points (lissage +-1 / 3 mm)
+  detection Apex : 0 points en collision en 10 s
+tour 2 : 0 points en contact ; resolus par un autre B : 0/0 (paliers 45/90/181 deg : [0, 0, 0])
+etape 9 : 87701 echantillons (1 sur 1) en 49 s ; 0 evenements sur 0 points ; par type : {}
+  duree 74 s

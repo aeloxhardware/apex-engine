@@ -1,0 +1,12 @@
+== tilted benchy undertriangulated_repaired 4
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_pin_pass4.gcode
+  1076367 lignes, 1070786 mouvements, 3818 trajets a vide, 2760 retractions, degagements {'Z': 2347, 'R': 414, 'none': 0}
+  filament 4.57 m ; temps nominal 1.64 h, avec limites de B 3.32 h
+  controle de repere |Y - (C - 90)| max 5.68e-14 deg ; degagements en contact franc : 0
+  duree de l'export 128 s
+== dino 5
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_dino_pin_pass5.gcode
+  976949 lignes, 973269 mouvements, 3281 trajets a vide, 1813 retractions, degagements {'Z': 1107, 'R': 707, 'none': 0}
+  filament 6.40 m ; temps nominal 2.24 h, avec limites de B 4.28 h
+  controle de repere |Y - (C - 90)| max 5.68e-14 deg ; degagements en contact franc : 0
+  duree de l'export 112 s

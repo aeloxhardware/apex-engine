@@ -1,0 +1,93 @@
+##### tilted benchy undertriangulated_repaired passe 4  debut 12:23:03
+tour 1
+  P2         27 s  (code 0, skin_loop_P2_it1.log)
+  P4         13 s  (code 0, skin_loop_P4_it1.log)
+  P5         18 s  (code 0, skin_loop_P5_it1.log)
+  -> 275 points de collision ; zones en collision (RETIREES) : 30/51 (2393 mm2 sur 2833)
+tour 2
+  P2          5 s  (code 0, skin_loop_P2_it2.log)
+  P4         11 s  (code 0, skin_loop_P4_it2.log)
+  P5         17 s  (code 0, skin_loop_P5_it2.log)
+  -> 17 points de collision ; zones en collision (RETIREES) : 7/33 (305 mm2 sur 2216)
+tour 3
+  P2          5 s  (code 0, skin_loop_P2_it3.log)
+  P4         13 s  (code 0, skin_loop_P4_it3.log)
+  P5         17 s  (code 0, skin_loop_P5_it3.log)
+  -> 11 points de collision ; zones en collision (RETIREES) : 4/33 (72 mm2 sur 2139)
+tour 4
+  P2          5 s  (code 0, skin_loop_P2_it4.log)
+  P4         10 s  (code 0, skin_loop_P4_it4.log)
+  P5         15 s  (code 0, skin_loop_P5_it4.log)
+  -> 1 points de collision ; zones en collision (RETIREES) : 1/29 (7 mm2 sur 2100)
+tour 5
+  P2          4 s  (code 0, skin_loop_P2_it5.log)
+  P4         10 s  (code 0, skin_loop_P4_it5.log)
+  P5         16 s  (code 0, skin_loop_P5_it5.log)
+  -> 0 points de collision ; zones en collision (RETIREES) : 0/29 (0 mm2 sur 2095)
+  P3        104 s  (code 0, skin_loop_P3_itfinal.log)
+  P5        162 s  (code 0, skin_loop_P5_itfinal.log)
+zero collision (verifie sur le corps creuse) : termine
+  boucle de lissage terminee en 453 s
+etape 8 : 990248 points (3827 polylignes) en 14 s ; corps : ecart tete / normale de couche median 9.1 deg, 95e 27.2, max 89.1 ; > 5 deg 69.0%, > 45 deg 1.6%
+borne de B selon la hauteur : 568 points ramenes (0.06%) ; |dB| median 20.5 deg, max 140.5
+  detection Apex : 25 points en collision en 6 s
+tour 1 : 25 points en contact ; resolus par un autre B : 14/25 (paliers 45/90/181 deg : [0, 4, 10])
+  applique a 256 points (lissage +-1 / 3 mm)
+  detection Apex : 11 points en collision en 5 s
+tour 2 : 11 points en contact ; resolus par un autre B : 0/11 (paliers 45/90/181 deg : [0, 0, 0])
+  NON resolus : 11 ; z median 38.2 mm ; B median 0 deg
+etape 9 : 65235 echantillons (1 sur 1) en 27 s ; 11 evenements sur 11 points ; par type : {('printed_part', 'body'): 11}
+  penetration mediane 0.07 mm, max 0.38 mm
+  step8+9 en 48 s
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_tilted_benchy_undertriangulated_repaired_pin_pass4.gcode
+  1088303 lignes, 1082707 mouvements, 3827 trajets a vide, 2767 retractions, degagements {'Z': 2349, 'R': 419, 'none': 0}
+  filament 4.57 m ; temps nominal 1.64 h, avec limites de B 2.28 h ; tous axes (config.g recommande) 1.89 h
+  controle de repere |Y - (C - 90)| max 5.68e-14 deg ; degagements en contact franc : 0
+  Y cumule : 31.3 tours (Y de -11065 a 204 deg)
+  duree de l'export 77 s
+  export en 79 s ; TOTAL 580 s
+##### dino passe 5  debut 12:32:43
+tour 1
+  P2         31 s  (code 0, skin_loop_P2_it1.log)
+  P4         21 s  (code 0, skin_loop_P4_it1.log)
+  P5         25 s  (code 0, skin_loop_P5_it1.log)
+  -> 233 points de collision ; zones en collision (RETIREES) : 39/70 (1652 mm2 sur 3730)
+tour 2
+  P2          6 s  (code 0, skin_loop_P2_it2.log)
+  P4         14 s  (code 0, skin_loop_P4_it2.log)
+  P5         20 s  (code 0, skin_loop_P5_it2.log)
+  -> 17 points de collision ; zones en collision (RETIREES) : 6/36 (2109 mm2 sur 3108)
+tour 3
+  P2          5 s  (code 0, skin_loop_P2_it3.log)
+  P4         13 s  (code 0, skin_loop_P4_it3.log)
+  P5         24 s  (code 0, skin_loop_P5_it3.log)
+  -> 8 points de collision ; zones en collision (RETIREES) : 2/31 (1925 mm2 sur 3028)
+tour 4
+  P2          6 s  (code 0, skin_loop_P2_it4.log)
+  P4         15 s  (code 0, skin_loop_P4_it4.log)
+  P5         21 s  (code 0, skin_loop_P5_it4.log)
+  -> 0 points de collision ; zones en collision (RETIREES) : 0/31 (0 mm2 sur 2983)
+  P3        126 s  (code 0, skin_loop_P3_itfinal.log)
+  P5        258 s  (code 0, skin_loop_P5_itfinal.log)
+verification sur le corps creuse : 6 points de collision -> zones retirees
+  P3        103 s  (code 0, skin_loop_P3_itfinal1.log)
+  P5        238 s  (code 0, skin_loop_P5_itfinal1.log)
+  -> zones retirees : [4] ; points de collision restants : 0
+  boucle de lissage terminee en 924 s
+etape 8 : 857363 points (2763 polylignes) en 14 s ; corps : ecart tete / normale de couche median 3.3 deg, 95e 16.3, max 76.5 ; > 5 deg 35.7%, > 45 deg 0.1%
+borne de B selon la hauteur : 1142 points ramenes (0.13%) ; |dB| median 39.8 deg, max 111.0
+  detection Apex : 191 points en collision en 7 s
+tour 1 : 191 points en contact ; resolus par un autre B : 191/191 (paliers 45/90/181 deg : [88, 89, 14])
+  applique a 3791 points (lissage +-1 / 3 mm)
+  detection Apex : 0 points en collision en 7 s
+tour 2 : 0 points en contact ; resolus par un autre B : 0/0 (paliers 45/90/181 deg : [0, 0, 0])
+etape 9 : 87810 echantillons (1 sur 1) en 45 s ; 0 evenements sur 0 points ; par type : {}
+  step8+9 en 68 s
+R:\APEX_NEW_VERSION\slicer_engine\research\S4_Slicer\output_models\loop_dino_pin_pass5.gcode
+  972683 lignes, 969146 mouvements, 2763 trajets a vide, 1742 retractions, degagements {'Z': 1072, 'R': 671, 'none': 0}
+  filament 6.42 m ; temps nominal 2.24 h, avec limites de B 2.98 h ; tous axes (config.g recommande) 2.62 h
+  controle de repere |Y - (C - 90)| max 5.68e-14 deg ; degagements en contact franc : 0
+  Y cumule : 620.5 tours (Y de -223546 a -164 deg)
+  duree de l'export 74 s
+  export en 75 s ; TOTAL 1067 s
+CHAIN_DONE

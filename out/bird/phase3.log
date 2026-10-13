@@ -1,0 +1,172 @@
+[bird] Boucle de deformation : res/test_models/l_shape_overhang.stl
+[bird]   maillage grossier (30 tetraedres, 20.3 mm3 en moyenne) : retetraedrisation a 0.5 mm3
+[bird]   base figee : 1035 cellules, 356 noeuds
+[bird]   2102 tetraedres
+[bird]   passe 1 : acceptee -> MAX_OVERHANG 20 (depl. 0.000 mm, zone 0.0 mm2)
+[bird]   passe 2 : acceptee -> MAX_OVERHANG 10 (depl. 0.000 mm, zone 0.0 mm2)
+[bird]   passe 3 : acceptee -> MAX_OVERHANG 5 (depl. 0.000 mm, zone 13.8 mm2)
+[bird]   passe 4 : acceptee -> MAX_OVERHANG 0 (depl. 0.000 mm, zone 8.4 mm2)
+[bird]   passe 5 : acceptee, bareme epuise mais ca bouge encore -> meme passe (depl. 0.000 mm, zone 9.6 mm2)
+[bird]   passe 6 : acceptee, bareme epuise mais ca bouge encore -> meme passe (depl. 0.000 mm, zone 12.8 mm2)
+[bird]   passe 7 : acceptee, bareme epuise mais ca bouge encore -> meme passe (depl. 0.000 mm, zone 12.9 mm2)
+[bird]   arret : repli en repetant les derniers reglages (7 passe(s) acceptee(s))
+[bird] Tranchage deforme + lissage non planaire (P2-P5)
+[skin] tour 1 : 15 point(s) de collision, 2 zone(s) en contact ; P4 cache 0 reprise(s) / 5 calcul(s)
+[skin] tour 2 : 0 point(s) de collision, 0 zone(s) en contact ; P4 cache 2 reprise(s) / 8 calcul(s)
+[skin] zero collision (verifie sur le corps creuse) en 16 s
+[bird] Etape 8 : 27471 point(s), 13128 orientation(s) inatteignable(s)
+[bird]   borne de B selon la hauteur : 8039 point(s)
+[bird] Etape 9 : 250 collision(s)
+[bird]   paliers : 195/250 resolu(s), 88 restante(s)
+[bird]   paliers : 31/86 resolu(s), 96 restante(s)
+[bird]   paliers : 37/92 resolu(s), 84 restante(s)
+[bird]   paliers : 25/80 resolu(s), 81 restante(s)
+[bird] Etape 10 : converged=True, 0 collision(s) non resolue(s)
+{"model": "l_shape_overhang.stl", "way": "bird", "resolution": 1.5, "tetrahedra": 2102, "accepted_passes": 7, "stop_reason": "repli en repetant les derniers reglages", "layers": 101, "skin_timings": {"tranchage non creuse": 1.287391185760498, "P2 zones": 0.8106875419616699, "P4 trajectoires": 0.9961240291595459, "P5 controle (boucle)": 0.3144843578338623, "tranchage creuse (P3)": 10.839065313339233, "P5 controle (exhaustif)": 1.648348093032837}, "skin_excluded_zones": [], "compute_s": 43.6, "points": 27471, "unsupported_fraction": 0.02577625909968801, "unsupported_events": 694, "ordering_defects": 603, "true_overhangs": 0, "collision_points": 77, "unresolved_after_step10": 0, "step8_diagnostics": 13128, "moves": 33317, "print_time_fw_h": 0.09269572752758133, "y_turns": 15.851587463816456, "tip_z_min": 0.19999999999999996, "written": true}
+[main] Etape 1/10 - ingestion : res/test_models/l-triple-axis-overhanged-shape.stl
+[main]   watertight avant/apres reparation : True/True, 1827 tetraedres
+[main] Etape 2/10 - detection des surplombs
+[main]   6 faces en surplomb sur 30
+[main] Etape 3/10 - segmentation en regions
+[main]   1 region(s)
+[main] Etape 4/10 - resolution du champ scalaire
+[main] Etape 5/10 - extraction des couches courbes
+[main]   ordre contraint par la tete : 5343 contrainte(s), 0 couche(s) deplacee(s), 8 violee(s)
+[main]   161 couche(s)
+[main] Etape 6/10 - remplissage 2D par couche
+[main] Etape 7/10 - couleur + ordonnancement
+[main]   161 passe(s) d'impression
+[main] Etape 8/10 - trajectoire machine (resolution IK)
+[main]   21168 point(s) de trajectoire, 5853 orientation(s) inatteignable(s)
+[main] Etape 8c/10 - verification du support de depot
+[main]   452 depot(s) sans support (2.55% de la matiere extrudee) : 44 defaut(s) d'ordre, 0 surplomb(s) reel(s)
+[main] Etape 9/10 - simulation de collision
+[main]   0 collision(s) detectee(s) (nozzle_model_checked=True, chuck_checked=False)
+[main] Etape 10/10 - ajustement
+[main]   converged=True, 5853 ajustement(s), 0 collision(s) non resolue(s)
+{"model": "l-triple-axis-overhanged-shape.stl", "way": "fem", "resolution": 1.5, "layers": 161, "compute_s": 4.0, "points": 21168, "unsupported_fraction": 0.02547914317925592, "unsupported_events": 452, "ordering_defects": 44, "true_overhangs": 0, "collision_points": 0, "unresolved_after_step10": 0, "step8_diagnostics": 5853, "moves": 35503, "print_time_fw_h": 0.23177481861092847, "y_turns": 50.5, "tip_z_min": 0.2017610524306499, "written": true}
+[bird] Boucle de deformation : res/test_models/l-triple-axis-overhanged-shape.stl
+[bird]   maillage grossier (42 tetraedres, 20.6 mm3 en moyenne) : retetraedrisation a 0.5 mm3
+[bird]   base figee : 992 cellules, 393 noeuds
+[bird]   2935 tetraedres
+[bird]   passe 1 : acceptee -> MAX_OVERHANG 20 (depl. 0.059 mm, zone 0.0 mm2)
+[bird]   passe 2 : acceptee -> MAX_OVERHANG 10 (depl. 0.066 mm, zone 0.0 mm2)
+[bird]   passe 3 : acceptee -> MAX_OVERHANG 5 (depl. 0.080 mm, zone 0.0 mm2)
+[bird]   passe 4 : acceptee -> MAX_OVERHANG 0 (depl. 0.074 mm, zone 0.0 mm2)
+[bird]   passe 5 : acceptee, bareme epuise mais ca bouge encore -> meme passe (depl. 0.037 mm, zone 3.8 mm2)
+[bird]   passe 6 : acceptee, peu de changement -> multiplicateur 1.5 (depl. 0.019 mm, zone 11.8 mm2)
+[bird]   passe 7 : acceptee, bareme epuise mais ca bouge encore -> meme passe (depl. 0.026 mm, zone 10.9 mm2)
+[bird]   passe 8 : acceptee, bareme epuise mais ca bouge encore -> meme passe (depl. 0.025 mm, zone 16.6 mm2)
+[bird]   passe 9 : acceptee, bareme epuise mais ca bouge encore -> meme passe (depl. 0.062 mm, zone 26.6 mm2)
+[bird]   arret : repli en repetant les derniers reglages (9 passe(s) acceptee(s))
+[bird] Tranchage deforme + lissage non planaire (P2-P5)
+[skin] tour 1 : 100 point(s) de collision, 3 zone(s) en contact ; P4 cache 0 reprise(s) / 5 calcul(s)
+[skin] tour 2 : 0 point(s) de collision, 0 zone(s) en contact ; P4 cache 0 reprise(s) / 8 calcul(s)
+[skin] zero collision (verifie sur le corps creuse) en 24 s
+[bird] Etape 8 : 52023 point(s), 25398 orientation(s) inatteignable(s)
+[bird]   borne de B selon la hauteur : 11043 point(s)
+[bird] Etape 9 : 245 collision(s)
+[bird]   paliers : 167/245 resolu(s), 115 restante(s)
+[bird]   paliers : 37/115 resolu(s), 110 restante(s)
+[bird]   paliers : 32/110 resolu(s), 96 restante(s)
+[bird]   paliers : 18/96 resolu(s), 102 restante(s)
+[bird] Etape 10 : converged=True, 0 collision(s) non resolue(s)
+{"model": "l-triple-axis-overhanged-shape.stl", "way": "bird", "resolution": 1.5, "tetrahedra": 2935, "accepted_passes": 9, "stop_reason": "repli en repetant les derniers reglages", "layers": 107, "skin_timings": {"tranchage non creuse": 1.5638644695281982, "P2 zones": 1.8737082481384277, "P4 trajectoires": 2.9669148921966553, "P5 controle (boucle)": 0.7265501022338867, "tranchage creuse (P3)": 12.192253589630127, "P5 controle (exhaustif)": 4.340936899185181}, "skin_excluded_zones": [], "compute_s": 61.6, "points": 52023, "unsupported_fraction": 0.024140482030915393, "unsupported_events": 1240, "ordering_defects": 1042, "true_overhangs": 0, "collision_points": 102, "unresolved_after_step10": 0, "step8_diagnostics": 25398, "moves": 62110, "print_time_fw_h": 0.12818205825564377, "y_turns": 2.5760340375261466, "tip_z_min": 0.19999999999999998, "written": true}
+[main] Etape 1/10 - ingestion : res/test_models/death.stl
+[main]   watertight avant/apres reparation : True/True, 325678 tetraedres
+[main] Etape 2/10 - detection des surplombs
+[main]   359 faces en surplomb sur 2310
+[main] Etape 3/10 - segmentation en regions
+[main]   22 region(s)
+[main] Etape 4/10 - resolution du champ scalaire
+[main] Etape 5/10 - extraction des couches courbes
+[main]   ordre contraint par la tete : 26752 contrainte(s), 193 couche(s) deplacee(s), 186 violee(s)
+[main]   255 couche(s)
+[main] Etape 6/10 - remplissage 2D par couche
+[main] Etape 7/10 - couleur + ordonnancement
+[main]   255 passe(s) d'impression
+[main] Etape 8/10 - trajectoire machine (resolution IK)
+[main]   359049 point(s) de trajectoire, 115192 orientation(s) inatteignable(s)
+[main] Etape 8c/10 - verification du support de depot
+[main]   886 depot(s) sans support (0.27% de la matiere extrudee) : 738 defaut(s) d'ordre, 0 surplomb(s) reel(s)
+[main] Etape 9/10 - simulation de collision
+[main]   226 collision(s) detectee(s) (nozzle_model_checked=True, chuck_checked=False)
+[main] Etape 10/10 - ajustement
+[main]   converged=True, 115418 ajustement(s), 0 collision(s) non resolue(s)
+{"model": "death.stl", "way": "fem", "resolution": 1.5, "layers": 255, "compute_s": 55.3, "points": 359049, "unsupported_fraction": 0.002725256607824501, "unsupported_events": 886, "ordering_defects": 738, "true_overhangs": 0, "collision_points": 226, "unresolved_after_step10": 0, "step8_diagnostics": 115192, "moves": 448349, "print_time_fw_h": 2.1256738385257727, "y_turns": 0.01626052320393359, "tip_z_min": 51.59136486622513, "written": true}
+[bird] Boucle de deformation : res/test_models/death.stl
+Traceback (most recent call last):
+  File "R:\APEX_NEW_VERSION\slicer_engine\scripts\measure_bird_vs_fem.py", line 86, in <module>
+    print(json.dumps(row), flush=True)
+    ^^
+  File "R:\APEX_NEW_VERSION\slicer_engine\scripts\measure_bird_vs_fem.py", line 55, in main
+    r = M.run_bird_pipeline(model, params)
+  File "R:\APEX_NEW_VERSION\slicer_engine\main.py", line 436, in run_bird_pipeline
+    loop_result = bird_loop.run(mesh_path, bird.loop, log=lambda m: print(f"[bird]   {m}"))
+  File "R:\APEX_NEW_VERSION\slicer_engine\pipeline\bird\loop.py", line 72, in run
+    tet = bd.load_and_tetrahedralize(stl_path, max_tet_volume=params.max_tet_volume,
+                                     flatten_bottom=params.layer_height)
+  File "R:\APEX_NEW_VERSION\slicer_engine\pipeline\bird\deformation.py", line 125, in load_and_tetrahedralize
+    tet = tetrahedralize(np.asarray(mesh.vertices), np.asarray(mesh.faces), max_tet_volume)
+  File "R:\APEX_NEW_VERSION\slicer_engine\pipeline\bird\deformation.py", line 110, in tetrahedralize
+    raise RuntimeError(f"TetGen (voie Bird) a echoue, code {proc.returncode} : {proc.stderr[-2000:]}")
+RuntimeError: TetGen (voie Bird) a echoue, code 1 : Traceback (most recent call last):
+  File "<frozen runpy>", line 203, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "R:\APEX_NEW_VERSION\slicer_engine\pipeline\bird\_tetgen_worker.py", line 33, in <module>
+    main(sys.argv[1], sys.argv[2])
+    ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "R:\APEX_NEW_VERSION\slicer_engine\pipeline\bird\_tetgen_worker.py", line 28, in main
+    tet.tetrahedralize()
+    ~~~~~~~~~~~~~~~~~~^^
+  File "R:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\tetgen\pytetgen.py", line 865, in tetrahedralize
+    self._tetgen.tetrahedralize(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        plc,
+        ^^^^
+    ...<80 lines>...
+        switches,
+        ^^^^^^^^^
+    )
+    ^
+RuntimeError: The input surface mesh contain self-intersections.
+
+[main] Etape 1/10 - ingestion : res/test_models/turkish.stl
+[main]   watertight avant/apres reparation : False/True, 318299 tetraedres
+[main] Etape 2/10 - detection des surplombs
+[main]   231 faces en surplomb sur 10104
+[main] Etape 3/10 - segmentation en regions
+[main]   24 region(s)
+[main] Etape 4/10 - resolution du champ scalaire
+[main] Etape 5/10 - extraction des couches courbes
+[main]   ordre contraint par la tete : 45429 contrainte(s), 312 couche(s) deplacee(s), 563 violee(s)
+[main]   312 couche(s)
+[main] Etape 6/10 - remplissage 2D par couche
+[main] Etape 7/10 - couleur + ordonnancement
+[main]   312 passe(s) d'impression
+[main] Etape 8/10 - trajectoire machine (resolution IK)
+[main]   613285 point(s) de trajectoire, 184932 orientation(s) inatteignable(s)
+[main] Etape 8c/10 - verification du support de depot
+[main]   1086 depot(s) sans support (0.20% de la matiere extrudee) : 83 defaut(s) d'ordre, 0 surplomb(s) reel(s)
+[main] Etape 9/10 - simulation de collision
+[main]   1254 collision(s) detectee(s) (nozzle_model_checked=True, chuck_checked=False)
+[main] Etape 10/10 - ajustement
+[main]   converged=True, 186186 ajustement(s), 0 collision(s) non resolue(s)
+{"model": "turkish.stl", "way": "fem", "resolution": 1.5, "layers": 312, "compute_s": 92.8, "points": 613285, "unsupported_fraction": 0.001984152359515253, "unsupported_events": 1086, "ordering_defects": 83, "true_overhangs": 0, "collision_points": 1254, "unresolved_after_step10": 0, "fallback_supports": 1244, "local_reorientations": 10, "step8_diagnostics": 184932, "moves": 851252, "print_time_fw_h": 5.401239473647028, "y_turns": 0.1024163823495668, "tip_z_min": 30.432923355077367, "written": true}
+[bird] Boucle de deformation : res/test_models/turkish.stl
+Traceback (most recent call last):
+  File "R:\APEX_NEW_VERSION\slicer_engine\scripts\measure_bird_vs_fem.py", line 90, in <module>
+    main()
+    ~~~~^^
+  File "R:\APEX_NEW_VERSION\slicer_engine\scripts\measure_bird_vs_fem.py", line 55, in main
+    r = M.run_bird_pipeline(model, params)
+  File "R:\APEX_NEW_VERSION\slicer_engine\main.py", line 436, in run_bird_pipeline
+    loop_result = bird_loop.run(mesh_path, bird.loop, log=lambda m: print(f"[bird]   {m}"))
+  File "R:\APEX_NEW_VERSION\slicer_engine\pipeline\bird\loop.py", line 72, in run
+    tet = bd.load_and_tetrahedralize(stl_path, max_tet_volume=params.max_tet_volume,
+                                     flatten_bottom=params.layer_height)
+  File "R:\APEX_NEW_VERSION\slicer_engine\pipeline\bird\deformation.py", line 125, in load_and_tetrahedralize
+    tet = tetrahedralize(np.asarray(mesh.vertices), np.asarray(mesh.faces), max_tet_volume)
+  File "R:\APEX_NEW_VERSION\slicer_engine\pipeline\bird\deformation.py", line 110, in tetrahedralize
+    raise RuntimeError(f"TetGen (voie Bird) a echoue, code {proc.returncode} : {proc.stderr[-2000:]}")
+RuntimeError: TetGen (voie Bird) a echoue, code 3221226356 : 

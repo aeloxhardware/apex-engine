@@ -1,0 +1,19 @@
+[bird] Boucle de deformation : research/S4_Slicer/input_models/tilted benchy undertriangulated_repaired.stl
+[bird]   base figee : 108 cellules, 203 noeuds
+[bird]   24345 tetraedres
+[bird]   passe 1 : acceptee -> MAX_OVERHANG 20 (depl. 0.986 mm, zone 1.3 mm2)
+[bird]   passe 2 : acceptee -> MAX_OVERHANG 10 (depl. 0.787 mm, zone 1.4 mm2)
+[bird]   passe 3 : acceptee -> MAX_OVERHANG 5 (depl. 0.748 mm, zone 14.8 mm2)
+[bird]   passe 4 : acceptee -> MAX_OVERHANG 0 (depl. 0.989 mm, zone 19.5 mm2)
+[bird]   REPLI -- passe rejetee, essai a overhang=2.5
+[bird]   REPLI -- passe rejetee, essai a overhang=3.75
+[bird]   arret : repli meme avec le plus petit ecart sur overhang (4 passe(s) acceptee(s))
+[bird] Tranchage deforme : {'layers': 313, 'points': 334046, 'outside': 4793, 'ambiguous': 198, 'cut': 205, 'jumps': 5}
+[bird] Etape 8 : 333837 point(s), 213649 orientation(s) inatteignable(s)
+[bird]   borne de B selon la hauteur : 299 point(s)
+[bird] Etape 9 : 20 collision(s)
+[bird]   paliers : 5/20 resolu(s), 15 restante(s)
+[bird]   paliers : 0/15 resolu(s), 15 restante(s)
+[bird]   paliers : 0/15 resolu(s), 15 restante(s)
+[bird]   paliers : 0/15 resolu(s), 15 restante(s)
+[bird] Etape 10 : converged=True, 0 collision(s) non resolue(s)

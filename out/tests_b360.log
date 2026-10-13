@@ -1,0 +1,6 @@
+=========================== short test summary info ===========================
+FAILED tests/test_config_schema.py::test_generated_files_up_to_date - Asserti...
+1 failed, 465 passed in 239.69s (0:03:59)
+=========================== short test summary info ===========================
+FAILED tests/test_config_schema.py::test_generated_files_up_to_date - Asserti...
+1 failed, 465 passed in 240.49s (0:04:00)
