@@ -158,3 +158,83 @@ def test_self_intersecting_surface_is_repaired_before_tetgen(tmp_path):
                               np.cross(p[:, 2] - p[:, 0], p[:, 3] - p[:, 0]))).sum() / 6.0
     union = trimesh.boolean.union([a, b], engine="manifold").volume
     assert abs(volume - union) < 0.02 * union
+
+
+def test_native_least_squares_threads_bit_identical(overhang_tet):
+    """Solveur LSQ natif parallele (2026-10-13) : J x par lignes, J^T u par colonnes dans
+    l'ordre croissant des lignes, residus et jacobienne par tetraedre -- deformation,
+    rotations et cout IDENTIQUES AU BIT a 1 fil et a tous les coeurs."""
+    from core import _cpp
+    if not _cpp.available() or not hasattr(_cpp.module(), "bird_lsq_set_threads"):
+        pytest.skip("noyau natif sans solveur LSQ parallele")
+    previous = _cpp.set_enabled(True)
+    try:
+        tet = overhang_tet
+        topo, attrs = bd.calculate_tet_attributes(tet)
+        cell_mask, node_mask, _z = bd.planar_base_mask(tet, topo, 30.0, 0.2)
+        params = {**bd.DEFAULT_PARAMS, "MAX_OVERHANG": 30.0, "ROTATION_MULTIPLIER": 1.0,
+                  "ROTATE_ITERATIONS": 30, "DEFORM_ITERATIONS": 80}
+        base = (cell_mask, node_mask, tet.points.copy())
+        results = []
+        for threads in (1, 0):
+            _cpp.module().bird_lsq_set_threads(threads, 1)        # seuil 1 : le chemin parallele est exerce
+            results.append(bd.run_one_iteration(tet, topo, attrs, params, planar_base=base))
+        (tet_a, _a, info_a), (tet_b, _b, info_b) = results
+        assert np.array_equal(info_a["rotation_field"], info_b["rotation_field"])
+        assert np.array_equal(tet_a.points, tet_b.points)
+        assert info_a["deform_cost"] == info_b["deform_cost"]
+        assert np.abs(tet_a.points - tet.points).max() > 0.1          # garde : la passe deforme
+    finally:
+        _cpp.module().bird_lsq_set_threads(0, 4096)
+        _cpp.set_enabled(previous)
+
+
+def test_native_barycentric_candidates_match_lapack(overhang_tet):
+    """Retour deforme -> origine natif (apex_core.tet_barycentric_candidates) contre la
+    resolution LAPACK : tolerance declaree, pas le bit (LU transcrite ; Benchy passe 4 :
+    score <= 4,5e-9, point ramene <= 1,2e-10 mm). Les trois appelants sont compares :
+    candidats du tranchage deforme, `machine_toolpath.locate`, `PrintedSolid.phi_at`."""
+    from core import _cpp
+    from pipeline.bird import deformed_slicing as ds
+    from pipeline.bird.machine_toolpath import locate
+    from pipeline.bird.skin.zones import PrintedSolid
+    from scipy.spatial import cKDTree
+    if not _cpp.available() or not hasattr(_cpp.module(), "tet_barycentric_candidates"):
+        pytest.skip("noyau natif sans tet_barycentric_candidates (reconstruire cpp/lib)")
+    tet = overhang_tet
+    original = tet.points
+    shear = np.array([[1.0, 0.0, 0.15], [0.0, 1.0, 0.0], [-0.1, 0.0, 1.0]])
+    deformed = original @ shear.T + 0.05 * np.sin(original)
+    rng = np.random.default_rng(3)
+    t = rng.integers(0, len(tet.cells), 3000)
+    w = rng.dirichlet(np.ones(4), len(t))
+    points_def = np.einsum("nv,nvk->nk", w, deformed[tet.cells][t]) + rng.normal(0, 0.4, (len(t), 3))
+    points_org = np.einsum("nv,nvk->nk", w, original[tet.cells][t]) + rng.normal(0, 0.4, (len(t), 3))
+    out = {}
+    for native in (False, True):
+        previous = _cpp.set_enabled(native)
+        try:
+            assert (ds._barycentric_native() is not None) == native          # chemin demande reellement pris
+            d = ds.DeformedToOriginal(tet.cells, deformed, original, k=12)
+            tree = cKDTree(original[tet.cells].mean(axis=1))
+            out[native] = (d._candidates(points_def), locate(points_org, original, tet.cells, tree, k=12),
+                           PrintedSolid(tet.cells, original, deformed, k=12).phi_at(points_org))
+        finally:
+            _cpp.set_enabled(previous)
+    (c_py, loc_py, phi_py), (c_nat, loc_nat, phi_nat) = out[False], out[True]
+    for a, b in zip(c_py, c_nat):
+        if a.dtype.kind == "f":
+            fin = np.isfinite(a)
+            assert np.array_equal(fin, np.isfinite(b))
+            assert np.abs(a[fin] - b[fin]).max() < 1e-9
+        else:
+            assert np.array_equal(a, b)                                      # candidats, validite, comptes
+    valid = c_py[3]
+    assert valid.all(axis=1).sum() < len(valid) and valid.any()              # cas dedans ET dehors tires
+    # locate : ex aequo tranches par la regle explicite (LOCATE_TIE), plus par l'arrondi.
+    # Sans elle, 2 points sur 3000 differaient ici (scores egaux a 2e-16 pres).
+    assert np.array_equal(loc_py, loc_nat)
+    inside = np.isfinite(phi_py)
+    assert 0 < inside.sum() < len(phi_py)                                    # garde anti-faux-vert
+    assert np.array_equal(inside, np.isfinite(phi_nat))
+    assert np.abs(phi_py[inside] - phi_nat[inside]).max() < 1e-9

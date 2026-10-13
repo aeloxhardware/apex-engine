@@ -1,18 +1,66 @@
 // Voir apex/bird_lsq.hpp. Transcription de scipy (trf_no_bounds, lsmr, common.py).
 #include "apex/bird_lsq.hpp"
 
+#include "apex/internal/parallel_pool.hpp"
+
 #include <Eigen/Dense>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
 
 namespace apex {
+
+// Compteurs du dernier appel (phase 0 du plan Bird C++/Vulkan) : temps en
+// produits matrice-vecteur, residus, jacobienne, iterations LSMR. Mesure seule,
+// aucun effet sur le calcul.
+static LsqProfile g_last_profile;
+
+LsqProfile bird_lsq_last_profile() { return g_last_profile; }
+
+// Parallelisme (2026-10-13) : produits J x et J^T u, residus et jacobienne repartis
+// sur un pool persistant. Resultat IDENTIQUE AU BIT a 1 fil : chaque ligne de J x
+// garde sa somme dans l'ordre des colonnes, chaque composante de J^T u est sommee
+// dans l'ordre CROISSANT des lignes (transposee construite une fois), residus et
+// jacobienne sont independants par tetraedre / paire. Les reductions (produits
+// scalaires, normes) restent sequentielles.
+static std::atomic<int> g_lsq_threads{0};   // 0 = tous les coeurs, 1 = sequentiel
+static std::atomic<std::int64_t> g_lsq_min_parallel{4096};   // en dessous : un seul bloc
+
+void bird_lsq_set_threads(int threads, std::int64_t min_parallel) {
+    g_lsq_threads = threads < 0 ? 0 : threads;
+    g_lsq_min_parallel = min_parallel < 1 ? 1 : min_parallel;
+}
+
 namespace {
 
+internal::ParallelPool& lsq_pool() {
+    static internal::ParallelPool* pool =
+        new internal::ParallelPool(std::max(1u, std::thread::hardware_concurrency()));
+    return *pool;
+}
+
+// fn(begin, end) sur [0, count) : pool si autorise, sinon en un bloc.
+void parallel_for(std::int64_t count, const std::function<void(std::int64_t, std::int64_t)>& fn) {
+    if (g_lsq_threads.load() == 1) {
+        fn(0, count);
+        return;
+    }
+    lsq_pool().run(count, fn, g_lsq_min_parallel.load());
+}
+
 using Vec = std::vector<double>;
+using Clock = std::chrono::steady_clock;
+
+thread_local LsqProfile g_prof;
+
+double seconds_since(Clock::time_point t0) {
+    return std::chrono::duration<double>(Clock::now() - t0).count();
+}
 
 double dot(const Vec& a, const Vec& b) {
     double s = 0.0;
@@ -29,22 +77,52 @@ struct Csr {
     std::int64_t m = 0, n = 0;
     std::vector<std::int64_t> indptr, indices;
     std::vector<float> values;
+    // Transposee (structure seulement) : pour chaque colonne j, positions k dans
+    // `values` des coefficients de cette colonne, par ligne CROISSANTE ; t_rows = leurs lignes.
+    std::vector<std::int64_t> t_indptr, t_pos, t_rows;
+
+    void build_transpose() {
+        t_indptr.assign(n + 1, 0);
+        for (std::int64_t k = 0; k < static_cast<std::int64_t>(indices.size()); ++k) ++t_indptr[indices[k] + 1];
+        for (std::int64_t j = 0; j < n; ++j) t_indptr[j + 1] += t_indptr[j];
+        t_pos.assign(indices.size(), 0);
+        t_rows.assign(indices.size(), 0);
+        std::vector<std::int64_t> fill(t_indptr.begin(), t_indptr.end() - 1);
+        for (std::int64_t r = 0; r < m; ++r)           // lignes croissantes : ordre conserve par colonne
+            for (std::int64_t k = indptr[r]; k < indptr[r + 1]; ++k) {
+                const std::int64_t q = fill[indices[k]]++;
+                t_pos[q] = k;
+                t_rows[q] = r;
+            }
+    }
 
     // y = J x
     void matvec(const double* x, double* y) const {
-        for (std::int64_t r = 0; r < m; ++r) {
-            double s = 0.0;
-            for (std::int64_t k = indptr[r]; k < indptr[r + 1]; ++k) s += double(values[k]) * x[indices[k]];
-            y[r] = s;
-        }
+        const auto t0 = Clock::now();
+        parallel_for(m, [&](std::int64_t begin, std::int64_t end) {
+            for (std::int64_t r = begin; r < end; ++r) {
+                double s = 0.0;
+                for (std::int64_t k = indptr[r]; k < indptr[r + 1]; ++k) s += double(values[k]) * x[indices[k]];
+                y[r] = s;
+            }
+        });
+        g_prof.matvec_s += seconds_since(t0);
+        ++g_prof.matvec_calls;
     }
-    // y = J^T u
+    // y = J^T u : y[j] = somme sur les lignes CROISSANTES de J[r, j] u[r], comme
+    // l'accumulation sequentielle d'origine (0 + a1 + a2 + ...).
     void rmatvec(const double* u, double* y) const {
-        std::fill(y, y + n, 0.0);
-        for (std::int64_t r = 0; r < m; ++r) {
-            const double ur = u[r];
-            for (std::int64_t k = indptr[r]; k < indptr[r + 1]; ++k) y[indices[k]] += double(values[k]) * ur;
-        }
+        const auto t0 = Clock::now();
+        parallel_for(n, [&](std::int64_t begin, std::int64_t end) {
+            for (std::int64_t j = begin; j < end; ++j) {
+                double s = 0.0;
+                for (std::int64_t q = t_indptr[j]; q < t_indptr[j + 1]; ++q)
+                    s += double(values[t_pos[q]]) * u[t_rows[q]];
+                y[j] = s;
+            }
+        });
+        g_prof.rmatvec_s += seconds_since(t0);
+        ++g_prof.rmatvec_calls;
     }
 };
 
@@ -135,8 +213,10 @@ Vec lsmr(const ScaledOp& A, const Vec& b, double damp) {
     if (normar == 0 || normb == 0) return x;
     Vec Av(m), Atu(n);
     std::int64_t itn = 0;
+    ++g_prof.lsmr_calls;
     while (itn < maxiter) {
         ++itn;
+        ++g_prof.lsmr_iterations;
         A.matvec(v, Av);
         for (std::int64_t i = 0; i < m; ++i) u[i] = u[i] * -alpha + Av[i];
         beta = norm2(u);
@@ -262,12 +342,44 @@ void trust_region_2d(const double B[2][2], const double g[2], double Delta, doub
 }
 
 // trf_no_bounds, tr_solver="lsmr", regularize=True, damp=0, perte lineaire.
+LsqResult trf_impl(const Problem& prob, Csr J, Vec x, double ftol, double xtol, double gtol, int max_nfev,
+                   bool jac_scale_on);
+
+// Enveloppe de mesure : compteurs remis a zero, temps total, copie dans g_last_profile.
 LsqResult trf(const Problem& prob, Csr J, Vec x, double ftol, double xtol, double gtol, int max_nfev, bool jac_scale_on) {
+    g_prof = LsqProfile{};
+    g_prof.rows = J.m;
+    g_prof.cols = J.n;
+    g_prof.nnz = static_cast<std::int64_t>(J.indices.size());
+    const auto t0 = Clock::now();
+    LsqResult out = trf_impl(prob, std::move(J), std::move(x), ftol, xtol, gtol, max_nfev, jac_scale_on);
+    g_prof.total_s = seconds_since(t0);
+    g_prof.nfev = out.nfev;
+    g_last_profile = g_prof;
+    return out;
+}
+
+void timed_fun(const Problem& prob, const Vec& x, Vec& f) {
+    const auto t0 = Clock::now();
+    prob.fun(x, f);
+    g_prof.fun_s += seconds_since(t0);
+    ++g_prof.fun_calls;
+}
+
+void timed_jac(const Problem& prob, const Vec& x, Csr& J) {
+    const auto t0 = Clock::now();
+    prob.jac(x, J);
+    g_prof.jac_s += seconds_since(t0);
+    ++g_prof.jac_calls;
+}
+
+LsqResult trf_impl(const Problem& prob, Csr J, Vec x, double ftol, double xtol, double gtol, int max_nfev,
+                   bool jac_scale_on) {
     const std::int64_t m = J.m, n = J.n;
     Vec f(m), f_new(m), g(n), x_new(n), step(n), step_h(n), g_h(n), Jv(m);
-    prob.fun(x, f);
+    timed_fun(prob, x, f);
     for (double v : f) if (!std::isfinite(v)) throw std::runtime_error("residus non finis au point initial");
-    prob.jac(x, J);
+    timed_jac(prob, x, J);
     int nfev = 1;
     double cost = 0.5 * dot(f, f);
     J.rmatvec(f.data(), g.data());
@@ -327,7 +439,7 @@ LsqResult trf(const Problem& prob, Csr J, Vec x, double ftol, double xtol, doubl
             Jh.matvec(step_h, Jv);
             const double predicted_reduction = -(0.5 * dot(Jv, Jv) + dot(step_h, g_h));
             for (std::int64_t j = 0; j < n; ++j) { step[j] = d[j] * step_h[j]; x_new[j] = x[j] + step[j]; }
-            prob.fun(x_new, f_new);
+            timed_fun(prob, x_new, f_new);
             ++nfev;
             const double step_h_norm = norm2(step_h);
             bool finite = true;
@@ -357,7 +469,7 @@ LsqResult trf(const Problem& prob, Csr J, Vec x, double ftol, double xtol, doubl
             x = x_new;
             f = f_new;
             cost = cost_new;
-            prob.jac(x, J);
+            timed_jac(prob, x, J);
             J.rmatvec(f.data(), g.data());
             if (jac_scale_on) {
                 jac_scale(J, scale_inv, true);
@@ -422,26 +534,30 @@ public:
     }
 
     void fun(const Vec& x, Vec& f) const override {
-        for (std::int64_t c = 0; c < n_cells_; ++c) {
-            double dd[3][4];
-            diff(x, c, dd);
-            double s = 0.0;
-            for (int k = 0; k < 3; ++k)
-                for (int j = 0; j < 4; ++j) s += dd[k][j] * dd[k][j];
-            const double nrm = std::sqrt(s);
-            f[c] = nrm * nrm;                       // np.linalg.norm(...) ** 2
-        }
+        parallel_for(n_cells_, [&](std::int64_t begin, std::int64_t end) {
+            for (std::int64_t c = begin; c < end; ++c) {
+                double dd[3][4];
+                diff(x, c, dd);
+                double s = 0.0;
+                for (int k = 0; k < 3; ++k)
+                    for (int j = 0; j < 4; ++j) s += dd[k][j] * dd[k][j];
+                const double nrm = std::sqrt(s);
+                f[c] = nrm * nrm;                       // np.linalg.norm(...) ** 2
+            }
+        });
     }
 
     void jac(const Vec& x, Csr& J) const override {
-        for (std::int64_t c = 0; c < n_cells_; ++c) {
-            double dd[3][4];
-            diff(x, c, dd);
-            for (std::int64_t k = J.indptr[c]; k < J.indptr[c + 1]; ++k) {
-                const int slot = slot_[k];
-                J.values[k] = static_cast<float>(2.0 * dd[slot % 3][slot / 3]);
+        parallel_for(n_cells_, [&](std::int64_t begin, std::int64_t end) {
+            for (std::int64_t c = begin; c < end; ++c) {
+                double dd[3][4];
+                diff(x, c, dd);
+                for (std::int64_t k = J.indptr[c]; k < J.indptr[c + 1]; ++k) {
+                    const int slot = slot_[k];
+                    J.values[k] = static_cast<float>(2.0 * dd[slot % 3][slot / 3]);
+                }
             }
-        }
+        });
     }
 
 private:
@@ -531,6 +647,7 @@ LsqResult bird_lsq_deform(const double* base_vertices, std::int64_t n_points, co
                           const double* old_transformed, int max_nfev, double ftol, double xtol, double gtol) {
     DeformProblem prob(base_vertices, n_points, cells, n_cells, column, old_transformed);
     Csr J = prob.pattern(n_free);
+    J.build_transpose();
     Vec x0(n_free * 3);
     for (std::int64_t v = 0; v < n_points; ++v)
         if (column[v] >= 0)
@@ -544,6 +661,7 @@ LsqResult bird_lsq_rotation(const std::int64_t* pairs, std::int64_t n_pairs, con
                             double ftol, double xtol, double gtol) {
     RotationProblem prob(pairs, n_pairs, targets, n_targets, initial, n_cells, column, weight);
     Csr J = prob.pattern(n_free);
+    J.build_transpose();
     return trf(prob, std::move(J), Vec(n_free, 0.0), ftol, xtol, gtol, max_nfev, false);
 }
 

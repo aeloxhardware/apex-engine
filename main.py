@@ -429,7 +429,7 @@ class BirdPipelineResult:
 
 
 def run_bird_pipeline(mesh_path: str, params: PipelineParams,
-                      bird: Optional[BirdPipelineParams] = None) -> BirdPipelineResult:
+                      bird: Optional[BirdPipelineParams] = None, loop_result=None) -> BirdPipelineResult:
     """
     Voie Bird de bout en bout (limite #75) : boucle de deformation -> tranchage
     dans l'espace deforme (etapes 5-6 d'Apex) -> etape 8 (normale de couche Bird
@@ -437,14 +437,19 @@ def run_bird_pipeline(mesh_path: str, params: PipelineParams,
     -> etape 10. Repere de sortie : repere Bird = repere machine (piece centree
     sur l'axe du plateau, plateau a z = 0). Lissage non planaire P2-P5 si
     `bird.skin` (defaut). Ne remplace PAS la voie FEM (`run_pipeline`).
+    `loop_result` (optionnel) : deformation deja calculee (`bird_loop.from_saved_passes`),
+    la boucle n'est alors pas relancee.
     """
     from dataclasses import replace as _replace
     from pipeline.bird import deformed_slicing, loop as bird_loop, machine_toolpath as bird_step8
 
     bird = bird or BirdPipelineParams()
     check_model_fits_machine(mesh_path, params.machine_profile)
-    print(f"[bird] Boucle de deformation : {mesh_path}")
-    loop_result = bird_loop.run(mesh_path, bird.loop, log=lambda m: print(f"[bird]   {m}"))
+    if loop_result is None:
+        print(f"[bird] Boucle de deformation : {mesh_path}")
+        loop_result = bird_loop.run(mesh_path, bird.loop, log=lambda m: print(f"[bird]   {m}"))
+    else:
+        print(f"[bird] Deformation fournie ({loop_result.stop_reason}), boucle non relancee")
     print(f"[bird]   arret : {loop_result.stop_reason} ({len(loop_result.passes) - 1} passe(s) acceptee(s))")
 
     original, final = loop_result.original, loop_result.final
@@ -492,11 +497,14 @@ def run_bird_pipeline(mesh_path: str, params: PipelineParams,
 
 
 def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_path: str,
-                         pivot_to_tip: Optional[float] = None):
+                         pivot_to_tip: Optional[float] = None, check_travel: bool = True):
     """Export G-code controle (comme scripts/export_model_gcode.py) : pointe jamais
     sous le plateau (`strict`), hauteur mini de la VRAIE tete selon B pour les
-    degagements, L = derniere valeur de config/pivot_to_tip.json sinon 46 mm."""
-    from file_io.gcode_export import GcodeParams, export_gcode, head_zlow_from_table, toolpath_arrays
+    degagements, L = derniere valeur de config/pivot_to_tip.json sinon 46 mm.
+    `check_travel` : degagements controles contre la matiere deja deposee
+    (`material_travel_check`, comme la chaine de recherche), en natif si actif."""
+    from file_io.gcode_export import (GcodeParams, export_gcode, head_zlow_from_table, material_travel_check,
+                                      toolpath_arrays)
     from file_io.pivot_length import current_pivot_to_tip
     from pipeline import step9_collision_sim as s9
     machine, sim = params.machine_profile, params.collision
@@ -512,7 +520,9 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
                          [:, 2].min() for b in grid_b])
         head_zlow = head_zlow_from_table(grid_b, zlow)
     gp = GcodeParams(pivot_to_tip=pivot_to_tip, strict=True)
-    return export_gcode(toolpath_arrays(toolpath), machine, gp, out_path, head_zlow=head_zlow)
+    arrays = toolpath_arrays(toolpath)
+    travel_check = material_travel_check(arrays, machine, gp) if check_travel else None
+    return export_gcode(arrays, machine, gp, out_path, head_zlow=head_zlow, travel_check=travel_check)
 
 
 def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
@@ -764,6 +774,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--method", choices=("fem", "bird"), default="fem",
         help="Voie de tranchage : fem (champ scalaire, defaut) ou bird (deformation, limite #75).",
     )
+    parser.add_argument(
+        "--from-pass", default=None, metavar="PREFIXE,K",
+        help="Voie bird : repartir de la passe K deja calculee (<PREFIXE>cells.npy, pass0.npy, passK.npy, "
+             "ex. research/S4_Slicer/output_models/loop_dino_pin_,5) sans relancer la boucle de deformation.",
+    )
     args = parser.parse_args(argv)
 
     params = PipelineParams(resolution=args.resolution)
@@ -771,11 +786,18 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.method == "bird":
         # Voie Bird (limite #75) : pas de GLB pour l'instant (le visualiseur lit un PipelineResult FEM).
-        bird_result = run_bird_pipeline(args.mesh_path, params)
+        loop_result = None
+        if args.from_pass:
+            from pipeline.bird import loop as bird_loop
+            prefix, k = args.from_pass.rsplit(",", 1)
+            cells, p0, pk = (np.load(f"{prefix}{s}.npy") for s in ("cells", "pass0", f"pass{k}"))
+            loop_result = bird_loop.from_saved_passes(cells, p0, pk, reason=f"passe {k} enregistree")
+        bird_result = run_bird_pipeline(args.mesh_path, params, loop_result=loop_result)
         if args.output_gcode:
             _lines, report = export_gcode_checked(bird_result.adjusted_toolpath, params, args.output_gcode)
             print(f"[main] G-code ecrit : {args.output_gcode} ({report.moves} mouvements, "
-                  f"{report.print_time_fw_s / 3600:.2f} h tous axes, Y cumule {report.y_turns:.1f} tours)")
+                  f"{report.print_time_fw_s / 3600:.2f} h tous axes, Y cumule {report.y_turns:.1f} tours, "
+                  f"degagements en contact {report.travel_collisions})")
         return 0
 
     result = run_pipeline(args.mesh_path, params)

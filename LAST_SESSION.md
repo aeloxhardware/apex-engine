@@ -6,6 +6,89 @@ rendu est dans le commit `2b7edc9`). **Plan approuvé en cours d'exécution :**
 
 CODE SECRET : 7489
 
+## >>> SESSION DU 2026-10-13 (chantier « Bird en C++ puis Vulkan ») — LIRE EN TOUT PREMIER <<<
+
+**Plan approuvé** : `C:\Users\test_\.claude\plans\port-e-tout-bird-hidden-nygaard.md` (étape −1,
+phases 0 à 3). Décisions de l'utilisateur : portée = TOUT Bird ; matériel = RTX 3090 seulement ;
+précision GPU (fp32/fp64) décidée APRÈS mesure ; démarrage immédiat. Détail technique et
+chiffres : **CLAUDE.md #76 et #77** ; suivi : **DT.md**. **EN PAUSE à la demande de l'utilisateur
+(avant un /compact)** : reprendre au point « Suite » ci-dessous quand il le dit.
+
+### Git
+- Branche `session-2026-10-13` (créée depuis `main`), un commit `fc473c2d` (travail du 06 au
+  13/10 + `place_on_platform`). **Tout ce qui suit n'est PAS commité.** Rien n'est poussé.
+- **Attention** : après ce commit, l'index contient des artefacts INDEXÉS qui ne viennent pas de
+  cette session (`build/.cmake/...`, `build/CMakeFiles/...`, `cpp/build/...`, `.pytest_cache`,
+  `_skipped.face/.node`), probablement une autre session (`slicer_ux`). Ne PAS les commiter sans
+  vérifier : ajouter les fichiers source un par un, comme pour `fc473c2d`.
+
+### Fait aujourd'hui (tout mesuré)
+1. **Liste « moins d'une heure »** : commit ; `place_on_platform` (défaut actif, #76 : death était à
+   z = 51,4 mm, turkish à 30,3 mm) ; G-code régénérés (`out/share/*_v6.zip`) ; suite complète.
+2. **Étape −1 FAITE** : production Bird basculée sur `main.py --method bird` (#77).
+   - `material_travel_check` (contrôle des dégagements) dans le moteur et dans l'export NATIF
+     (`TravelCheck`, `PastMaterialIndex::any_past_within`, `apex_core.EXPORT_TRAVEL_CHECK`),
+     texte identique ; `main.export_gcode_checked(check_travel=True)`.
+   - `pipeline.bird.loop.from_saved_passes` + `run_bird_pipeline(loop_result=)` + option
+     `main.py --from-pass=<préfixe>,<k>`.
+   - À entrée identique (passes 4 / 5 de la recherche) : mêmes collisions, zones, Y, filament ;
+     Benchy 580 → 250 s, dino 1 067 → 383 s. **Production : `out/share/benchy_pass4_v7.zip`,
+     `dino_pass5_v7.zip`** (sources sur `H:/apex_bird_compare_2026-10-13/fixed/`).
+3. **Phase 0 FAITE** : `scripts/profile_bird.py` (options `--from-pass`, `--gcode`, `--no-skin`),
+   compteurs natifs `apex_core.bird_lsq_last_profile()`. Profils dans
+   `out/bird/profile_bird_2026-10-13.jsonl` et `out/bird/profile_*.log` : Benchy 300,6 s,
+   dino 373 s (depuis la passe 5), death 714 s, l-triple ~40 s, l_shape 29 s.
+4. **Gains identiques au bit** (G-code du Benchy comparé OCTET PAR OCTET, avec et sans boucle) :
+   - P5 parallèle `SkinCheckIndex.check_zone_parallel` (rang d'insertion = préfixe visible) :
+     47,7 → 8,4 s ;
+   - solveur LSQ parallèle (pool persistant `cpp/include/apex/internal/parallel_pool.hpp`,
+     transposée CSR, `bird_lsq_set_threads(threads, min_parallel)`) : déformation 44,6 → 25,8 s ;
+   - densification de `material_travel_check` vectorisée : 9,7 → 0,5 s ;
+   - candidats barycentriques (`workers=-1`, lots de 200 000 points toutes couches, fils) :
+     20,3 → 16,4 s seulement (numpy partage mal la résolution 3×3) ;
+   - **Benchy complet 300,6 → 226,8 s ; depuis la passe 4 : 166,9 s.**
+5. **Phase 1 (socle Vulkan) FAITE** : `cpp/CMakeLists.txt` option `APEX_WITH_VULKAN`,
+   `scripts/build_cpp.py --vulkan`, volk + VMA dans `cpp/third_party/` (licences MIT, fichiers
+   `VERSION.txt` — **jamais un fichier nommé `VERSION`** dans un dossier d'en-têtes : MSVC le
+   prend pour `<version>`), `cpp/shaders/*.comp`, `apex/gpu/vk_context.hpp|vk_internal.hpp`,
+   `core._cpp.gpu_status() / gpu_enabled() / set_gpu_enabled()` (`APEX_USE_GPU`, défaut éteint).
+   RTX 3090, fp64 actif, `saxpy` identique au bit (`tests/test_gpu_runtime.py`). Aucun noyau métier.
+6. **Règle du maillage grossier de la boucle Bird DÉSACTIVÉE par défaut** (décision utilisateur,
+   `BirdLoopParams.max_mean_tet_volume = None`) : elle faisait passer le dino de 4 263 à 151 695
+   tétraèdres.
+7. **Module installé** : `cpp/lib` reconstruit avec `--vulkan` (tout ce qui précède dedans).
+   Modules de travail : `cpp/build_dev`, `cpp/build_vk2` (jetables).
+8. **Tests : 504/504** en `APEX_USE_CPP=0`, `=1`, `=1` + `APEX_USE_GPU=1` (avant le changement
+   du point 6, qui ne touche aucun test : 26/26 sur les fichiers Bird et orchestrateur après).
+
+### Constat non corrigé
+- Le contrôle des dégagements hérité de la recherche ne teste que 16 points sur 46 mm d'axe pour un
+  rayon de 0,2 mm : un cordon entre deux échantillons n'est pas vu. À reprendre (capsule) avec mesure.
+
+### Fait après la reprise (même jour, détail CLAUDE.md #77)
+- **Barycentriques natifs** (`apex_core.tet_barycentric_candidates`, tolérance déclarée, ×20) dans
+  les trois appelants ; `APEX_NATIVE_BARY=0` pour comparer.
+- **Règle explicite d'ex aequo de `locate`** (`LOCATE_TIE = 1e-9`, change les deux chemins).
+- **Raffinement par lots** (identique à l'octet). Benchy et dino vérifiés de bout en bout ;
+  fichiers sur `H:/apex_bird_compare_2026-10-13/bary2/` (nouvelle référence d'identité :
+  `benchy_refine.gcode`, `dino_refine.gcode`).
+- Module `cpp/lib` réinstallé (`--vulkan`). **Toujours rien de commité.**
+
+### Suite (ordre du profil, plan approuvé)
+1. Instrumenter le tranchage déformé du dino (~70 s non attribuées sur 99,6 s ; P3 probable).
+2. P2 « dernier moment accessible » (19 s Benchy, 55 s death ; pool de processus aujourd'hui).
+3. Étape 8 Bird en tableaux (`run_from_passes`, ~12 s de boucle d'objets Python).
+4. Dijkstra (networkx) + champ initial + topologie en C++ (17 s Benchy, 63 s death) ; reproduire le
+   départage exact de networkx.
+5. P4 (chaînage `lines_multi`, doublons, fusion des micro-zones).
+6. Phase 3 GPU : uniquement là où le C++ multithread laisse plus de 1 s par appel.
+- **Méthode de contrôle d'identité** (à refaire après chaque pas exact) :
+  `APEX_USE_CPP=1 .venv/Scripts/python.exe -u scripts/profile_bird.py "research/S4_Slicer/input_models/tilted benchy undertriangulated_repaired.stl" --from-pass="research/S4_Slicer/output_models/loop_tilted_benchy_undertriangulated_repaired_pin_,4" --gcode=H:/.../x.gcode`
+  puis `cmp` avec `H:/apex_bird_compare_2026-10-13/fixed/tilted benchy undertriangulated_repaired_bird.gcode`
+  (et, avec la boucle : sans `--from-pass`, contre `H:/apex_bird_compare_2026-10-13/tilted benchy undertriangulated_repaired_bird.gcode`).
+- Rappels : un seul calcul lourd à la fois (machine 12 cœurs ; une compilation complète fausse un
+  profil) ; tuer les processus enfants après un arrêt ; sorties lourdes sur H:.
+
 ## >>> SUITE DU 2026-10-06 (soir, autonome hors UI) — LIRE D'ABORD <<<
 
 Détail dans CLAUDE.md, limites #72 et #73 ; état courant dans `DT.md`. Rien n'est commité.

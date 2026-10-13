@@ -1,9 +1,9 @@
 # Dev Tracker (DT) — Apex Slicer
 
-État au **2026-10-13** (liste « Moins d'une heure » traitée ; le reste date du 2026-10-08). Convention de rédaction : section « Dev Tracker » de `CLAUDE.md`
+État au **2026-10-13, soir** (chantier « Bird en C++ puis Vulkan » démarré : étape −1, phase 0, phase 1 ; voir #77). Convention de rédaction : section « Dev Tracker » de `CLAUDE.md`
 (🟢 résolu · ⏳ en cours · ⬛ non traité, sans successeur · ♦️ à résoudre avant de continuer).
 Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session : `LAST_SESSION.md`.
-**Tests : 495/495 dans les deux positions de `APEX_USE_CPP`** (2026-10-13, suite complète).
+**Tests : 505/505 dans les positions `APEX_USE_CPP=0`, `=1` et `=1` + `APEX_USE_GPU=1`** (2026-10-13 soir, suite complète).
 
 ## Ce qui a été développé
 - 🟢 Correctifs : parois trouées (#65), étape 8 (tête retournée, #58), étape 5 (couche perdue, #60), étape 10 (réorientation impossible en mode exact, #66), étape 3 (tri stable), trous du Benchy (#68), pointe qui quittait sa trajectoire (`max_tip_deviation`, #61), plateau de step9 à z = origine (+0,5 mm auparavant, #71), ingestion de turkish décalé (`_tetrahedralize_with_translation_retry`, #72).
@@ -23,8 +23,15 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 - 🟢 **2026-10-07** — Échec isolé de `test_export_extrusion_and_retraction` expliqué : une session `slicer_ux` éditait `gcode_export.py` pendant la suite de tests (#74). Aucun défaut de code.
 - 🟢 **2026-10-13** — Pose du modèle sur le plateau à l'ingestion (`place_on_platform`, activé par défaut, #76) : death était à z = 51,4 mm et turkish à 30,3 mm du plateau. Mesuré sur les 4 modèles, neutre à l'ordre du bruit près, 0 collision plateau.
 - 🟢 **2026-10-13** — G-code régénérés : salon FEM identique au bit ; Benchy et dino par la chaîne Bird → `out/share/*_v6.zip`. Temps réestimés (Z recommandé / `config.g` actuel) : Benchy 1,89 / 9,76 h, dino 2,62 / 14,90 h, l-triple 0,23 / 0,80 h, l_shape 0,20 / 1,15 h.
+- 🟢 **2026-10-13** — **Production Bird basculée sur `main.py --method bird`** (étape −1, #77) : à entrée identique (passes 4 et 5 de la recherche), mêmes collisions, mêmes zones exclues, mêmes tours de Y et filament ; Benchy 580 → 250 s, dino 1 067 → 383 s ; contrôle des dégagements porté dans l'export natif (texte identique) ; `--from-pass=<préfixe>,<k>`. G-code de production **`out/share/*_v7.zip`**.
+- 🟢 **2026-10-13** — Phase 0 (profil par phase, `scripts/profile_bird.py`) : Benchy 300,6 s, dino 373 s, death 714 s (#77).
+- 🟢 **2026-10-13** — Gains identiques au bit (G-code du Benchy comparé octet par octet) : P5 parallèle 47,7 → 8,4 s, solveur LSQ parallèle (déformation 44,6 → 25,8 s), densification de l'export 9,7 → 0,5 s, candidats 20,3 → 16,4 s ; **Benchy complet 300,6 → 226,8 s**.
+- 🟢 **2026-10-13** — Socle Vulkan (phase 1) : `--vulkan`, volk + VMA, `gpu_status()`, `APEX_USE_GPU` ; RTX 3090, float64 actif, `saxpy` identique au bit au CPU.
+- 🟢 **2026-10-13** — Règle du maillage grossier de la boucle Bird **désactivée par défaut** (décision de l'utilisateur ; `BirdLoopParams.max_mean_tet_volume = None`) : elle retétraédrisait le dino de 4 263 à 151 695 tétraèdres (#77).
 
 ## Réponses de l'utilisateur
+- 🟢 **2026-10-13** : règle du maillage grossier désactivée par défaut ; candidats barycentriques en C++ acceptés avec tolérance déclarée.
+- 🟢 **2026-10-13** : barycentriques natifs (×20, tolérance déclarée, #77) + règle explicite d'ex aequo de `locate` + raffinement par lots (identique à l'octet) ; Benchy et dino vérifiés de bout en bout (mêmes collisions par tour et finales ; dino 158 au lieu de 157 à l'étape 9, toutes résolues). Candidats : Benchy 16,4 → 1,2 s, dino 15,2 → 3,4 s.
 - 🟢 `config.g` est le fichier RRF actif ; pivot à 46 mm ; zéro Z = buse au contact du plateau ; le firmware ne fait aucune cinématique ; Y est l'axe de rotation actif ; sens physique de B (croquis : B négatif = pointe vers l'extérieur) ; RRF = imprimante bac à sable ; GPU : Vulkan ; normale par point activée.
 - 🟢 **2026-10-07** : supports de l'étape 10 = vraies collisions seulement (recommandation retenue). La méthode de mesure de L est CONFIDENTIELLE (brevetable, matériel pas encore construit) : jamais publique, jamais versionnée.
 

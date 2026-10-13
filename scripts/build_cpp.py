@@ -90,6 +90,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="Construit dans cpp/build_dev/ (module dans cpp/build_dev/lib) sans toucher "
                              "cpp/lib, verrouille par un calcul en cours ; charger avec "
                              "APEX_CPP_LIB_DIR=cpp/build_dev/lib")
+    parser.add_argument("--vulkan", action="store_true",
+                        help="Construit le backend Vulkan compute (APEX_WITH_VULKAN, SDK : variable VULKAN_SDK). "
+                             "Sans cette option, le backend est explicitement desactive.")
     args = parser.parse_args(argv)
     global BUILD_DIR, LIB_DIR
     if args.dev:
@@ -134,6 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         f"-DPython_EXECUTABLE={sys.executable}",
         f"-Dpybind11_DIR={pybind11.get_cmake_dir()}",
         f"-DAPEX_LIB_DIR={LIB_DIR.as_posix()}",
+        f"-DAPEX_WITH_VULKAN={'ON' if args.vulkan else 'OFF'}",
     ]
     print("[build_cpp] configuration...")
     if subprocess.run(configure, env=env).returncode != 0:

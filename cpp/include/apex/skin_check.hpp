@@ -37,6 +37,19 @@ public:
                     double plate_radius, double margin, double reach, double step,
                     std::uint8_t* plate_hit, double* distance) const;
 
+    // Meme resultat que check_zone, IDENTIQUE AU BIT, reparti sur `threads` fils
+    // (<= 0 : nombre de coeurs). La couche temporaire de check_zone ne fait que
+    // croitre dans l'ordre d'insertion ; l'ensemble vu par un point teste est donc
+    // un PREFIXE de cet ordre (bizarrerie des blocs de 256 points comprise : elle
+    // allonge le prefixe d'un segment). Chaque point de la zone porte son rang ; un
+    // point teste ne lit que les rangs < sa limite. Le minimum d'un meme ensemble
+    // de distances ne depend pas de l'ordre de parcours.
+    void check_zone_parallel(const double* head, std::int64_t n_head, const double* axes, std::int64_t n_axes,
+                             const double* pts, const std::int64_t* starts, std::int64_t n_lines,
+                             const double* cosv, const double* sinv, const std::int64_t* tested,
+                             std::int64_t n_tested, double plate_radius, double margin, double reach, double step,
+                             std::uint8_t* plate_hit, double* distance, int threads = 0) const;
+
 private:
     struct Layer {
         std::vector<double> xyz;

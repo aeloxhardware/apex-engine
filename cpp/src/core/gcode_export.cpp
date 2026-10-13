@@ -51,7 +51,7 @@ inline double norm4(double a, double b, double c, double d) { return std::sqrt(a
 std::string export_gcode_body(const double* pos, const double* ang, const double* ext, const std::uint8_t* skin,
                               const double* slow, std::int64_t n, const std::vector<double>& zgrid,
                               const std::vector<double>& zvals, const GcodeExportParams& P,
-                              GcodeExportStats& st) {
+                              GcodeExportStats& st, const TravelCheck* travel) {
     std::string out;
     out.reserve(static_cast<std::size_t>(n) * 60);
     const double inf = std::numeric_limits<double>::infinity();
@@ -192,8 +192,37 @@ std::string export_gcode_body(const double* pos, const double* ang, const double
         out += '\n';
     };
 
-    // clearance_move : rend l'axe ('Z', 'R', 'n' pour none) et le point degage
-    auto clearance = [&](const double* p, double b, std::array<double, 3>& cand) -> char {
+    // _rodrigues_rotate (core/geometry_utils.py) sur un vecteur, meme ordre
+    // d'operations que la version par lots : v*c + (k x v)*s + (k*dot)*(1-c).
+    auto rodrigues = [](const double* v, const double* k, double angle_deg, double* out3) {
+        const double a = angle_deg * kDegToRad;
+        const double c = std::cos(a), s = std::sin(a);
+        const double dot = v[0] * k[0] + v[1] * k[1] + v[2] * k[2];
+        const double cr[3] = {k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]};
+        for (int j = 0; j < 3; ++j) out3[j] = v[j] * c + cr[j] * s + k[j] * dot * (1.0 - c);
+    };
+    // travel_check(i, point, b) de material_travel_check : points de l'axe de la tete
+    // (0, 0, t) tournes par B puis par C = degrees(atan2(x, -y)), translates au point.
+    std::vector<double> axis_pts(travel ? travel->axis_t.size() * 3 : 0);
+    auto blocked = [&](std::int64_t i, const double* p, double b) -> bool {
+        const double c = std::atan2(p[0], -p[1]) * kRadToDeg;
+        for (std::size_t j = 0; j < travel->axis_t.size(); ++j) {
+            const double v[3] = {0.0, 0.0, travel->axis_t[j]};
+            double vb[3], vc[3];
+            rodrigues(v, travel->axis_b, b, vb);
+            rodrigues(vb, travel->axis_c, c, vc);
+            for (int k = 0; k < 3; ++k) axis_pts[j * 3 + k] = vc[k] + p[k];
+        }
+        return travel->material->any_past_within(axis_pts.data(), static_cast<std::int64_t>(travel->axis_t.size()),
+                                                 i, travel->radius);
+    };
+
+    // clearance_move : rend l'axe ('Z', 'R', 'n' pour none) et le point degage.
+    // `check_index` >= 0 (et `travel`) : controle de contact, pas doubles jusqu'a
+    // max_factor, premier candidat sur pour le plateau garde si tout est bloque.
+    auto clearance = [&](const double* p, double b, std::array<double, 3>& cand,
+                         std::int64_t check_index = -1) -> char {
+        const bool check = travel != nullptr && check_index >= 0;
         const double br = b * kDegToRad;
         const double sr = std::sin(br), cz = std::cos(br);
         const double x = p[0], y = p[1];
@@ -201,19 +230,28 @@ std::string export_gcode_body(const double* pos, const double* ang, const double
         double rad[3] = {1.0, 0.0, 0.0};
         if (r > 1e-9) { rad[0] = x / r; rad[1] = y / r; rad[2] = 0.0 / r; }
         const char order[2] = {std::fabs(cz) >= std::fabs(sr) ? 'Z' : 'R', std::fabs(cz) >= std::fabs(sr) ? 'R' : 'Z'};
-        for (char axis : order) {
-            double step[3];
-            if (axis == 'Z') {
-                step[0] = 0.0; step[1] = 0.0; step[2] = P.travel_clearance * (cz >= 0 ? 1.0 : -1.0);
-            } else {
-                if (r < 1e-9 && sr < 0) continue;
-                const double s = sr >= 0 ? 1.0 : -1.0;
-                for (int k = 0; k < 3; ++k) step[k] = rad[k] * P.travel_clearance * s;
+        std::vector<double> factors{1.0};
+        while (check && factors.back() * 2.0 <= travel->max_factor + 1e-9) factors.push_back(factors.back() * 2.0);
+        char fb_axis = 0;
+        std::array<double, 3> fb{};
+        for (const double factor : factors) {
+            for (char axis : order) {
+                double step[3];
+                if (axis == 'Z') {
+                    step[0] = 0.0; step[1] = 0.0; step[2] = P.travel_clearance * factor * (cz >= 0 ? 1.0 : -1.0);
+                } else {
+                    if (r < 1e-9 && sr < 0) continue;
+                    const double s = sr >= 0 ? 1.0 : -1.0;
+                    for (int k = 0; k < 3; ++k) step[k] = rad[k] * P.travel_clearance * factor * s;
+                }
+                for (int k = 0; k < 3; ++k) cand[k] = p[k] + step[k];
+                const double lowest = cand[2] + (has_table ? head_zlow(b) : 0.0);
+                if (!(lowest >= P.platform_margin || cand[2] >= p[2])) continue;
+                if (!check || !blocked(check_index, cand.data(), b)) return axis;
+                if (fb_axis == 0) { fb_axis = axis; fb = cand; }
             }
-            for (int k = 0; k < 3; ++k) cand[k] = p[k] + step[k];
-            const double lowest = cand[2] + (has_table ? head_zlow(b) : 0.0);
-            if (lowest >= P.platform_margin || cand[2] >= p[2]) return axis;
         }
+        if (fb_axis != 0) { cand = fb; return fb_axis; }
         cand = {p[0], p[1], p[2]};
         return 'n';
     };
@@ -254,9 +292,12 @@ std::string export_gcode_body(const double* pos, const double* ang, const double
                 retract(-1.0);
                 st.retractions++;
                 const double b0 = ang[(i - 1) * 2 + 1];
-                const char a0 = clearance(q, b0, up0);
-                clearance(p, b, up1);
+                const char a0 = clearance(q, b0, up0, i);
+                clearance(p, b, up1, i);
                 count_axis(a0);
+                if (travel != nullptr)
+                    st.travel_collisions += static_cast<std::int64_t>(blocked(i, up0.data(), b0)) +
+                                            static_cast<std::int64_t>(blocked(i, up1.data(), b));
                 move(up0.data(), b0, P.travel_speed, 0.0, "degagement " + axis_name(a0));
                 move(up1.data(), b, P.travel_speed, 0.0, "");
                 move(p, b, P.travel_speed, 0.0, "");

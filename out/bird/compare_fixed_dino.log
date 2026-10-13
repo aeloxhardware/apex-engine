@@ -1,0 +1,15 @@
+[bird] Deformation fournie (passe 5 enregistree), boucle non relancee
+[bird]   arret : passe 5 enregistree (1 passe(s) acceptee(s))
+[bird] Tranchage deforme + lissage non planaire (P2-P5)
+[skin] tour 1 : 240 point(s) de collision, 40 zone(s) en contact ; P4 cache 0 reprise(s) / 70 calcul(s)
+[skin] tour 2 : 17 point(s) de collision, 6 zone(s) en contact ; P4 cache 12 reprise(s) / 94 calcul(s)
+[skin] tour 3 : 7 point(s) de collision, 2 zone(s) en contact ; P4 cache 39 reprise(s) / 98 calcul(s)
+[skin] tour 4 : 0 point(s) de collision, 0 zone(s) en contact ; P4 cache 67 reprise(s) / 101 calcul(s)
+[skin] verification sur le corps creuse : 6 point(s) -> zones retirees
+[skin] exclusion 1 : zones retirees [4], points restants 0
+[bird] Etape 8 : 856245 point(s), 293266 orientation(s) inatteignable(s)
+[bird]   borne de B selon la hauteur : 917 point(s)
+[bird] Etape 9 : 157 collision(s)
+[bird]   paliers : 157/157 resolu(s), 0 restante(s)
+[bird] Etape 10 : converged=True, 0 collision(s) non resolue(s)
+{"model": "dino.stl", "way": "bird", "resolution": 1.5, "from_pass": "research/S4_Slicer/output_models/loop_dino_pin_,5", "tetrahedra": 4263, "accepted_passes": 1, "stop_reason": "passe 5 enregistree", "layers": 310, "skin_timings": {"tranchage non creuse": 13.87579607963562, "P2 zones": 36.289536476135254, "P4 trajectoires": 49.05078458786011, "P5 controle (boucle)": 14.369805097579956, "tranchage creuse (P3)": 112.73486828804016, "P5 controle (exhaustif)": 101.92381548881531}, "skin_excluded_zones": [4], "compute_s": 383.4, "points": 856245, "unsupported_fraction": 0.00018395254258735696, "unsupported_events": 157, "ordering_defects": 149, "true_overhangs": 0, "collision_points": 0, "unresolved_after_step10": 0, "fallback_supports": 0, "local_reorientations": 0, "step8_diagnostics": 293266, "moves": 916024, "lines": 919567, "retractions": 1745, "clearance_axes": {"Z": 1069, "R": 677, "none": 0}, "travel_collisions": 0, "print_time_h": 2.657344896879068, "print_time_fw_h": 2.4465395637830585, "y_turns": 620.5059491971111, "tip_z_min": 0.16685289837044281, "head_z_min": 0.9771163016311242, "filament_m": 6.421378666449244, "written": true, "export_s": 14.1}

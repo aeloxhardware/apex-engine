@@ -22,6 +22,22 @@
 
 namespace apex {
 
+// Compteurs du dernier appel a bird_lsq_deform / bird_lsq_rotation (mesure de la
+// phase 0 du plan Bird C++/Vulkan). Aucun effet sur le calcul.
+struct LsqProfile {
+    double total_s = 0.0, matvec_s = 0.0, rmatvec_s = 0.0, fun_s = 0.0, jac_s = 0.0;
+    std::int64_t matvec_calls = 0, rmatvec_calls = 0, fun_calls = 0, jac_calls = 0;
+    std::int64_t lsmr_calls = 0, lsmr_iterations = 0, nfev = 0;
+    std::int64_t rows = 0, cols = 0, nnz = 0;
+};
+LsqProfile bird_lsq_last_profile();
+
+// Nombre de fils des produits matrice-vecteur, residus et jacobienne (0 = tous les
+// coeurs, 1 = sequentiel). Resultat identique au bit quel que soit ce nombre.
+// `min_parallel` : taille de boucle en dessous de laquelle on reste sur un bloc
+// (4096 par defaut ; 1 dans les tests, pour exercer le chemin parallele).
+void bird_lsq_set_threads(int threads, std::int64_t min_parallel = 4096);
+
 struct LsqResult {
     std::vector<double> x;
     double cost = 0.0;
