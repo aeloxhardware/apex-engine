@@ -12,6 +12,17 @@ sans redemander les spécifications déjà actées. L'IA peut et doit modifier c
 
 ---
 
+## RAPPELS PERMANENTS À L'UTILISATEUR (demande du 2026-10-18)
+
+**À la fin de CHAQUE réponse, rappeler en une ligne chacun des points ci-dessous, tant que
+`DT.md` (section « RAPPELS PERMANENTS ») ne le marque pas fait `[x]`.** Ne cesser un rappel
+que lorsque l'utilisateur dit l'avoir fait et que la case est cochée dans `DT.md`.
+1. **Modifier les paramètres du firmware** (`config.g` : `M203 Z8000`, `M201 Z1500`) — bloquant
+   pour les temps d'impression du salon.
+2. **Essayer le champ scalaire multibranche** (FEM) — **priorité majeure** : seule piste
+   restante contre le défaut de fond du champ unique sur les surplombs négatifs
+   (limites #51 à #54, aucune mesure à ce jour).
+
 ## COMMENT LIRE CE FICHIER (à lire AVANT le reste)
 
 Ce document est long, dense et écrit avec assurance. **Cette assurance n'est

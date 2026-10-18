@@ -5,6 +5,11 @@
 Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session : `LAST_SESSION.md`.
 **Tests : 505/505 dans les positions `APEX_USE_CPP=0`, `=1` et `=1` + `APEX_USE_GPU=1`** (2026-10-13 soir, suite complète).
 
+## ⚠️ RAPPELS PERMANENTS — à répéter à CHAQUE réponse tant que la case n'est pas cochée (demande de l'utilisateur, 2026-10-18)
+- ♦️ **[ ] Modifier les paramètres du firmware** dans `config.g` : `M203 Z8000` et `M201 Z1500` (Z actuel : 400 mm/min, 70 mm/s²). Bloquant : le pivot couple Z à B, le Benchy passe de 1,66 h à ~9,7 h, et les temps d'impression du salon (MFR 2026) en dépendent. **Cocher « [x] » ici quand l'utilisateur dit l'avoir fait ; seulement alors, cesser le rappel.**
+- ♦️ **[ ] Essayer le champ scalaire multibranche (FEM) — PRIORITÉ MAJEURE.** Un champ unique ne peut pas croître depuis le plateau ET décroître sous une partie suspendue (limites #51 à #54) : c'est le défaut de fond de la voie FEM sur les surplombs négatifs, et la seule piste restante (six mécanismes ont échoué avant l'audit du circuit). Idée : une branche de champ par partie portée, chacune croissant depuis SON attache, raccordées aux jonctions ; variante simple : poids de direction par région. Aucune mesure à ce jour. À mesurer sur les QUATRE modèles de `res/test_models/` avant toute activation par défaut. **Cocher « [x] » ici quand l'utilisateur dit l'avoir essayé ; seulement alors, cesser le rappel.**
+- Contexte : MFR 2026 commence ~2026-10-23. Le lot nocturne tourne sur la voie **Bird**.
+
 ## Ce qui a été développé
 - 🟢 Correctifs : parois trouées (#65), étape 8 (tête retournée, #58), étape 5 (couche perdue, #60), étape 10 (réorientation impossible en mode exact, #66), étape 3 (tri stable), trous du Benchy (#68), pointe qui quittait sa trajectoire (`max_tip_deviation`, #61), plateau de step9 à z = origine (+0,5 mm auparavant, #71), ingestion de turkish décalé (`_tetrahedralize_with_translation_retry`, #72).
 - 🟢 `step5b` : ordre des couches contraint par la tête (#67). Collisions : death 41,6 → 0,13 %, turkish 53,6 → 0,21 %, sans dégradation de la matière sans appui.
