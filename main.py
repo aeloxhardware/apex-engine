@@ -779,6 +779,11 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Voie bird : repartir de la passe K deja calculee (<PREFIXE>cells.npy, pass0.npy, passK.npy, "
              "ex. research/S4_Slicer/output_models/loop_dino_pin_,5) sans relancer la boucle de deformation.",
     )
+    parser.add_argument(
+        "--base-min-height", type=float, default=None, metavar="MM",
+        help="Voie bird : hauteur minimale de la base figee (mm). Ignore les surplombs plus bas "
+             "(chanfrein de pied). Defaut : aucun (comportement historique).",
+    )
     args = parser.parse_args(argv)
 
     params = PipelineParams(resolution=args.resolution)
@@ -792,7 +797,9 @@ def main(argv: Optional[list[str]] = None) -> int:
             prefix, k = args.from_pass.rsplit(",", 1)
             cells, p0, pk = (np.load(f"{prefix}{s}.npy") for s in ("cells", "pass0", f"pass{k}"))
             loop_result = bird_loop.from_saved_passes(cells, p0, pk, reason=f"passe {k} enregistree")
-        bird_result = run_bird_pipeline(args.mesh_path, params, loop_result=loop_result)
+        bird_params = BirdPipelineParams()
+        bird_params.loop.base_min_height = args.base_min_height
+        bird_result = run_bird_pipeline(args.mesh_path, params, bird=bird_params, loop_result=loop_result)
         if args.output_gcode:
             _lines, report = export_gcode_checked(bird_result.adjusted_toolpath, params, args.output_gcode)
             print(f"[main] G-code ecrit : {args.output_gcode} ({report.moves} mouvements, "

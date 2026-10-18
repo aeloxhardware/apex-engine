@@ -36,6 +36,9 @@ class BirdLoopParams:
     max_passes: int = 16
     layer_height: float = 0.2              # aplatissement du dessous et base plane
     pin_base: bool = True                  # base imprimee a plat (planar_base_mask)
+    # Hauteur minimale de la base figee (mm) : les surplombs plus bas que cette hauteur
+    # (chanfrein de pied) ne limitent pas la base. None = comportement historique.
+    base_min_height: Optional[float] = None
     base_contact_layers: Optional[int] = None   # variante « contact + marge » (None = jusqu'au 1er surplomb)
     max_tet_volume: Optional[float] = None
     # Maillage trop grossier (2026-10-07) : la deformation se calcule par tetraedre, et
@@ -104,7 +107,8 @@ def run(stl_path: str, params: BirdLoopParams = BirdLoopParams(),
     if params.pin_base:
         max_height = (params.base_contact_layers * params.layer_height) if params.base_contact_layers else None
         cell_mask, node_mask, z_first = bd.planar_base_mask(tet, topo, params.overhang_schedule[0],
-                                                            params.layer_height, max_height=max_height)
+                                                            params.layer_height, max_height=max_height,
+                                                            min_height=params.base_min_height)
         planar_base = (cell_mask, node_mask, tet.points.copy())
         say(f"base figee : {cell_mask.sum()} cellules, {node_mask.sum()} noeuds")
     say(f"{tet.number_of_cells} tetraedres")
