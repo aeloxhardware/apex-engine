@@ -264,6 +264,53 @@
      "default": 2000,
      "type": "integer"
     },
+    "multibranch": {
+     "default": false,
+     "type": "boolean"
+    },
+    "multibranch_blend_directions": {
+     "default": false,
+     "type": "boolean"
+    },
+    "multibranch_direction_mode": {
+     "default": "region",
+     "type": "string"
+    },
+    "multibranch_flow_angle_deg": {
+     "default": 30.0,
+     "type": "number"
+    },
+    "multibranch_min_branch_tets": {
+     "default": 40,
+     "type": "integer"
+    },
+    "multibranch_order_by_branch": {
+     "default": true,
+     "type": "boolean"
+    },
+    "multibranch_partition": {
+     "default": "region",
+     "type": "string"
+    },
+    "multibranch_smoothing_iterations": {
+     "default": 0,
+     "type": "integer"
+    },
+    "multibranch_use_risk_weights": {
+     "default": true,
+     "type": "boolean"
+    },
+    "multibranch_vertical_if_safe": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
     "overhang_influence_depth": {
      "default": 1,
      "type": "integer"
@@ -846,6 +893,16 @@
       "laplacian_smoothness_weight": 1.0,
       "max_downward_growth_angle_deg": null,
       "max_solver_iterations": 2000,
+      "multibranch": false,
+      "multibranch_blend_directions": false,
+      "multibranch_direction_mode": "region",
+      "multibranch_flow_angle_deg": 30.0,
+      "multibranch_min_branch_tets": 40,
+      "multibranch_order_by_branch": true,
+      "multibranch_partition": "region",
+      "multibranch_smoothing_iterations": 0,
+      "multibranch_use_risk_weights": true,
+      "multibranch_vertical_if_safe": null,
       "overhang_influence_depth": 1,
       "platform_anchor_value": 0.0,
       "platform_anchor_weight": 1000000.0,

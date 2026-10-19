@@ -348,6 +348,11 @@ class ScalarField:
     # dont tous les poids valent 1.0 (mécanisme actif mais indicateur plat,
     # ce qui est le cas normal d'une pièce SANS ramification).
     smoothness_modulation_diagnostic: Optional["SmoothnessModulationDiagnostic"] = None
+    # Champ multibranche (step4b) : branche de chaque tetraedre et profondeur de chaque
+    # branche dans l'arbre de croissance depuis le plateau. L'etape 5 s'en sert comme
+    # « regions » et « rangs » de l'ordre d'impression. None = champ unique.
+    branch_labels: Optional[np.ndarray] = None
+    branch_depths: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------

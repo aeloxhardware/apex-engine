@@ -85,6 +85,34 @@ def apply_variant(params: PipelineParams, name: str) -> None:
                 kw.setdefault("kind", "stable")
                 return _orig(x, *a, **kw)
         step3_segmentation.np = _NP()
+    elif name.startswith("mb"):     # champ multibranche (2026-10-19) : mb, mb_geo, mb_s<N>
+        fs = params.field_solver
+        fs.multibranch = True
+        if "geo" in name:
+            fs.multibranch_direction_mode = "geodesic"
+        if "up" in name.split("_"):
+            fs.multibranch_direction_mode = "up"
+        if "flowmean" in name:
+            fs.multibranch_partition = "flow"
+            fs.multibranch_direction_mode = "flow_mean"
+        elif "flow" in name:
+            fs.multibranch_partition = "flow"
+            fs.multibranch_direction_mode = "flow"
+        if "_a" in name:
+            fs.multibranch_flow_angle_deg = float(name.split("_a")[1].split("_")[0])
+        if "_s" in name:
+            fs.multibranch_smoothing_iterations = int(name.split("_s")[1].split("_")[0])
+        if "vert" in name.split("_"):
+            fs.multibranch_vertical_if_safe = 0.02
+        if "blend" in name:
+            fs.multibranch_blend_directions = True
+        if "noorder" in name:
+            fs.multibranch_order_by_branch = False
+        if "norisk" in name:
+            fs.multibranch_use_risk_weights = False
+        if "_t" in name:
+            fs.multibranch_min_branch_tets = int(name.split("_t")[1].split("_")[0])
+        params.field_solver.enforce_upward_growth = False
     elif name == "branch005":
         params.segmentation.branch_cut_threshold = 0.05
     else:

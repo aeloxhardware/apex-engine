@@ -14,14 +14,13 @@ sans redemander les spécifications déjà actées. L'IA peut et doit modifier c
 
 ## RAPPELS PERMANENTS À L'UTILISATEUR (demande du 2026-10-18)
 
-**À la fin de CHAQUE réponse, rappeler en une ligne chacun des points ci-dessous, tant que
+**À la fin de CHAQUE réponse, rappeler en une ligne le point ci-dessous, tant que
 `DT.md` (section « RAPPELS PERMANENTS ») ne le marque pas fait `[x]`.** Ne cesser un rappel
 que lorsque l'utilisateur dit l'avoir fait et que la case est cochée dans `DT.md`.
 1. **Modifier les paramètres du firmware** (`config.g` : `M203 Z8000`, `M201 Z1500`) — bloquant
    pour les temps d'impression du salon.
-2. **Essayer le champ scalaire multibranche** (FEM) — **priorité majeure** : seule piste
-   restante contre le défaut de fond du champ unique sur les surplombs négatifs
-   (limites #51 à #54, aucune mesure à ce jour).
+2. ~~Essayer le champ scalaire multibranche~~ : **fait le 2026-10-19** (limite #78, résultat mitigé,
+   opt-in). Rappel arrêté.
 
 ## COMMENT LIRE CE FICHIER (à lire AVANT le reste)
 
@@ -3152,6 +3151,68 @@ pour affichage/validation avant export G-code.
       **RTX 3090 détectée, float64 actif, `saxpy` identique au bit au CPU en float32 et
       float64** (`tests/test_gpu_runtime.py`). Aucun noyau métier encore : la phase 3
       n'écrit un noyau que si le C++ multithread laisse plus de 1 s par appel.
+
+78. **Champ scalaire MULTIBRANCHE (`pipeline/step4b_multibranch.py`, 2026-10-19, opt-in
+    `FieldSolverParams.multibranch`) : résultat MITIGÉ — divise par ~2 la matière sans appui sur
+    death et benchy, dégrade fig et deer. Pas d'activation par défaut.**
+
+    - **Mécanisme.** Branches = (région de step3 × composante connexe par faces), petites branches
+      fondues dans leur voisine (`multibranch_min_branch_tets`, 40) ; arbre BFS depuis les branches
+      au contact du plateau ; chaque branche résout son propre système (lissage + « le gradient suit
+      la direction ») avec pour Dirichlet DUR les nœuds déjà valorisés par ses parents. φ est continu
+      aux interfaces ; les racines sont ancrées au plateau. `ScalarField.branch_labels/branch_depths`
+      servent d'ordre à l'étape 5 (rang de branche), sans effet mesuré. Les `Constraint[]` ne sont pas
+      honorées ; `enforce_upward_growth` n'est pas appliqué (le signe « up » de `mode="up"` fait la
+      même chose branche par branche) ; la projection radiale atteignable l'est.
+    - **Sondes** (`scripts/measure_matrix.py`, variantes `mb*`, `mbo*`, `mbr*` ; résultats
+      `D:/apex_multibranch/results.jsonl`, copie à archiver) : matière sans appui (step9b) et fraction
+      de collisions de la tête, contre la référence FEM actuelle.
+    - **Quatre familles de partition/direction ÉCARTÉES** (toutes pires que la référence sur ≥ 3
+      modèles sur 4) : directions de région « loin de l'attache » (`mb`, benchy ×8,6), directions
+      géodésiques par branche (`mb_geo`, ×2 à ×19), partition par flux géodésique quantifié sur la
+      sphère, flux par tétraèdre ou moyen par branche (`flow`/`flowmean`, ×2 à ×9 ; échec de
+      convergence CG sur fig). Même schéma que #52/#54 : une croissance « en tube » donne des couches
+      transversales, mal vues par le test de support VERTICAL de step9b.
+    - **Ce qui a marché** : `mbr_up` = partition par régions, directions de région retournées vers le
+      haut (isosurfaces identiques à `enforce_upward_growth`), poids de risque de surplomb (omis dans la
+      première version : c'était la cause de benchy ×5, ajouter `multibranch_use_risk_weights`), solveur
+      hiérarchique à Dirichlet dur :
+
+      | modèle | matière sans appui (réf → mbr_up) | collisions tête |
+      |---|---|---|
+      | death | 0,58 → 0,26 % (×0,44) | +0,2 pt |
+      | benchy incliné | 0,07 → 0,03 % (×0,47) | 0 |
+      | real_overhang | ×1,02 | +0,1 pt |
+      | dino | ×0,97 | 0 |
+      | l_shape / l-triple | identiques au bit | 0 |
+      | deer | 0,164 → 0,201 % (×1,23) | +0,3 pt |
+      | fig | 0,30 → 0,35 % (×1,17) | +2,1 pts (16 → 18 %) |
+      | turkish | non mesurable : l'ingestion FEM échoue (l'autodocteur n'existe que côté Bird) | |
+
+      Sensibilité NON monotone au seuil de fusion (t10 : death ×0,83 ; t200 : benchy ×1,02) et le
+      lissage des directions (`_s20`) aide death (×0,39) mais dégrade benchy (×2,3) : réglages à ne pas
+      figer sur un modèle (erreur déjà payée en #51). Mélange des directions (`_blend`) : death ×0,30,
+      mais dino ×1,31, benchy ×1,32, deer ×1,27.
+    - **`multibranch_vertical_if_safe`** (trancher à la verticale une branche sans risque de surplomb) :
+      sans effet, aucune branche ne passe sous le seuil de 2 % (le risque est non nul presque partout).
+    - **Constats annexes importants** :
+      1. **`true_overhang_count = 0` sur tous les modèles, référence comprise** : il n'y a plus de
+         surplomb réel à supprimer. `unsupported_fraction` compte aussi les points « résolus par
+         inclinaison » et surtout des DÉFAUTS D'ORDRE (≈ 94 % sur death, 100 % sur benchy/deer/fig).
+      2. **Ces défauts d'ordre sont LOCAUX** : écart médian entre un point et son support futur de 2 à
+         20 points de trajectoire (death), 22 à 59 % dans le MÊME cordon continu. Aucune amélioration du
+         champ ne les touche ; c'est l'ordre des cordons/anneaux à l'intérieur d'une couche inclinée
+         (bas avant haut) qui est en cause. Piste non mesurée avec l'état actuel du code (#50 l'avait
+         écartée dans un état antérieur).
+      3. Le feedback global (`support_feedback_iterations=3`) mesuré sur ce jeu : death ×0,54 mais
+         real_overhang ×2,0, dino ×2,5, benchy ×3,3 : opt-in confirmé.
+      4. La direction de région de step3 est dégénérée (#51) : le même vecteur (−0,26, 0,08, −0,96)
+         est élu pour la plus grande région de death, benchy et deer. Le gain de `mbr_up` vient donc en
+         partie d'un tirage arbitraire.
+    - **Tests** : `tests/test_step4b_multibranch.py` (2).
+    - **Autodocteur Bird** (même session) : voir `pipeline/bird/deformation.py` (`diagnose_surface`,
+      TetGen `Y`, `base_min_height`) : fait passer le Fighter jet F18 et deer, jamais appliqué à
+      l'ingestion FEM (`step1_ingest`), d'où l'échec de turkish.
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
