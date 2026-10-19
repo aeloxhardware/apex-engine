@@ -538,6 +538,44 @@ class FieldSolverParams:
     # False (defaut) = DESACTIVE, comportement historique inchange.
     use_heat_geodesic_field: bool = False
 
+    # CHAMP MULTIBRANCHE (2026-10-19, piste majeure du DT, voir
+    # `pipeline/step4b_multibranch.py`). Un champ UNIQUE ne peut pas a la fois
+    # croitre depuis le plateau et croitre VERS LE BAS sous un plafond suspendu
+    # (limites #51 a #54). Ici le volume est decoupe en BRANCHES (region de step3
+    # x composante connexe), organisees en arbre depuis le plateau ; chaque
+    # branche resout son PROPRE champ, avec pour condition de Dirichlet les
+    # valeurs deja calculees de ses parents a l'interface : le champ global est
+    # continu, mais chaque branche croit en s'eloignant de son attache.
+    # LIMITES : les Constraint[] utilisateur ne sont pas honorees ; le
+    # redressement `enforce_upward_growth` n'y est pas applique (il defait la
+    # croissance vers le bas) ; la projection radiale atteignable l'est.
+    # False (defaut) = DESACTIVE.
+    multibranch: bool = False
+    # Une branche de moins de ce nombre de tetraedres est fondue dans sa voisine.
+    multibranch_min_branch_tets: int = 40
+    # Direction de croissance d'une branche : "region" (cible de step3, orientee
+    # pour s'eloigner de l'attache) ou "geodesic" (gradient de la distance
+    # geodesique depuis l'attache, a l'interieur de la branche).
+    multibranch_direction_mode: str = "region"
+    # Iterations de lissage vectoriel (par branche) des directions ; 0 = aucun.
+    multibranch_smoothing_iterations: int = 0
+    # Partition en branches : "region" (regions de step3) ou "flow" (composantes connexes
+    # de tetraedres dont le flux geodesique tourne de moins de `multibranch_flow_angle_deg`
+    # entre voisins : une branche = un tube de croissance coherente). En mode "flow",
+    # `multibranch_direction_mode` vaut "flow" (flux par tetraedre) ou "flow_mean"
+    # (flux moyen de la branche : couches planes par partie).
+    multibranch_partition: str = "region"
+    multibranch_flow_angle_deg: float = 30.0
+    # Majore le terme de direction autour des surplombs (comme le champ unique).
+    multibranch_use_risk_weights: bool = True
+    # L'etape 5 ordonne les couches par rang de BRANCHE (sinon par rang de region de step3).
+    multibranch_order_by_branch: bool = True
+    # Directions de region melangees spatialement (`direction_blend_radius`), comme le champ unique.
+    multibranch_blend_directions: bool = False
+    # Une branche dont la part de tetraedres a risque de surplomb est inferieure a ce seuil est
+    # tranchee A LA VERTICALE (aucune inclinaison inutile). None = desactive.
+    multibranch_vertical_if_safe: Optional[float] = None
+
 
 @dataclass
 class FieldSolverStaticSystem:
@@ -2743,6 +2781,10 @@ def run(
     # meme systeme, c'est un autre champ. Les Constraint[] utilisateur ne sont
     # donc pas honorees dans ce mode - limite assumee, signalee ici plutot que
     # silencieuse, et raison pour laquelle il reste opt-in.
+    if params.multibranch:
+        from pipeline.step4b_multibranch import solve_multibranch_field
+        return solve_multibranch_field(tet_mesh, mesh_data, region_dependency_graph, params, overhang_map)
+
     if params.use_heat_geodesic_field:
         shape_gradients, volumes = _compute_shape_gradients(tet_mesh)
         platform_nodes = _identify_platform_nodes(

@@ -1715,6 +1715,11 @@ def run(
 
     tet_regions = _map_tets_to_regions(tet_mesh, mesh_data, region_dependency_graph)
     region_ranks = _compute_region_ranks(region_dependency_graph)
+    if getattr(scalar_field, "branch_labels", None) is not None:
+        # Champ multibranche : l'ordre suit l'arbre de BRANCHES (profondeur depuis le plateau),
+        # pas les regions de step3, qui ne sont plus ce qui porte la croissance.
+        tet_regions = np.asarray(scalar_field.branch_labels, dtype=np.int64)
+        region_ranks = {int(k): int(v) for k, v in scalar_field.branch_depths.items()}
     volumes = _tet_volumes(tet_mesh)
 
     scale = float(np.ptp(tet_mesh.tet_vertices, axis=0).max()) or 1.0
