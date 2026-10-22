@@ -448,18 +448,24 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
              "fil_area": fil_area, "max_tip_deviation": params.max_tip_deviation},
             *(() if travel_native is None else (travel_native,)))
         _z_offset(1.0, params.z_reference)   # meme erreur que le chemin Python si z_reference est inconnu
-        rep.travel_collisions = int(st.get("travel_collisions", 0))
-        out += body.split(chr(10))
-        rep.moves, rep.travels, rep.retractions = st["moves"], st["travels"], st["retractions"]
-        rep.subdivided_moves = st["subdivided_moves"]
-        rep.max_tip_deviation_before = st["max_tip_deviation_before"]
-        rep.clearance_axes = {"Z": st["clearance_Z"], "R": st["clearance_R"], "none": st["clearance_none"]}
-        rep.filament_mm, rep.c_mismatch_deg = st["filament_mm"], st["c_mismatch_deg"]
-        rep.tip_z_min, rep.head_z_min = st["tip_z_min"], st["head_z_min"]
-        rep.tip_below_plate, rep.head_below_margin = st["tip_below_plate"], st["head_below_margin"]
-        if st["any"]:
-            guard["x"], guard["y"], guard["z"] = list(st["x"]), list(st["y"]), list(st["z"])
-        n_loop = 0
+        if "subdivided_moves" not in st:
+            # Module natif PERIME (anterieur au decoupage `max_tip_deviation`, pas 24 etendu) : il
+            # ecrirait des mouvements non decoupes, donc une pointe qui quitte sa trajectoire. Son
+            # resultat est ecarte et le chemin Python, identique, le remplace (jamais un fichier faux).
+            n_loop = n
+        else:
+            rep.travel_collisions = int(st.get("travel_collisions", 0))
+            out += body.split(chr(10))
+            rep.moves, rep.travels, rep.retractions = st["moves"], st["travels"], st["retractions"]
+            rep.subdivided_moves = st["subdivided_moves"]
+            rep.max_tip_deviation_before = st["max_tip_deviation_before"]
+            rep.clearance_axes = {"Z": st["clearance_Z"], "R": st["clearance_R"], "none": st["clearance_none"]}
+            rep.filament_mm, rep.c_mismatch_deg = st["filament_mm"], st["c_mismatch_deg"]
+            rep.tip_z_min, rep.head_z_min = st["tip_z_min"], st["head_z_min"]
+            rep.tip_below_plate, rep.head_below_margin = st["tip_below_plate"], st["head_below_margin"]
+            if st["any"]:
+                guard["x"], guard["y"], guard["z"] = list(st["x"]), list(st["y"]), list(st["z"])
+            n_loop = 0
     else:
         n_loop = n
 

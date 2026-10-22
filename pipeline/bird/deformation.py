@@ -236,18 +236,17 @@ def tet_mesh_problem(tet: BirdTet) -> Optional[str]:
     return None
 
 
-def _tetrahedralize_repaired(mesh: trimesh.Trimesh, max_tet_volume: Optional[float],
-                             first_error: Exception) -> BirdTet:
-    """Reparation de la surface (autodocteur) : la cascade de reparation de step1, dans le
-    meme ordre de preference (nettoyage, resolution geometrique des auto-intersections avec
-    TetGen pour oracle, puis pymeshfix), chaque candidat rejete s'il perd plus de la moitie
-    des faces, ou si son maillage tetraedrique est inexploitable (`tet_mesh_problem`).
-    Appelee quand `diagnose_surface` trouve un defaut, ou quand TetGen refuse ou produit
-    un maillage inexploitable. Un maillage sain n'est jamais modifie (Benchy inchange)."""
+def repair_candidates(mesh: trimesh.Trimesh) -> tuple[trimesh.Trimesh, list[tuple[str, trimesh.Trimesh]]]:
+    """Surfaces de remplacement candidates, dans l'ordre de preference, chacune avec son
+    libelle. Rend `(maillage nettoye, candidats)` ; le garde-fou d'etendue (une reparation
+    qui ampute la piece est rejetee) est applique par l'appelant. Partagee par la voie Bird
+    et par l'ingestion FEM (`step1_ingest`) : une seule cascade de reparation. L'ordre est
+    celui de la voie Bird d'origine (identique au bit)."""
     from pipeline import step1_ingest as s1
 
-    candidates = []
+    candidates: list[tuple[str, trimesh.Trimesh]] = []
     cleaned, _report = s1._clean_and_repair(mesh.copy())
+
     # Nettoyage de surface d'abord : souder les details quasi coincidents, puis l'union des
     # coques qui se traversent. Un candidat soude est ensuite essaye avant les autres.
     welded = weld_short_edges(cleaned)
@@ -255,18 +254,20 @@ def _tetrahedralize_repaired(mesh: trimesh.Trimesh, max_tet_volume: Optional[flo
         w_bodies = welded.split(only_watertight=True)
         if len(w_bodies) > 1:
             try:
-                candidates.append(trimesh.boolean.union(list(w_bodies), engine="manifold"))
+                candidates.append(("soudure des aretes courtes + union des coques",
+                                   trimesh.boolean.union(list(w_bodies), engine="manifold")))
             except Exception:      # noqa: BLE001 -- best-effort
                 pass
-        candidates.append(welded)
-    candidates.append(cleaned)
+        candidates.append(("soudure des aretes courtes", welded))
+    candidates.append(("nettoyage seul", cleaned))
     # Coques qui se traversent (corps concatenes sans union) : l'union booleenne les
     # fusionne sans rien perdre, la ou pymeshfix garde UNE coque (mesure : deux boites
     # croisees -> une seule, a exactement 50 % des faces, sous le garde-fou de step1).
     bodies = cleaned.split(only_watertight=True)
     if len(bodies) > 1:
         try:
-            candidates.append(trimesh.boolean.union(list(bodies), engine="manifold"))
+            candidates.append(("union des coques qui se traversent",
+                               trimesh.boolean.union(list(bodies), engine="manifold")))
         except Exception:      # noqa: BLE001 -- best-effort, la cascade continue
             pass
     resolved = s1.resolve_self_intersections(cleaned)
@@ -276,10 +277,23 @@ def _tetrahedralize_repaired(mesh: trimesh.Trimesh, max_tet_volume: Optional[flo
             if local is not None:
                 resolved = local
         resolved, _probe = s1._finish_geometric_resolution(resolved, 1.0)
-        candidates.append(resolved)
+        candidates.append(("resolution geometrique des auto-intersections", resolved))
     fixed = s1._repair_with_pymeshfix(cleaned)
     if fixed is not None and len(fixed.faces) >= 0.5 * len(cleaned.faces):
-        candidates.append(fixed)
+        candidates.append(("pymeshfix", fixed))
+    return cleaned, candidates
+
+
+def _tetrahedralize_repaired(mesh: trimesh.Trimesh, max_tet_volume: Optional[float],
+                             first_error: Exception) -> BirdTet:
+    """Reparation de la surface (autodocteur) : la cascade de reparation de step1, dans le
+    meme ordre de preference (nettoyage, resolution geometrique des auto-intersections avec
+    TetGen pour oracle, puis pymeshfix), chaque candidat rejete s'il perd plus de la moitie
+    des faces, ou si son maillage tetraedrique est inexploitable (`tet_mesh_problem`).
+    Appelee quand `diagnose_surface` trouve un defaut, ou quand TetGen refuse ou produit
+    un maillage inexploitable. Un maillage sain n'est jamais modifie (Benchy inchange)."""
+    cleaned, labelled = repair_candidates(mesh)
+    candidates = [candidate for _label, candidate in labelled]
     errors = [first_error]
     reference = cleaned.extents
     for candidate in candidates:

@@ -42,6 +42,12 @@ def apply_variant(params: PipelineParams, name: str) -> None:
         params.machine_toolpath.free_axis_median_window = 9
     elif name == "feedback3":
         params.field_solver.support_feedback_iterations = 3
+    elif name.startswith("fbair"):      # retroaction restreinte aux tetraedres « en l'air » (Bird) : fbair3, fbair3_t2
+        fs = params.field_solver
+        fs.support_feedback_iterations = int(name[5:].split("_")[0] or 3)
+        fs.support_feedback_require_in_air = True
+        if "_t" in name:
+            fs.support_feedback_in_air_threshold_mm = float(name.split("_t")[1].split("_")[0])
     elif name == "feedback_dyn":
         params.field_solver.support_feedback_iterations = 50
     elif name == "geo_smooth50":
@@ -85,6 +91,43 @@ def apply_variant(params: PipelineParams, name: str) -> None:
                 kw.setdefault("kind", "stable")
                 return _orig(x, *a, **kw)
         step3_segmentation.np = _NP()
+    elif name in ("heat_t1", "heat_noppn", "heat_split"):
+        # correctifs du champ de la chaleur (tous avec l'ordre contraint step5b)
+        apply_variant(params, "heat_corder")
+        if name == "heat_t1":                # temps de diffusion de Crane (h^2) au lieu de 100 h^2
+            params.field_solver.heat_method_time_factor = 1.0
+        elif name == "heat_noppn":           # orientation : normale du plan moyen de la couche, pas le gradient local
+            params.machine_toolpath.per_point_normal = False
+        else:                                # ordre : couches scindees en morceaux disjoints (granularite de step5b)
+            params.layers.split_disjoint_clusters = 3.0
+    elif name == "heat_iso_reach":           # heat_iso + flux projete sur les inclinaisons atteignables (#64)
+        apply_variant(params, "heat_iso")
+        params.field_solver.heat_project_reachable = True
+    elif name in ("heat_iso", "heat_iso_corder", "heat_frontier", "heat_frontier_corder"):
+        # ordre des couches du champ de la chaleur : isovaleur seule, ou croissance de front (step5)
+        apply_variant(params, "heat_corder" if name.endswith("_corder") else "heat")
+        if "_iso" in name:
+            params.layers.isovalue_order = True
+        else:
+            params.layers.frontier_order = True
+    elif name == "heat_corder":              # idem + ordre contraint par l'appui et la tete (step5b)
+        params.field_solver.use_heat_geodesic_field = True
+        params.field_solver.enforce_upward_growth = False
+        from pipeline.step5b_collision_order import CollisionOrderParams
+        params.collision_order = CollisionOrderParams(support_depth=0.3)
+    elif name == "heat":                     # champ = distance au plateau (methode de la chaleur), couches = isosurfaces
+        params.field_solver.use_heat_geodesic_field = True
+        params.field_solver.enforce_upward_growth = False
+        params.collision_order = None
+    elif name.startswith("planar"):          # parties a couches planes (2026-10-19) ; planar_a<DEG> : angle de fusion
+        params.field_solver.planar_parts = True
+        params.collision_order = None      # l'ordre est celui des parties (step5b le brouille)
+        if "reeb" in name:                 # planar_reeb[_b<mm>] : squelette (graphe de Reeb geodesique)
+            params.field_solver.planar_parts_partition = "reeb"
+            if "_b" in name:
+                params.field_solver.planar_reeb_band_mm = float(name.split("_b")[1])
+        elif "_a" in name:
+            params.segmentation.max_region_merge_angle_deg = float(name.split("_a")[1])
     elif name.startswith("mb"):     # champ multibranche (2026-10-19) : mb, mb_geo, mb_s<N>
         fs = params.field_solver
         fs.multibranch = True

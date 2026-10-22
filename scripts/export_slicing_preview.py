@@ -121,10 +121,14 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
     region_graph = segmentation_run(mesh_data, overhang_map, segmentation_params, tet_mesh)
 
     print("[preview] Etape 4/8 - resolution du champ scalaire")
-    scalar_field = field_solver_run(
-        tet_mesh, mesh_data, overhang_map, region_graph, params.constraints,
-        _effective_field_solver_params(params),
-    )
+    _fs_params = _effective_field_solver_params(params)
+    if _fs_params.planar_parts:
+        from pipeline.step4c_planar_parts import build_planar_parts
+        tet_mesh, scalar_field = build_planar_parts(tet_mesh, mesh_data, region_graph, _fs_params, overhang_map)
+    else:
+        scalar_field = field_solver_run(
+            tet_mesh, mesh_data, overhang_map, region_graph, params.constraints, _fs_params,
+        )
 
     print("[preview] Etape 5/8 - extraction des couches courbes")
     layers = layers_run(tet_mesh, mesh_data, scalar_field, region_graph, params.layers)

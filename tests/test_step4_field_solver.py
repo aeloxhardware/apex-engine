@@ -1478,3 +1478,10 @@ def test_radial_tilt_projection_keeps_only_reachable_component():
     inward = -0.8 * rhat + 0.6 * np.array([0, 0, 1.0])
     out, _ = _project_to_reachable_radial_tilt(tm, np.vstack([inward, d[1]]), np.zeros(3), np.array([0.0, 0.0, 1.0]))
     assert np.allclose(out[0], [0, 0, 1])           # penche vers le centre : ramenee a la verticale
+
+
+def test_heat_project_reachable_is_opt_in_and_needs_an_origin():
+    """Champ de la chaleur : la projection sur les inclinaisons atteignables est opt-in
+    et sans effet tant que `radial_tilt_origin` n'est pas renseigne."""
+    assert FieldSolverParams().heat_project_reachable is False
+    assert FieldSolverParams().radial_tilt_origin is None
