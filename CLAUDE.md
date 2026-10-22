@@ -3214,6 +3214,70 @@ pour affichage/validation avant export G-code.
       TetGen `Y`, `base_min_height`) : fait passer le Fighter jet F18 et deer, jamais appliqué à
       l'ingestion FEM (`step1_ingest`), d'où l'échec de turkish.
 
+79. **Champ = DISTANCE AU PLATEAU par la méthode de la chaleur (`use_heat_geodesic_field`),
+    couches = ses isosurfaces (2026-10-21/22). Premier champ dont l'ORDRE est correct sur une
+    pièce suspendue sans compromis visible : pilier, cabine, puis la coque en dômes qui
+    s'étendent depuis leur attache, rebords en dernier. Idée de l'utilisateur (« des couches
+    perpendiculaires aux chemins de Dijkstra »). Opt-in, non activé.**
+
+    - **Nouvelle métrique, indépendante de la gravité : la matière FLOTTANTE**
+      (`D:/apex_multibranch/islands.py`, hors dépôt). Chaque tétraèdre reçoit l'instant
+      d'impression de la couche d'isovaleur la plus proche ; un morceau de couche (composante
+      par faces) est flottant s'il ne touche ni le plateau ni un tétraèdre imprimé avant lui.
+      C'est ce que montrent les captures (îlots, bandes) ; step9b ne le mesure pas.
+    - **Cause n°1 : le tri historique `(rang de région, isovaleur)` de step5.** Avec ce champ,
+      φ EST la progression, et le rang de step3 la casse : sur death, les couches de rang 2
+      (φ 23,6 à 39,6) passaient avant celles de rang 3 (φ 8,3 à 69,9). Corrigé par
+      `LayerParams.isovalue_order` (opt-in) ; `frontier_order` (déjà écrit) donne exactement
+      le même ordre ici.
+    - **Cause n°2 : step5b.** Il déplace des couches ENTIÈRES (une isosurface de distance
+      traverse toute la pièce) et pose la tête avec UNE normale par couche (`_layer_normal`),
+      fausse sur un dôme : bandes tardives dans les montants de la cabine.
+    - **Mesures death (résolution 0,8)** :
+
+      | variante | flottant | îlots > 1 mm³ | collisions tête | step9b |
+      |---|---:|---:|---:|---:|
+      | FEM (référence) | 7,10 % | 72 | 0,5 % | 0,58 % |
+      | chaleur, tri par rang | 0,79 % | 10 | 58,0 % | 2,15 % |
+      | chaleur + step5b | 6,50 % | 84 | 47,9 % | 1,82 % |
+      | **chaleur, `isovalue_order`** | **0,023 %** | **0** | 28,9 % | 2,19 % |
+
+      real_overhang : 0 % flottant (FEM 1,5 %), collisions 17,3 % (FEM 0 %).
+    - **step9b ne mesure pas la même chose ici** : sur death, 85 % de ses 7 319 « défauts
+      d'ordre » sont là où la couche pousse vers le BAS, 47 % tête retournée (B > 90°), et
+      pour 94 % le « support manquant » est à moins de 0,3 mm sous le point, imprimé ~3 points
+      plus tard (la suite du même cordon). C'est le test VERTICAL appliqué à un dépôt vers le
+      bas, pas un défaut d'ordre. Sa tenue physique (dépôt sous une couche, tête vers le haut)
+      n'est PAS vérifiée : à essayer sur machine avant de compter dessus.
+    - **Restent ouverts** : collisions (28,9 % sur death), orientation (25,7 % des points à
+      plus de 45° de la normale : le flux de la chaleur n'est pas projeté sur le demi-plan
+      atteignable, contrairement au FEM, #64), 5 minima locaux de φ (61 micro-îlots).
+    - **Orientation atteignable (`FieldSolverParams.heat_project_reachable`, opt-in, 2026-10-22)** :
+      le flux de la chaleur est projeté sur le demi-plan (+radial, vertical) avant
+      `L*phi = div(X)` (même projection que le FEM, #64 ; `radial_tilt_origin` était déjà
+      renseigné par `main` mais ignoré par la branche chaleur). Variante `heat_iso_reach`.
+
+      | | real_overhang avant → après | death avant → après |
+      |---|---:|---:|
+      | points à plus de 45° de la normale | 14,7 → **0,5 %** | 25,7 → **16,8 %** |
+      | points à plus de 15° | 26,3 → **2,8 %** | 56,7 → **21,3 %** |
+      | orientations inatteignables (step8) | 15 118 → **3 305** | 315 440 → **99 691** |
+      | collisions de la tête | 17,3 → 13,7 % | 28,9 → 26,6 % |
+      | matière flottante | 0 → 0,66 % | 0,023 → 0,29 % |
+      | step9b sans appui | 4,19 → 3,70 % | 2,19 → 2,88 % |
+
+      L'orientation s'améliore beaucoup, mais les collisions ne bougent presque pas : leur cause
+      n'est donc PAS l'orientation seule (restent l'ordre et la forme des couches, `step5b`).
+      Contrepartie : un peu de matière flottante revient (flux projeté = plus un gradient).
+      Couverture de la surface vérifiée inchangée (`D:/apex_multibranch/coverage.py`).
+    - **Piège payé** : `heat_method_time_factor = 1` (temps h² de Crane) semblait résoudre
+      real_overhang (0,67 %, 0 collision) ; FAUX succès : u sous-dépasse le seuil de gradient
+      loin du plateau, φ y devient plat et la trajectoire perd le pont et la jambe (8 628 mm
+      extrudés contre 12 331). Toujours vérifier la matière extrudée avant de conclure.
+    - Tests : `test_isovalue_order_ignores_region_rank`, `test_isovalue_order_disabled_by_default`.
+      Variantes `heat*` de `scripts/measure_matrix.py`, visualisation à curseur
+      `scripts/plot_toolpath_slider.py`.
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.
@@ -5542,6 +5606,7 @@ Ce qui reste, hors cœur algorithmique :
   licence, limite #56) et demande à être cité (`CITATION.cff`) : notice de licence et
   attribution conservées dans tout code dérivé, citation dans le README et l'interface.
   Préalable : comparer Bird et FEM sur les 4 modèles (step9b et collisions).
+- **Voies hors champ scalaire** (décision de l'utilisateur, 2026-10-19, après le verdict mitigé du multibranche, #78) : (2) **parties à couches planes** : chaque partie de step3 tranchée en plans dans sa propre orientation, ordre d'impression entre parties — essai EN COURS, opt-in, à mesurer sur les 8 modèles ; (3) **balayage le long d'un squelette** (sections perpendiculaires, pour les parties fines) — ROADMAP, non commencé. Alternatives écartées pour l'instant : optimisation directe par voxels (coût), réordonnancement des cordons (essai B, après la voie 2).
 - **Un `resegmentation_hook` réel pour l'étape 10** — `main.py` le laisse
   à `None` pour l'instant (voir détail ci-dessus). L'implémenter
   demanderait de re-jouer step3→step8 avec une contrainte d'angle

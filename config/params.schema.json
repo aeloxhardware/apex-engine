@@ -245,6 +245,10 @@
      "default": 100.0,
      "type": "number"
     },
+    "heat_project_reachable": {
+     "default": false,
+     "type": "boolean"
+    },
     "laplacian_smoothness_weight": {
      "default": 1.0,
      "type": "number"
@@ -315,6 +319,18 @@
      "default": 1,
      "type": "integer"
     },
+    "planar_parts": {
+     "default": false,
+     "type": "boolean"
+    },
+    "planar_parts_partition": {
+     "default": "region",
+     "type": "string"
+    },
+    "planar_reeb_band_mm": {
+     "default": 4.0,
+     "type": "number"
+    },
     "platform_anchor_value": {
      "default": 0.0,
      "type": "number"
@@ -349,6 +365,10 @@
      "default": 0.0,
      "type": "number"
     },
+    "support_feedback_in_air_threshold_mm": {
+     "default": 1.0,
+     "type": "number"
+    },
     "support_feedback_iterations": {
      "default": 0,
      "type": "integer"
@@ -356,6 +376,10 @@
     "support_feedback_min_improvement": {
      "default": 0.02,
      "type": "number"
+    },
+    "support_feedback_require_in_air": {
+     "default": false,
+     "type": "boolean"
     },
     "support_feedback_threshold_deg": {
      "default": 45.0,
@@ -576,13 +600,17 @@
   },
   "LayerParams": {
    "additionalProperties": false,
-   "description": "LayerParams(layer_height_base: 'float' = 0.2, weld_tolerance_factor: 'float' = 1e-06, split_disjoint_clusters: 'Optional[float]' = None, support_driven_order: 'Optional[float]' = None, geodesic_order: 'bool' = False, frontier_order: 'bool' = False, nozzle_width: 'Optional[float]' = None, support_horizontal_radius_factor: 'float' = 2.5, support_vertical_height_factor: 'float' = 7.5, platform_contact_tolerance_factor: 'float' = 2.5, support_rotation_axes: 'Optional[list[RotationAxisSpec]]' = None,",
+   "description": "LayerParams(layer_height_base: 'float' = 0.2, weld_tolerance_factor: 'float' = 1e-06, split_disjoint_clusters: 'Optional[float]' = None, support_driven_order: 'Optional[float]' = None, geodesic_order: 'bool' = False, frontier_order: 'bool' = False, isovalue_order: 'bool' = False, nozzle_width: 'Optional[float]' = None, support_horizontal_radius_factor: 'float' = 2.5, support_vertical_height_factor: 'float' = 7.5, platform_contact_tolerance_factor: 'float' = 2.5, support_rotation_axes: 'Optional[",
    "properties": {
     "frontier_order": {
      "default": false,
      "type": "boolean"
     },
     "geodesic_order": {
+     "default": false,
+     "type": "boolean"
+    },
+    "isovalue_order": {
      "default": false,
      "type": "boolean"
     },
@@ -890,6 +918,7 @@
       "gradient_baseline_weight": 1.0,
       "gradient_overhang_weight": 5.0,
       "heat_method_time_factor": 100.0,
+      "heat_project_reachable": false,
       "laplacian_smoothness_weight": 1.0,
       "max_downward_growth_angle_deg": null,
       "max_solver_iterations": 2000,
@@ -904,14 +933,19 @@
       "multibranch_use_risk_weights": true,
       "multibranch_vertical_if_safe": null,
       "overhang_influence_depth": 1,
+      "planar_parts": false,
+      "planar_parts_partition": "region",
+      "planar_reeb_band_mm": 4.0,
       "platform_anchor_value": 0.0,
       "platform_anchor_weight": 1000000.0,
       "radial_tilt_origin": null,
       "resolution": 1.5,
       "smoothness_modulation_floor": 0.02,
       "smoothness_modulation_strength": 0.0,
+      "support_feedback_in_air_threshold_mm": 1.0,
       "support_feedback_iterations": 0,
       "support_feedback_min_improvement": 0.02,
+      "support_feedback_require_in_air": false,
       "support_feedback_threshold_deg": 45.0,
       "support_feedback_use_geodesic_target": false,
       "support_feedback_weight": 4.0,
@@ -955,6 +989,7 @@
      "default": {
       "frontier_order": false,
       "geodesic_order": false,
+      "isovalue_order": false,
       "layer_height_base": 0.2,
       "nozzle_width": null,
       "platform_contact_tolerance_factor": 2.5,

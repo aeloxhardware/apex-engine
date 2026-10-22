@@ -1539,3 +1539,42 @@ def test_frontier_order_marks_nothing_when_progress_follows_the_isovalue():
 def test_frontier_order_disabled_by_default():
     """Opt-in : le defaut ne doit jamais emprunter ce chemin de code."""
     assert LayerParams().frontier_order is False
+
+
+# ---------------------------------------------------------------------------
+# Tri par isovaleur seule (LayerParams.isovalue_order)
+# ---------------------------------------------------------------------------
+
+def test_isovalue_order_ignores_region_rank(tripod_data):
+    """
+    Champ qui EST la progression (distance au plateau) : le rang de region ne
+    doit plus primer. Dependances inversees (bras -> pied) pour que le tri
+    historique (rang, isovaleur) imprime les bras, d'isovaleur haute, avant le
+    pied : sans ce desaccord le test ne prouverait rien.
+    """
+    mesh_data, tet_mesh, overhang_map, region_graph = tripod_data
+    field = field_run(
+        tet_mesh, mesh_data, overhang_map, region_graph, [],
+        FieldSolverParams(direction_blend_radius=20.0, direction_blend_power=2.0, direction_blend_min_norm=0.1),
+    )
+    inverted = RegionDependencyGraph(
+        regions=region_graph.regions,
+        dependencies=[(1, 0), (2, 0), (3, 0)],
+        platform_contact_faces=region_graph.platform_contact_faces,
+    )
+
+    historic = layers_run(tet_mesh, mesh_data, field, inverted, LayerParams(layer_height_base=0.5))
+    iso_historic = [layer.isovalue for layer in historic]
+    assert iso_historic != sorted(iso_historic), "le tri par rang doit ici contredire l'isovaleur"
+
+    ordered = layers_run(
+        tet_mesh, mesh_data, field, inverted, LayerParams(layer_height_base=0.5, isovalue_order=True)
+    )
+    iso_ordered = [layer.isovalue for layer in ordered]
+    assert iso_ordered == sorted(iso_ordered)
+    assert sorted(iso_ordered) == sorted(iso_historic), "meme ensemble de couches, seul l'ordre change"
+
+
+def test_isovalue_order_disabled_by_default():
+    """Opt-in : le defaut garde le tri historique (rang, isovaleur)."""
+    assert LayerParams().isovalue_order is False

@@ -247,6 +247,12 @@ def main(argv: list[str] | None = None) -> int:
              "produit des couches ~40%% plus epaisses a valeur nominale identique, "
              "et comparer sans compenser fausserait la lecture.",
     )
+    parser.add_argument("--planar-parts", action="store_true",
+                        help="parties a couches planes (step4c, 2026-10-19)")
+    parser.add_argument("--reeb", type=float, default=None, metavar="MM",
+                        help="parties planes decoupees par le squelette (graphe de Reeb geodesique, tranches de MM)")
+    parser.add_argument("--merge-angle", type=float, default=None, metavar="DEG",
+                        help="max_region_merge_angle_deg de step3 (decoupage plus fin)")
     parser.add_argument("--elev", type=float, default=20.0, help="Elevation de la camera (degres)")
     parser.add_argument("--azim", type=float, default=-60.0, help="Azimut de la camera (degres)")
     args = parser.parse_args(argv)
@@ -289,6 +295,14 @@ def main(argv: list[str] | None = None) -> int:
         params.field_solver = replace(
             params.field_solver, transition_distance_mm=args.transition_distance
         )
+    if args.merge_angle is not None:
+        params.segmentation = replace(params.segmentation, max_region_merge_angle_deg=args.merge_angle)
+    if args.planar_parts:
+        params.field_solver = replace(params.field_solver, planar_parts=True)
+        params.collision_order = None
+        if args.reeb is not None:
+            params.field_solver = replace(params.field_solver, planar_parts_partition="reeb",
+                                          planar_reeb_band_mm=args.reeb)
     if args.layer_height is not None:
         params.layers.layer_height_base = args.layer_height
 

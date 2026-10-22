@@ -28,6 +28,7 @@ Sortie : ScalarField
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from typing import Optional
 
@@ -538,6 +539,21 @@ class FieldSolverParams:
     # False (defaut) = DESACTIVE, comportement historique inchange.
     use_heat_geodesic_field: bool = False
 
+    # Avec `use_heat_geodesic_field` : la direction du flux de la chaleur est
+    # projetee sur le demi-plan (+radial, vertical) atteignable par la tete
+    # (`_project_to_reachable_radial_tilt`, limite #64) AVANT l'integration de
+    # `L*phi = div(X)`, comme le fait le FEM pour ses directions cibles. Sans
+    # elle, le champ de la chaleur ignorait `radial_tilt_origin` : sur death,
+    # 25,7 % des points de trajectoire a plus de 45 deg de la normale et 59 %
+    # d'orientations inatteignables sur ENDGAME (limite #79). Necessite
+    # `radial_tilt_origin` (renseigne par `main._effective_field_solver_params`
+    # sur la machine actuelle) ; sans lui, sans effet.
+    #
+    # Contrepartie : le flux projete n'est plus un gradient, donc `||grad phi||`
+    # s'ecarte de 1 la ou la projection coupe (epaisseur de couche variable).
+    # False (defaut) = DESACTIVE, comportement inchange.
+    heat_project_reachable: bool = False
+
     # CHAMP MULTIBRANCHE (2026-10-19, piste majeure du DT, voir
     # `pipeline/step4b_multibranch.py`). Un champ UNIQUE ne peut pas a la fois
     # croitre depuis le plateau et croitre VERS LE BAS sous un plafond suspendu
@@ -551,6 +567,13 @@ class FieldSolverParams:
     # croissance vers le bas) ; la projection radiale atteignable l'est.
     # False (defaut) = DESACTIVE.
     multibranch: bool = False
+    # Parties a couches planes (step4c, 2026-10-19) : remplace le champ ET le maillage de step5.
+    planar_parts: bool = False
+    # Decoupage des parties : "region" (regions de step3 x composantes) ou "reeb" (branches du graphe
+    # de Reeb de la distance geodesique au plateau : squelette topologique de la piece, 2026-10-21).
+    planar_parts_partition: str = "region"
+    # Largeur des tranches de distance geodesique du graphe de Reeb (mm).
+    planar_reeb_band_mm: float = 4.0
     # Une branche de moins de ce nombre de tetraedres est fondue dans sa voisine.
     multibranch_min_branch_tets: int = 40
     # Direction de croissance d'une branche : "region" (cible de step3, orientee
@@ -575,6 +598,14 @@ class FieldSolverParams:
     # Une branche dont la part de tetraedres a risque de surplomb est inferieure a ce seuil est
     # tranchee A LA VERTICALE (aucune inclinaison inutile). None = desactive.
     multibranch_vertical_if_safe: Optional[float] = None
+
+    # Rétroaction restreinte aux tetraedres « en l'air » au sens de Bird (`in_air`) : le plus
+    # court chemin (en sauts de face) depuis le plateau, a travers la matiere, passe par un
+    # tetraedre plus haut que lui de plus de `support_feedback_in_air_threshold_mm`.
+    # Test TOPOLOGIQUE, independant du champ. Seuls ces tetraedres sont corriges par la boucle de
+    # retroaction (en plus du test de plafond). False = comportement historique.
+    support_feedback_require_in_air: bool = False
+    support_feedback_in_air_threshold_mm: float = 1.0
 
 
 @dataclass
@@ -1305,13 +1336,31 @@ def _heat_method_distance(
 
     source = np.zeros(node_count)
     source[source_nodes] = 1.0
-    u = _solve_linear_system((M + t * L).tocsr(), source, params)
+    def solve(A, b):
+        # Le systeme de diffusion (temps t = 100 h^2) est mal conditionne sur un
+        # grand modele (fig.stl, 165 mm, 309 000 noeuds : 2 000 iterations de CG
+        # ne suffisent pas). Repli UNIQUE avec 10x plus d'iterations, jamais en
+        # premiere intention : le chemin habituel reste inchange.
+        try:
+            return _solve_linear_system(A, b, params)
+        except FieldSolverError:
+            more = dataclasses.replace(params, max_solver_iterations=max(20000, 10 * params.max_solver_iterations))
+            return _solve_linear_system(A, b, more)
+
+    u = solve((M + t * L).tocsr(), source)
 
     gradients = _compute_per_tet_gradient(tet_mesh, shape_gradients, u)
     norms = np.linalg.norm(gradients, axis=1)
     flow = np.zeros_like(gradients)
     usable = norms > 1e-12
     flow[usable] = -gradients[usable] / norms[usable][:, None]
+
+    if params.heat_project_reachable and params.radial_tilt_origin is not None:
+        projected, _changed = _project_to_reachable_radial_tilt(
+            tet_mesh, flow, params.radial_tilt_origin,
+            params.up_vector if params.up_vector is not None else np.array([0.0, 0.0, 1.0]),
+        )
+        flow[usable] = projected[usable]
 
     rhs = _assemble_divergence_rhs(tet_mesh, shape_gradients, volumes, flow)
 
@@ -1324,7 +1373,7 @@ def _heat_method_distance(
                  params.platform_anchor_weight, 0.0),
         format="csr",
     )
-    phi = _solve_linear_system((L + anchor).tocsr(), rhs, params)
+    phi = solve((L + anchor).tocsr(), rhs)
 
     # Une distance est positive et nulle a la source ; le signe de la
     # solution de Poisson n'est pas garanti par le systeme lui-meme.
@@ -1868,6 +1917,43 @@ def _apply_geodesic_targets(
     return result, remaining
 
 
+def _in_air_mask(
+    tet_mesh: TetMesh, platform_nodes: np.ndarray, threshold: float
+) -> np.ndarray:
+    """
+    Tetraedres « en l'air » au sens de Bird (`pipeline/bird/deformation.py::update_tet_attributes`) :
+    le plus court chemin, en sauts de face, depuis un tetraedre au contact du plateau jusqu'a lui
+    traverse un tetraedre plus haut que lui de plus de `threshold` (il n'est atteint qu'en montant
+    puis en redescendant). Vectorise : un Dijkstra multi-source non pondere de scipy rend l'arbre des
+    plus courts chemins ; l'altitude maximale le long du chemin se propage de la racine vers les
+    feuilles niveau par niveau.
+    """
+    T = tet_mesh.tet_count
+    adjacency = _build_tet_tet_adjacency(tet_mesh)
+    on_platform = np.isin(tet_mesh.tetrahedra, platform_nodes).any(axis=1)
+    sources = np.where(on_platform)[0]
+    if len(sources) == 0:
+        return np.zeros(T, dtype=bool)
+    dist, pred, _src = spgraph.dijkstra(
+        adjacency, directed=False, indices=sources, min_only=True,
+        unweighted=True, return_predecessors=True,
+    )
+    z = tet_mesh.tet_vertices[tet_mesh.tetrahedra][:, :, 2].mean(axis=1)
+    reachable = np.isfinite(dist)
+    max_z = z.copy()
+    order = np.argsort(dist[reachable], kind="stable")
+    ids = np.where(reachable)[0][order]
+    levels = dist[ids].astype(np.int64)
+    bounds = np.searchsorted(levels, np.arange(levels.max() + 2)) if len(ids) else []
+    for lvl in range(1, len(bounds) - 1):
+        level_ids = ids[bounds[lvl]:bounds[lvl + 1]]
+        if len(level_ids):
+            max_z[level_ids] = np.maximum(max_z[level_ids], max_z[pred[level_ids]])
+    in_air = reachable & (max_z > z + threshold)
+    return in_air
+
+
+
 def _apply_support_feedback(
     A_without_gradient: sp.csr_matrix,
     b_without_gradient: np.ndarray,
@@ -1879,6 +1965,7 @@ def _apply_support_feedback(
     tet_normals: np.ndarray,
     params: FieldSolverParams,
     geodesic_directions: Optional[np.ndarray] = None,
+    in_air_mask: Optional[np.ndarray] = None,
 ) -> tuple[sp.csr_matrix, np.ndarray, np.ndarray, SupportFeedbackDiagnostic]:
     """
     Boucle de point fixe : resoudre, re-evaluer le surplomb contre le champ
@@ -1925,6 +2012,8 @@ def _apply_support_feedback(
         field_gradients = _compute_per_tet_gradient(tet_mesh, shape_gradients, values)
         angles = _self_overhang_angles(field_gradients, tet_normals)
         offending = angles < threshold_rad
+        if in_air_mask is not None:
+            offending = offending & in_air_mask
 
         count = int(offending.sum())
         fraction = (
@@ -2573,6 +2662,14 @@ def build_static_system(
             mesh_data.face_normals[nearest_face_per_tet],
             params,
             geodesic_targets,
+            in_air_mask=(
+                _in_air_mask(
+                    tet_mesh,
+                    _identify_platform_nodes(tet_mesh, mesh_data, region_dependency_graph),
+                    params.support_feedback_in_air_threshold_mm,
+                )
+                if params.support_feedback_require_in_air else None
+            ),
         )
     else:
         gradient_A, gradient_b = _assemble_gradient_direction_term(

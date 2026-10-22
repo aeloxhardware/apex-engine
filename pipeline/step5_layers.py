@@ -188,6 +188,19 @@ class LayerParams:
     # False (defaut) = DESACTIVE, ordre historique strictement inchange.
     frontier_order: bool = False
 
+    # --- TRI PAR ISOVALEUR SEULE (2026-10-22) ------------------------------
+    # Le tri historique `(rang de region, isovaleur)` suppose que l'isovaleur
+    # ne dit pas a elle seule l'ordre de croissance, et s'en remet au rang de
+    # step3 pour le dire. C'est l'inverse quand le champ EST une distance au
+    # plateau a travers la matiere (`use_heat_geodesic_field`) : phi est alors
+    # la progression elle-meme, et le rang de region la casse. Mesure sur
+    # death.stl (champ de la chaleur) : les couches de rang 2 (phi 23,6 a 39,6)
+    # passaient avant celles de rang 3 a phi 8,3, donc des pieces imprimees
+    # avant la matiere qui les relie au reste (correlation ordre/isovaleur 0,78).
+    #
+    # False (defaut) = DESACTIVE, ordre historique strictement inchange.
+    isovalue_order: bool = False
+
     # Largeur de cordon, REQUISE des que `support_driven_order` est actif
     # (rayon des capsules de matiere + echelle des rayons de recherche). Aucun
     # defaut arbitraire : step5 ne connait pas `MachineProfile`, et deviner
@@ -1884,6 +1897,8 @@ def run(
     else:
         def _sort_key(entry: tuple) -> tuple[int, float]:
             isovalue, _contours, region_ids, _frame = entry
+            if params.isovalue_order:
+                return (0, isovalue)
             rank = max((region_ranks.get(r, 0) for r in region_ids), default=0)
             return (rank, isovalue)
 

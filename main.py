@@ -612,10 +612,15 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
     print(f"[main]   {len(region_dependency_graph.regions)} region(s)")
 
     print("[main] Etape 4/10 - resolution du champ scalaire")
-    scalar_field = field_solver_run(
-        tet_mesh, mesh_data, overhang_map, region_dependency_graph, params.constraints,
-        _effective_field_solver_params(params)
-    )
+    _fs_params = _effective_field_solver_params(params)
+    if _fs_params.planar_parts:
+        from pipeline.step4c_planar_parts import build_planar_parts
+        tet_mesh, scalar_field = build_planar_parts(tet_mesh, mesh_data, region_dependency_graph, _fs_params,
+                                                    overhang_map)
+    else:
+        scalar_field = field_solver_run(
+            tet_mesh, mesh_data, overhang_map, region_dependency_graph, params.constraints, _fs_params
+        )
 
     print("[main] Etape 5/10 - extraction des couches courbes")
     layers = layers_run(tet_mesh, mesh_data, scalar_field, region_dependency_graph, params.layers)
