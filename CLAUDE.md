@@ -3378,6 +3378,8 @@ pour affichage/validation avant export G-code.
 
 83. **`APEX_TETGEN_Y=1` (opt-in, 2026-10-24) : option `Y` de TetGen dans step1.** Un Benchy simplifie a 5 900 faces (manifold3d + quadrique, ecart max 0,082 mm) est refuse par `pq1.2Aa` (`removevertexbyflips`) mais accepte avec `Y` (aucun point de Steiner sur la surface). Aucun effet par defaut ; non mesure sur les 4 modeles. Benchy 5 900 faces, remplissage 10 %, 50 mm/s : 164 244 points, 69 518 orientations inatteignables (non analysees), 7 collisions toutes resolues, zone centrale r = 4,77 mm (3 068 mm de cordon non depose). `max_feed` 12000 plafonne F a ~50 mm/s pres de l'axe.
 
+84. **Course basse du Z firmware (`clamp_firmware_z`, `PipelineParams.firmware_z_min`, `--firmware-z-min=MM`, opt-in, 2026-10-24).** Le firmware commande le pivot : Z = z + L (cos B - 1), donc B eleve pres du plateau envoie Z tres negatif (Benchy : Z min -39 mm, 626 mouvements sous -5) alors que la course est limitee a -5. B est borne point par point (cos B >= 1 - (z - zmin - 0,5)/L, applique avant step9). Benchy a -5 : 140 points ramenes (deposent hors de leur normale), Z min -4,46, 0 collision. Non teste sur machine.
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.

@@ -90,6 +90,47 @@ class Step10Params:
     orientation_support_min_residual_deg: Optional[float] = None
 
 
+def clamp_firmware_z(
+    toolpath: ToolpathMachine,
+    machine_profile: MachineProfile,
+    z_min: float,
+    pivot_to_tip: float,
+    margin: float = 0.5,
+    axis_index: Optional[int] = None,
+) -> tuple[ToolpathMachine, int]:
+    """
+    Borne B pour que le Z FIRMWARE (pivot) ne descende pas sous `z_min`.
+
+    Le firmware commande le pivot : Z = z + L (cos B - 1). Pres du plateau,
+    un B eleve envoie Z tres negatif (course physique limitee). Un point dont
+    Z passerait sous `z_min + margin` est ramene au plus grand B autorise,
+    cos B >= 1 - (z - z_min - margin) / L : il depose alors hors de sa normale
+    (le prix du plafond de course). Valide pour les axes d'orientation
+    tournant autour de l'horizontale (B) ; sans effet si z est deja assez haut.
+    Rend (trajectoire, nombre de points ramenes). Entree jamais mutee.
+    """
+    axes = machine_profile.rotation_axes or []
+    coupled = set(machine_profile.position_coupled_axes or [])
+    if axis_index is None:
+        free = [i for i in range(len(axes)) if i not in coupled]
+        if not free:
+            return ToolpathMachine(points=list(toolpath.points)), 0
+        axis_index = free[-1]
+    out, changed = [], 0
+    for pt in toolpath.points:
+        angles = list(pt.axis_angles)
+        b_deg = angles[axis_index]
+        z = float(pt.position[2])
+        c = 1.0 - (z - z_min - margin) / pivot_to_tip
+        if np.cos(np.radians(b_deg)) < c and b_deg <= 90.0:
+            angles[axis_index] = float(np.degrees(np.arccos(np.clip(c, -1.0, 1.0))))
+            out.append(replace(pt, axis_angles=angles))
+            changed += 1
+        else:
+            out.append(pt)
+    return ToolpathMachine(points=out), changed
+
+
 def clamp_head_height(
     toolpath: ToolpathMachine,
     machine_profile: MachineProfile,

@@ -70,7 +70,7 @@ from pipeline.step8_machine_toolpath import Step8Params, run as machine_toolpath
 from pipeline.step8b_travel_routing import TravelRoutingParams, route_long_travels
 from pipeline.step9b_support_check import SupportCheckParams, run as support_check_run
 from pipeline.step9_collision_sim import CollisionSimParams, run as collision_run
-from pipeline.step10_adjustment import (AdjustmentReport, Step10Params, clamp_head_height, reorient_coupled_tiers,
+from pipeline.step10_adjustment import (AdjustmentReport, Step10Params, clamp_firmware_z, clamp_head_height, reorient_coupled_tiers,
                                         run as adjustment_run)
 
 
@@ -409,6 +409,9 @@ class BirdPipelineParams:
     loop: "BirdLoopParams" = field(default_factory=lambda: _bird_loop_params())
     slicing: "DeformedSlicingParams" = field(default_factory=lambda: _bird_slicing_params())
     height_clamp: bool = True
+    # Course basse du Z firmware (pivot) : B est borne pour que Z >= firmware_z_min.
+    # None = aucune borne. Opt-in.
+    firmware_z_min: Optional[float] = None
     reorientation_tiers: Optional[tuple[float, ...]] = (45.0, 90.0, 181.0)
     reorientation_rounds: int = 4
     # Lissage non planaire P2-P5 (pipeline/bird/skin). None = corps seul.
@@ -719,6 +722,11 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
     if params.height_clamp:
         toolpath, clamped, _deviations = clamp_head_height(toolpath, params.machine_profile, params.collision)
         print(f"[main]   borne de l'angle de tete selon la hauteur : {clamped} point(s) ramene(s)")
+    if params.firmware_z_min is not None:
+        from file_io.pivot_length import current_pivot_to_tip
+        toolpath, zc = clamp_firmware_z(toolpath, params.machine_profile, params.firmware_z_min,
+                                        current_pivot_to_tip()[0])
+        print(f"[main]   borne de B pour Z firmware >= {params.firmware_z_min} : {zc} point(s) ramene(s)")
 
     print("[main] Etape 9/10 - simulation de collision")
     collision_report = collision_run(toolpath, params.machine_profile, params.collision)
@@ -821,6 +829,11 @@ def main(argv: Optional[list[str]] = None) -> int:
              "d'impression / vitesse angulaire max du plateau. Defaut : desactive.",
     )
     parser.add_argument(
+        "--firmware-z-min", type=float, default=None, metavar="MM",
+        help="Course basse du Z firmware (pivot) : B est borne pour que Z >= cette valeur (ex. -5). "
+             "Les points concernes deposent hors de leur normale. Defaut : aucune borne.",
+    )
+    parser.add_argument(
         "--method", choices=("fem", "bird"), default="fem",
         help="Voie de tranchage : fem (champ scalaire, defaut) ou bird (deformation, limite #75).",
     )
@@ -839,6 +852,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                      else "auto" if args.center_retract_radius == "auto" else float(args.center_retract_radius))
 
     params = PipelineParams(resolution=args.resolution)
+    params.firmware_z_min = args.firmware_z_min
     params.layers = LayerParams(layer_height_base=args.layer_height)
     if args.infill_density is not None:
         params.toolpath2d = replace(params.toolpath2d, infill_density=args.infill_density)
