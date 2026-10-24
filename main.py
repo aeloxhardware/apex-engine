@@ -302,7 +302,8 @@ class PipelineParams:
     # d'un defaut physique (CLAUDE.md, limite #65).
     toolpath2d: Step6Params = field(
         default_factory=lambda: Step6Params(
-            out_of_plane_interpolation_power=2.0, split_rings_into_runs=True, continuous_rings=True
+            out_of_plane_interpolation_power=2.0, split_rings_into_runs=True, continuous_rings=True,
+            run_split_min_amplitude=0.05,
         )
     )
     scheduling: Step7Params = field(default_factory=Step7Params)

@@ -1166,6 +1166,7 @@
       "infill_pattern": "crossed_zigzag",
       "nozzle_width": 0.4,
       "out_of_plane_interpolation_power": 2.0,
+      "run_split_min_amplitude": 0.05,
       "split_open_polylines": false,
       "split_rings_into_runs": true,
       "wall_count": 2
@@ -1359,7 +1360,7 @@
   },
   "Step6Params": {
    "additionalProperties": false,
-   "description": "Step6Params(nozzle_width: 'float' = 0.4, wall_count: 'int' = 2, infill_density: 'float' = 0.2, infill_pattern: 'InfillPattern' = <InfillPattern.CROSSED_ZIGZAG: 'crossed_zigzag'>, bridge_contour_ratio_threshold: 'float' = 0.05, bridge_anchor_extra_walls: 'int' = 2, degenerate_area_ratio: 'float' = 1e-06, out_of_plane_interpolation_power: 'float | None' = None, split_rings_into_runs: 'bool' = False, split_open_polylines: 'bool' = False, continuous_rings: 'bool' = False)",
+   "description": "Step6Params(nozzle_width: 'float' = 0.4, wall_count: 'int' = 2, infill_density: 'float' = 0.2, infill_pattern: 'InfillPattern' = <InfillPattern.CROSSED_ZIGZAG: 'crossed_zigzag'>, bridge_contour_ratio_threshold: 'float' = 0.05, bridge_anchor_extra_walls: 'int' = 2, degenerate_area_ratio: 'float' = 1e-06, out_of_plane_interpolation_power: 'float | None' = None, split_rings_into_runs: 'bool' = False, split_open_polylines: 'bool' = False, continuous_rings: 'bool' = False, run_split_min_amplitude: 'f",
    "properties": {
     "bridge_anchor_extra_walls": {
      "default": 2,
@@ -1404,6 +1405,10 @@
       }
      ],
      "default": null
+    },
+    "run_split_min_amplitude": {
+     "default": 1e-12,
+     "type": "number"
     },
     "split_open_polylines": {
      "default": false,

@@ -135,6 +135,16 @@ class Step6Params:
     # contours n=0 recoivent leur point de fermeture. False = historique.
     continuous_rings: bool = False
 
+    # Amplitude minimale (mm) d'un changement de sens pour COUPER un troncon
+    # monotone. Le defaut 1e-12 reproduit l'ancien comportement (toute
+    # oscillation, meme numerique, coupe). Mesure sur un cylindre plein
+    # (couche plate) : l'anneau exterieur a 257 points et une etendue d'offset
+    # de 3,8 um, soit 122 changements de sens -> 160 polylignes par couche au
+    # lieu de 4, chacune avec son trajet a vide. Une oscillation sous cette
+    # amplitude est du bruit du marching tetrahedra, bien en dessous de
+    # l'epaisseur d'un cordon : elle ne cree aucun appui manquant.
+    run_split_min_amplitude: float = 1e-12
+
 
 # ---------------------------------------------------------------------------
 # Projection / relevement repere local <-> 3D
@@ -845,7 +855,7 @@ def _reorient_bridge_toolpath(
 # qu'un seul anneau dans le repere local 2D d'une seule couche.
 # ---------------------------------------------------------------------------
 
-def _monotonic_runs(offsets: np.ndarray) -> list[tuple[int, int]]:
+def _monotonic_runs(offsets: np.ndarray, min_amplitude: float = 1e-12) -> list[tuple[int, int]]:
     """
     Decoupe un anneau en troncons [start, stop) D'INDICES DISJOINTS (jamais de
     sommet partage entre deux troncons - un decoupage "un sommet partage a
@@ -854,11 +864,14 @@ def _monotonic_runs(offsets: np.ndarray) -> list[tuple[int, int]]:
     independantes : bug reel mesure, l'anneau ressortait avec PLUS de points
     que l'original).
 
-    Troncons monotones en offset (croissant OU decroissant, un changement de
-    sens demarre un nouveau troncon). Un anneau plat (tous offsets egaux, cas
-    historique sans interpolation hors-plan) produit un seul troncon couvrant
-    tout l'anneau - non-regression : `_split_ring_into_runs` renvoie alors
-    l'anneau inchange, en une seule polyligne.
+    Troncons monotones en offset (croissant OU decroissant). Un changement de
+    sens ne coupe que si l'offset a recule de plus de `min_amplitude` depuis
+    l'extremum courant (hysteresis) : une oscillation plus petite est absorbee
+    par le troncon en cours. La coupure est placee juste apres l'extremum,
+    comme avant. Un anneau plat (tous offsets egaux, cas historique sans
+    interpolation hors-plan) produit un seul troncon couvrant tout l'anneau -
+    non-regression : `_split_ring_into_runs` renvoie alors l'anneau inchange,
+    en une seule polyligne.
     """
     n = len(offsets)
     if n <= 2:
@@ -866,19 +879,32 @@ def _monotonic_runs(offsets: np.ndarray) -> list[tuple[int, int]]:
 
     runs: list[tuple[int, int]] = []
     start = 0
-    # direction courante : 0 = indeterminee (plateau), 1 = montee, -1 = descente
-    direction = 0
+    direction = 0                      # 0 = indeterminee, 1 = montee, -1 = descente
+    low = high = float(offsets[0])     # bornes tant que la direction est indeterminee
+    ext_index = 0
+    ext_value = float(offsets[0])      # extremum courant dans la direction suivie
     for i in range(1, n):
-        delta = offsets[i] - offsets[i - 1]
-        step_dir = 1 if delta > 1e-12 else (-1 if delta < -1e-12 else 0)
-        if step_dir == 0:
-            continue  # plateau : prolonge le troncon courant sans trancher
+        value = float(offsets[i])
         if direction == 0:
-            direction = step_dir
-        elif step_dir != direction:
-            runs.append((start, i))
-            start = i
-            direction = step_dir
+            low, high = min(low, value), max(high, value)
+            if value - low > min_amplitude:
+                direction, ext_index, ext_value = 1, i, value
+            elif high - value > min_amplitude:
+                direction, ext_index, ext_value = -1, i, value
+        elif direction == 1:
+            if value >= ext_value:
+                ext_index, ext_value = i, value
+            elif ext_value - value > min_amplitude:
+                runs.append((start, ext_index + 1))
+                start = ext_index + 1
+                direction, ext_index, ext_value = -1, i, value
+        else:
+            if value <= ext_value:
+                ext_index, ext_value = i, value
+            elif value - ext_value > min_amplitude:
+                runs.append((start, ext_index + 1))
+                start = ext_index + 1
+                direction, ext_index, ext_value = 1, i, value
     runs.append((start, n))
     return runs
 
@@ -983,7 +1009,9 @@ def _merge_short_runs(
     return merged
 
 
-def _split_ring_into_runs(ring: np.ndarray, share_vertices: bool = False) -> list[np.ndarray]:
+def _split_ring_into_runs(
+    ring: np.ndarray, share_vertices: bool = False, min_amplitude: float = 1e-12
+) -> list[np.ndarray]:
     """
     Decoupe un anneau FERME (K,3) (u, v, offset) en troncons monotones, chacun
     stocke dans le sens MONTANT - voir docstring de section pour la cause
@@ -1001,7 +1029,7 @@ def _split_ring_into_runs(ring: np.ndarray, share_vertices: bool = False) -> lis
     if len(ring) <= 2:
         return [ring]
 
-    runs = _monotonic_runs(ring[:, 2])
+    runs = _monotonic_runs(ring[:, 2], min_amplitude)
     if len(runs) <= 1:
         return [ring]
 
@@ -1020,7 +1048,10 @@ def _split_ring_into_runs(ring: np.ndarray, share_vertices: bool = False) -> lis
 
 
 def _split_rings_in_toolpath(
-    toolpath: list[np.ndarray], include_open_polylines: bool = False, share_vertices: bool = False
+    toolpath: list[np.ndarray],
+    include_open_polylines: bool = False,
+    share_vertices: bool = False,
+    min_amplitude: float = 1e-12,
 ) -> list[np.ndarray]:
     """
     Applique `_split_ring_into_runs` a chaque polyligne FERMEE de `toolpath`
@@ -1052,7 +1083,7 @@ def _split_rings_in_toolpath(
     result: list[np.ndarray] = []
     for poly in toolpath:
         if _is_closed_ring(poly) or include_open_polylines:
-            result.extend(_split_ring_into_runs(poly, share_vertices))
+            result.extend(_split_ring_into_runs(poly, share_vertices, min_amplitude))
         else:
             result.append(poly)
     return result
@@ -1241,6 +1272,7 @@ def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, pa
             toolpath = _split_rings_in_toolpath(
                 toolpath, include_open_polylines=params.split_open_polylines,
                 share_vertices=params.continuous_rings,
+                min_amplitude=params.run_split_min_amplitude,
             )
 
         return replace(layer, toolpath_2d=toolpath)
