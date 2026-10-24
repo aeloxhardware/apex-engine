@@ -3314,9 +3314,12 @@ pour affichage/validation avant export G-code.
       (« Seuil de Randomisation » 0-1 : amplitude, espacement, forme et pics
       radiaux tirés au hasard), `spiral_seed` (graine fixe + rang d'isovaleur :
       reproductible, tirages différents d'une couche à l'autre).
-    - **Alternance** : rang d'isovaleur impair → spirale pivotée de π (= décalée
-      d'un demi-pas) et première déviation de signe opposé ; même sens de
-      rotation du plateau à toutes les couches.
+    - **Alternance** (corrigée le 2026-10-24 sur demande de l'utilisateur : la
+      première version décalait les couches impaires d'un demi-pas, contresens sur
+      son dessin) : TOUTES les couches suivent la MÊME ligne médiane et se
+      superposent ; seules les aspérités diffèrent (rang impair : première
+      déviation de signe opposé, tirages différents). Même sens de rotation du
+      plateau à toutes les couches.
     - **Centre** : `spiral_axis_origin`, dérivé de `MachineProfile.platform_origin`
       par `main._effective_toolpath2d_params` (appelé par `run_pipeline` ET
       `run_slicing_only`, synchronisés d'emblée) ; l'axe est projeté dans le plan

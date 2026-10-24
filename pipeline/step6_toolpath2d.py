@@ -62,8 +62,9 @@ class InfillPattern(Enum):
     CROSSED_ZIGZAG = "crossed_zigzag"
     # spirale d'Archimede autour de l'AXE DU PLATEAU, oscillante : r(theta)
     # avec theta qui ne recule jamais (le plateau tourne toujours dans le meme
-    # sens, les pics sont des mouvements radiaux), alternee d'une couche a
-    # l'autre (decalage d'un demi-pas, oscillation en opposition de phase).
+    # sens, les pics sont des mouvements radiaux). MEME ligne mediane a toutes
+    # les couches (elles se superposent) ; seules les asperites different
+    # d'une couche a l'autre (phase opposee, tirages differents).
     OSCILLATING_SPIRAL = "oscillating_spiral"
 
 
@@ -856,9 +857,10 @@ def _generate_spiral_infill(
     boundary: Polygon, params: "Step6Params", rank: int, axis_local: np.ndarray | None
 ) -> list[np.ndarray]:
     """
-    Remplissage OSCILLATING_SPIRAL d'une zone. Couches paires / impaires :
-    spirale pivotee de pi (= decalee d'un demi-pas) et oscillation en
-    opposition de phase, tirages differents (graine + rang). Le pas est corrige
+    Remplissage OSCILLATING_SPIRAL d'une zone. Toutes les couches suivent la
+    MEME spirale mediane (elles se superposent) ; seules les asperites
+    different : oscillation en opposition de phase une couche sur deux et
+    tirages differents (graine + rang). Le pas est corrige
     d'apres la longueur REELLEMENT deposee pour tenir `infill_density`.
     Les raccords entre morceaux suivent le bord (comme le zigzag) et ne sont
     pas garantis monotones en theta.
@@ -898,7 +900,7 @@ def _generate_spiral_infill(
         line = _oscillating_spiral_polyline(
             center, r_min_zone, r_max, pitch, amplitude, wavelength,
             params.spiral_randomization_threshold, width, rng,
-            first_sign=-1.0 if odd else 1.0, angle_offset=np.pi if odd else 0.0,
+            first_sign=-1.0 if odd else 1.0, angle_offset=0.0,
         )
         clipped = LineString(line).intersection(zone)
         length = float(clipped.length)
