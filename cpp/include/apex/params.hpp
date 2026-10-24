@@ -298,6 +298,7 @@ struct PipelineParams {
     CollisionSimParams collision{CollisionSimParams{.path_sampling_step = 2.0, .safety_margin = 1.0, .max_adjustment_iterations = 3, .grid_cell_size_multiplier = 4.0, .toolhead_sample_spacing = 5.0, .nozzle_contact_clearance = 3.0, .fast_kdtree = true, .fast_densify_step = 0.25}};
     Step10Params adjustment{Step10Params{.max_adjustment_iterations = 3, .reorientation_samples_per_axis = 12, .max_direction_deviation_deg = 45.0, .excluded_range_half_width_deg = 15.0, .rate_limit_neighbor_margin = 1, .orientation_support_min_residual_deg = std::nullopt}};
     bool height_clamp{false};
+    std::optional<double> firmware_z_min{std::nullopt};
     std::optional<std::vector<double>> coupled_reorientation_tiers{std::nullopt};
     int coupled_reorientation_rounds{3};
     MachineProfile machine_profile{MachineProfile{.rotation_axes = std::vector<RotationAxisSpec>{RotationAxisSpec{.axis = std::vector<double>{0.0, 0.0, 1.0}, .angle_range_deg = std::array<double, 2>{0.0, 360.0}}, RotationAxisSpec{.axis = std::vector<double>{1.0, 0.0, 0.0}, .angle_range_deg = std::array<double, 2>{0.0, 185.0}}}, .platform_origin = std::vector<double>{0.0, 0.0, 0.0}, .nozzle_diameter = 0.4, .max_angular_velocity = 29.08940264298949, .max_angular_acceleration = 22.689280275926283, .build_volume = std::nullopt, .z_clearance_min = 0.0, .platform_radius = 150.0, .position_coupled_axes = std::vector<int>{0}, .radial_direction = std::vector<double>{0.0, -1.0, 0.0}}};

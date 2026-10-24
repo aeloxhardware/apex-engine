@@ -961,6 +961,17 @@
       "use_ilu_preconditioner": false
      }
     },
+    "firmware_z_min": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
     "height_clamp": {
      "default": false,
      "type": "boolean"

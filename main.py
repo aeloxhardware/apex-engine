@@ -336,6 +336,9 @@ class PipelineParams:
     # step9 (CLAUDE.md limite #62, step10.clamp_head_height). Opt-in, non
     # mesure sur les quatre modeles de res/test_models/.
     height_clamp: bool = False
+    # Course basse du Z firmware (pivot) : B est borne pour que Z >= firmware_z_min.
+    # None = aucune borne. Opt-in.
+    firmware_z_min: Optional[float] = None
     # Reorientation par paliers des points en contact, machine a axe couple
     # (limite #62, step10.reorient_coupled_tiers), APRES step9 et avant
     # step10.run ; step9 est rejoue apres chaque tour. Opt-in (None).
@@ -409,9 +412,6 @@ class BirdPipelineParams:
     loop: "BirdLoopParams" = field(default_factory=lambda: _bird_loop_params())
     slicing: "DeformedSlicingParams" = field(default_factory=lambda: _bird_slicing_params())
     height_clamp: bool = True
-    # Course basse du Z firmware (pivot) : B est borne pour que Z >= firmware_z_min.
-    # None = aucune borne. Opt-in.
-    firmware_z_min: Optional[float] = None
     reorientation_tiers: Optional[tuple[float, ...]] = (45.0, 90.0, 181.0)
     reorientation_rounds: int = 4
     # Lissage non planaire P2-P5 (pipeline/bird/skin). None = corps seul.
