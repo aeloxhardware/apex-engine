@@ -30,9 +30,12 @@ from pipeline.step6_toolpath2d import (
     Step6Params,
     _classify_contours,
     _generate_infill,
+    _generate_spiral_infill,
     _interpolate_out_of_plane,
     _offset_walls,
     _lift_to_3d,
+    _oscillating_spiral_polyline,
+    _plate_axis_in_local_2d,
     _merge_short_runs,
     _monotonic_runs,
     _out_of_plane_offset,
@@ -1270,3 +1273,140 @@ def test_continuous_rings_closes_original_contour(flat_box_layers):
     assert open_ones and closed_ones
     assert all(len(p) == n for p, n in open_ones)
     assert all(len(p) == n + 1 and np.allclose(p[0], p[-1]) for p, n in closed_ones)
+
+
+def test_monotonic_runs_ignores_oscillation_below_min_amplitude():
+    # Bruit de 4 um autour d'une couche plate : une seule course, pas une coupe par oscillation.
+    offsets = 0.002 * np.sin(np.arange(200) * 1.7)
+    assert len(_monotonic_runs(offsets)) > 50                      # defaut historique : coupe partout
+    assert _monotonic_runs(offsets, min_amplitude=0.05) == [(0, 200)]
+
+
+def test_monotonic_runs_still_cuts_a_real_reversal_with_min_amplitude():
+    offsets = np.concatenate([np.linspace(0, 1, 50), np.linspace(1, 0, 50)[1:]])
+    assert _monotonic_runs(offsets, min_amplitude=0.05) == [(0, 50), (50, 99)]
+
+
+# ---------------------------------------------------------------------------
+# OSCILLATING_SPIRAL
+# ---------------------------------------------------------------------------
+
+def _spiral_params(**overrides):
+    base = dict(nozzle_width=0.4, wall_count=2, infill_density=0.2,
+                infill_pattern=InfillPattern.OSCILLATING_SPIRAL)
+    base.update(overrides)
+    return Step6Params(**base)
+
+
+def _disk(radius=13.0):
+    from shapely.geometry import Point
+    return Point(0.0, 0.0).buffer(radius, resolution=64)
+
+
+def _raw_spiral(rho, pitch=3.1, amplitude=0.48, seed=0, rank=0):
+    rng = np.random.default_rng([seed, rank])
+    return _oscillating_spiral_polyline(
+        np.zeros(2), 0.0, 13.0, pitch, amplitude, 1.6, rho, 0.4, rng,
+        first_sign=1.0, angle_offset=0.0,
+    )
+
+
+@pytest.mark.parametrize("rho", [0.0, 0.5, 1.0])
+def test_oscillating_spiral_never_goes_backward_and_never_crosses_itself(rho):
+    """Le plateau ne recule jamais (theta croissant) et la trajectoire ne se
+    recoupe pas : deux pics purement radiaux consecutifs repasseraient sur la
+    meme ligne (defaut trouve a la mise au point)."""
+    from shapely.geometry import LineString
+    line = _raw_spiral(rho)
+    angles = np.unwrap(np.arctan2(line[:, 1], line[:, 0]))
+    assert np.all(np.diff(angles) >= -1e-9)
+    assert LineString(line).is_simple
+
+
+def test_oscillating_spiral_has_radial_peaks_that_do_not_advance_only_when_randomized():
+    def stationary(line):
+        radii = np.hypot(line[:, 0], line[:, 1])
+        angles = np.unwrap(np.arctan2(line[:, 1], line[:, 0]))
+        return int(np.sum((np.abs(np.diff(angles)) < 1e-9) & (np.abs(np.diff(radii)) > 1e-3)))
+    assert stationary(_raw_spiral(0.0)) == 0
+    assert stationary(_raw_spiral(1.0)) > 0
+
+
+def test_oscillating_spiral_amplitude_is_capped_so_neighbouring_turns_never_touch():
+    pitch, width = 3.1, 0.4
+    line = _raw_spiral(1.0, pitch=pitch, amplitude=50.0)          # seuil demande absurde
+    angles = np.unwrap(np.arctan2(line[:, 1], line[:, 0]))
+    deviation = np.hypot(line[:, 0], line[:, 1]) - pitch * angles / (2 * np.pi)
+    assert np.abs(deviation).max() <= 0.5 * (pitch - width) + 1e-9
+
+
+@pytest.mark.parametrize("rho", [0.0, 0.5, 1.0])
+def test_oscillating_spiral_infill_hits_the_requested_density_inside_the_zone(rho):
+    from shapely.geometry import LineString
+    params = _spiral_params(spiral_randomization_threshold=rho)
+    chains = _generate_spiral_infill(_disk(), params, 0, np.zeros(2))
+    zone = _disk().buffer(-0.2, join_style="mitre")
+    length = sum(float(np.linalg.norm(np.diff(c, axis=0), axis=1).sum()) for c in chains)
+    assert length * 0.4 / zone.area == pytest.approx(0.2, rel=0.12)
+    assert all(zone.buffer(1e-3).covers(LineString(c)) for c in chains)
+
+
+def test_oscillating_spiral_is_reproducible_and_alternates_between_layers():
+    params = _spiral_params()
+    a = _generate_spiral_infill(_disk(), params, 0, np.zeros(2))
+    b = _generate_spiral_infill(_disk(), params, 0, np.zeros(2))
+    assert len(a) == len(b) and all(np.array_equal(x, y) for x, y in zip(a, b))
+    other_seed = _generate_spiral_infill(_disk(), _spiral_params(spiral_seed=7), 0, np.zeros(2))
+    assert not np.array_equal(a[0], other_seed[0])
+    odd = _generate_spiral_infill(_disk(), params, 1, np.zeros(2))
+    assert not np.array_equal(a[0][: len(odd[0])], odd[0][: len(a[0])])
+
+
+def test_oscillating_spiral_layers_share_the_same_median_line():
+    """Les couches se superposent sur la meme ligne mediane : l'ecart radial
+    de chaque couche a la spirale de base reste borne (plus de decalage d'un
+    demi-pas entre couches)."""
+    pitch = 2.0
+    params = _spiral_params(spiral_randomization_threshold=0.7)
+    for rank in (0, 1):
+        for chain in _generate_spiral_infill(_disk(), params, rank, np.zeros(2)):
+            angles = np.unwrap(np.arctan2(chain[:, 1], chain[:, 0]))
+            radius = np.hypot(chain[:, 0], chain[:, 1])
+            offset = np.mod(radius - pitch * angles / (2 * np.pi) + pitch / 2, pitch) - pitch / 2
+            assert np.abs(offset).max() < 0.5 * pitch
+
+
+def test_oscillating_spiral_connectors_never_make_the_plate_go_backward():
+    from pipeline.step6_toolpath2d import _angle_nondecreasing
+    for rank in (0, 1):
+        for chain in _generate_spiral_infill(_disk(), _spiral_params(spiral_randomization_threshold=1.0),
+                                             rank, np.zeros(2)):
+            assert _angle_nondecreasing(chain, np.zeros(2))
+
+
+def test_plate_axis_in_local_2d_follows_the_layer_plane():
+    frame = (np.array([5.0, 2.0, 1.0]), np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
+    assert np.allclose(_plate_axis_in_local_2d(frame, (0.0, 0.0, 0.0)), [-5.0, -2.0])
+    # plan incline de 45 deg autour de x, passant par l'origine : l'axe vertical
+    # x = y = 0 le coupe a l'origine, donc (0, 0) en local
+    tilt = (np.zeros(3), np.array([1.0, 0.0, 0.0]), np.array([0.0, np.cos(np.pi / 4), np.sin(np.pi / 4)]))
+    assert np.allclose(_plate_axis_in_local_2d(tilt, (0.0, 0.0, 3.0)), [0.0, 0.0], atol=1e-9)
+    # un axe decale de 1 mm en x se projette a 1 mm sur u
+    assert _plate_axis_in_local_2d(tilt, (1.0, 0.0, 0.0))[0] == pytest.approx(1.0)
+
+
+def test_oscillating_spiral_through_run_is_monotone_around_the_axis_and_alternates(flat_box_layers):
+    mesh_data, overhang_map, _layers = flat_box_layers
+    layers = [_flat_square_layer(0, 0.0), _flat_square_layer(1, 0.2)]
+    params = _spiral_params(spiral_axis_origin=(0.0, 0.0, 0.0), spiral_randomization_threshold=0.5)
+    result = toolpath_run(layers, mesh_data, overhang_map, params)
+    infills = []
+    for layer in result:
+        chains = [p for p in layer.toolpath_2d if not np.allclose(p[0, :2], p[-1, :2])]
+        assert chains, "le remplissage en spirale doit exister"
+        for chain in chains:
+            angles = np.unwrap(np.arctan2(chain[:, 1], chain[:, 0]))
+            assert np.all(np.diff(angles) >= -1e-9)
+        infills.append(max(chains, key=len))
+    n = min(len(infills[0]), len(infills[1]))
+    assert not np.allclose(infills[0][:n, :2], infills[1][:n, :2])

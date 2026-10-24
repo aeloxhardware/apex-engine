@@ -3278,6 +3278,69 @@ pour affichage/validation avant export G-code.
       Variantes `heat*` de `scripts/measure_matrix.py`, visualisation à curseur
       `scripts/plot_toolpath_slider.py`.
 
+80. **Étape 6 : un anneau était coupé à CHAQUE oscillation numérique du champ
+    (corrigé le 2026-10-24, `Step6Params.run_split_min_amplitude`, 0,05 mm dans
+    `main`).** Trouvé en slicant un cylindre plein (Ø30 × 10) : 9 076 courses
+    extrudées pour 50 couches, le périmètre extérieur en plus de 100 morceaux.
+    `_monotonic_runs` coupait au moindre changement de sens de l'offset hors-plan
+    (seuil 1e-12 mm) ; sur une couche plate l'anneau extérieur (257 points) a une
+    étendue d'offset de 3,8 µm et 122 changements de sens. Remède : hystérésis
+    d'amplitude (la coupure n'a lieu que si l'offset recule de plus que le seuil
+    depuis l'extremum, placée juste après l'extremum) ; défaut des fonctions
+    1e-12 = ancien comportement. Cylindre : 9 076 → 200 courses (4 par couche),
+    60 924 mouvements au lieu de 85 892, 0 collision.
+    **Mesure (variantes `legacy_runs` / `ref` de `measure_matrix.py`, Python pur,
+    résolution 0,8)** : l_shape matière sans appui 3,042 → 3,038 %, trajet à vide
+    −11 % ; l-triple 2,639 → 2,681 % (défauts d'ordre 78 → 82), trajet à vide
+    −14 % ; matière extrudée identique au mm près ; 0 collision. death : voir
+    `out/measure_matrix` (mesure longue en Python, résultat non consigné ici
+    tant qu'elle n'a pas fini). turkish NON mesuré. Les 5 tests de step6 verts,
+    2 ajoutés.
+
+81. **`InfillPattern.OSCILLATING_SPIRAL` (2026-10-24, opt-in, jamais activé par
+    défaut, NON mesuré sur les 4 modèles).** Idée de l'utilisateur : spirale
+    d'Archimède oscillante, alternée. Contrainte posée par l'utilisateur : le
+    plateau ne doit jamais reculer (mouvement continu, pics = mouvements radiaux,
+    éventuellement « qui n'avancent pas »).
+    - **Construction** (`_oscillating_spiral_polyline`) : en coordonnées polaires
+      (θ, r) autour de l'AXE DU PLATEAU, r = pas·θ/2π + déviation ; points de
+      contrôle dont θ ne décroît jamais ; deux points au même θ = pic purement
+      radial (jamais deux de suite : la tête repasserait sur la même ligne, la
+      polyligne cessait d'être simple) ; entre deux points, droite (pic net) ou
+      cosinus (courbe), toujours monotone en θ.
+    - **Réglages** : `spiral_alternation_threshold` (« Seuil d'Alternance », écart
+      radial des pics, plafonné à (pas − buse)/2 : deux tours voisins restent à
+      ≥ 1 buse), `spiral_peak_spacing`, `spiral_randomization_threshold`
+      (« Seuil de Randomisation » 0-1 : amplitude, espacement, forme et pics
+      radiaux tirés au hasard), `spiral_seed` (graine fixe + rang d'isovaleur :
+      reproductible, tirages différents d'une couche à l'autre).
+    - **Alternance** (corrigée le 2026-10-24 sur demande de l'utilisateur : la
+      première version décalait les couches impaires d'un demi-pas, contresens sur
+      son dessin) : TOUTES les couches suivent la MÊME ligne médiane et se
+      superposent ; seules les aspérités diffèrent (rang impair : première
+      déviation de signe opposé, tirages différents). Même sens de rotation du
+      plateau à toutes les couches.
+    - **Centre** : `spiral_axis_origin`, dérivé de `MachineProfile.platform_origin`
+      par `main._effective_toolpath2d_params` (appelé par `run_pipeline` ET
+      `run_slicing_only`, synchronisés d'emblée) ; l'axe est projeté dans le plan
+      de la couche (`_plate_axis_in_local_2d`). Sans lui : centre de la zone.
+    - **Densité** : le pas est corrigé d'après la longueur réellement déposée
+      (amplitude et longueur d'onde figées avant, sinon la boucle ne converge pas) :
+      disque Ø26, cible 0,20 → 0,201 à 0,207 pour une randomisation de 0 à 1.
+    - **Raccords** : entre morceaux clippés, le long du bord, REFUSÉS s'ils feraient
+      reculer θ (chaîne coupée, donc trajet à vide) : `_angle_nondecreasing`.
+    - **Mesuré sur le cylindre** (randomisation 0,5) : 0 collision, 0 orientation
+      inatteignable ; dans le G-code, 0 recul de l'axe Y du firmware sur 83 786
+      mouvements de remplissage extrudés. Les parois, elles, tournent dans l'autre
+      sens (121 courses sur 933).
+    - **Limites assumées** : le rayon de départ vaut un demi-pas (trou central
+      d'environ 0,8 mm de rayon, C tourne très vite près de l'axe) ; la monotonie
+      est celle de l'angle LOCAL autour de l'axe, pas de l'angle 3D sur une couche
+      très inclinée ; pièce hors axe : la spirale devient des arcs et les raccords
+      peuvent imposer des trajets à vide ; chemin natif (`APEX_NATIVE_FILL`) non
+      porté (repli Python). Aucun gain mécanique mesuré : motif disponible, non
+      recommandé par défaut. Tests : 8 (`tests/test_step6_toolpath2d.py`).
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.
