@@ -1270,3 +1270,15 @@ def test_continuous_rings_closes_original_contour(flat_box_layers):
     assert open_ones and closed_ones
     assert all(len(p) == n for p, n in open_ones)
     assert all(len(p) == n + 1 and np.allclose(p[0], p[-1]) for p, n in closed_ones)
+
+
+def test_monotonic_runs_ignores_oscillation_below_min_amplitude():
+    # Bruit de 4 um autour d'une couche plate : une seule course, pas une coupe par oscillation.
+    offsets = 0.002 * np.sin(np.arange(200) * 1.7)
+    assert len(_monotonic_runs(offsets)) > 50                      # defaut historique : coupe partout
+    assert _monotonic_runs(offsets, min_amplitude=0.05) == [(0, 200)]
+
+
+def test_monotonic_runs_still_cuts_a_real_reversal_with_min_amplitude():
+    offsets = np.concatenate([np.linspace(0, 1, 50), np.linspace(1, 0, 50)[1:]])
+    assert _monotonic_runs(offsets, min_amplitude=0.05) == [(0, 50), (50, 99)]

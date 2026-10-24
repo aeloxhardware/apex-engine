@@ -32,6 +32,9 @@ from scripts.export_slicing_preview import run_slicing_only  # noqa: E402
 def apply_variant(params: PipelineParams, name: str) -> None:
     if name == "ref":
         return
+    if name == "legacy_runs":       # coupure a la moindre oscillation (avant run_split_min_amplitude)
+        params.toolpath2d.run_split_min_amplitude = 1e-12
+        return
     if name == "placed":            # modele pose a z = 0 a l'ingestion (2026-10-13)
         params.place_on_platform = True
         return
