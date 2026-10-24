@@ -32,12 +32,13 @@ inline const char* to_string(ConstraintType v) {
     return "";
 }
 
-enum class InfillPattern { LINES, GRID, CROSSED_ZIGZAG };
+enum class InfillPattern { LINES, GRID, CROSSED_ZIGZAG, OSCILLATING_SPIRAL };
 inline const char* to_string(InfillPattern v) {
     switch (v) {
         case InfillPattern::LINES: return "lines";
         case InfillPattern::GRID: return "grid";
         case InfillPattern::CROSSED_ZIGZAG: return "crossed_zigzag";
+        case InfillPattern::OSCILLATING_SPIRAL: return "oscillating_spiral";
     }
     return "";
 }
@@ -160,6 +161,12 @@ struct Step6Params {
     bool split_rings_into_runs{false};
     bool split_open_polylines{false};
     bool continuous_rings{false};
+    double run_split_min_amplitude{1e-12};
+    std::optional<std::array<double, 3>> spiral_axis_origin{std::nullopt};
+    std::optional<double> spiral_alternation_threshold{std::nullopt};
+    std::optional<double> spiral_peak_spacing{std::nullopt};
+    double spiral_randomization_threshold{0.5};
+    int spiral_seed{0};
 };
 
 struct HoleCostModel {
@@ -284,7 +291,7 @@ struct PipelineParams {
     FieldSolverParams field_solver{FieldSolverParams{.laplacian_smoothness_weight = 1.0, .gradient_overhang_weight = 5.0, .resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .gradient_baseline_weight = 1.0, .overhang_influence_depth = 1, .enable_platform_anchor = true, .platform_anchor_weight = 1000000.0, .platform_anchor_value = 0.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .direction_blend_radius = 10.0, .direction_blend_power = 2.0, .direction_blend_min_norm = 0.1, .enforce_upward_growth = true, .upward_growth_epsilon = 1e-09, .max_downward_growth_angle_deg = std::nullopt, .use_geodesic_directions = false, .geodesic_source_weight = 0.0, .geodesic_saddle_threshold_deg = 100.0, .geodesic_smoothing_iterations = 0, .geodesic_smoothing_step = 0.5, .support_feedback_iterations = 0, .radial_tilt_origin = std::nullopt, .support_feedback_min_improvement = 0.02, .support_feedback_threshold_deg = 45.0, .support_feedback_weight = 4.0, .support_feedback_use_geodesic_target = false, .smoothness_modulation_strength = 0.0, .smoothness_modulation_floor = 0.02, .transition_distance_mm = std::nullopt, .heat_method_time_factor = 100.0, .use_heat_geodesic_field = false, .heat_project_reachable = false, .multibranch = false, .planar_parts = false, .planar_parts_partition = "region", .planar_reeb_band_mm = 4.0, .multibranch_min_branch_tets = 40, .multibranch_direction_mode = "region", .multibranch_smoothing_iterations = 0, .multibranch_partition = "region", .multibranch_flow_angle_deg = 30.0, .multibranch_use_risk_weights = true, .multibranch_order_by_branch = true, .multibranch_blend_directions = false, .multibranch_vertical_if_safe = std::nullopt, .support_feedback_require_in_air = false, .support_feedback_in_air_threshold_mm = 1.0}};
     std::optional<std::vector<Constraint>> constraints{std::nullopt};
     LayerParams layers{LayerParams{.layer_height_base = 0.2, .weld_tolerance_factor = 1e-06, .split_disjoint_clusters = std::nullopt, .support_driven_order = std::nullopt, .geodesic_order = false, .frontier_order = false, .isovalue_order = false, .nozzle_width = std::nullopt, .support_horizontal_radius_factor = 2.5, .support_vertical_height_factor = 7.5, .platform_contact_tolerance_factor = 2.5, .support_rotation_axes = std::nullopt, .support_direction_candidate_count = 26}};
-    Step6Params toolpath2d{Step6Params{.nozzle_width = 0.4, .wall_count = 2, .infill_density = 0.2, .infill_pattern = InfillPattern::CROSSED_ZIGZAG, .bridge_contour_ratio_threshold = 0.05, .bridge_anchor_extra_walls = 2, .degenerate_area_ratio = 1e-06, .out_of_plane_interpolation_power = 2.0, .split_rings_into_runs = true, .split_open_polylines = false, .continuous_rings = true}};
+    Step6Params toolpath2d{Step6Params{.nozzle_width = 0.4, .wall_count = 2, .infill_density = 0.2, .infill_pattern = InfillPattern::CROSSED_ZIGZAG, .bridge_contour_ratio_threshold = 0.05, .bridge_anchor_extra_walls = 2, .degenerate_area_ratio = 1e-06, .out_of_plane_interpolation_power = 2.0, .split_rings_into_runs = true, .split_open_polylines = false, .continuous_rings = true, .run_split_min_amplitude = 0.05, .spiral_axis_origin = std::nullopt, .spiral_alternation_threshold = std::nullopt, .spiral_peak_spacing = std::nullopt, .spiral_randomization_threshold = 0.5, .spiral_seed = 0}};
     Step7Params scheduling{Step7Params{.surface_color_distance = 0.5, .hole_cost_model = HoleCostModel{.reheat_penalty = 1.0, .adhesion_risk_weight = 1.0}, .purge_cost_model = PurgeCostModel{.volume_per_purge = 1.0, .time_per_purge = 1.0}, .max_open_holes = 4, .escape_direction_count = 16, .rotation_axes = std::nullopt, .deadline_ray_samples = 24}};
     std::optional<ColorMap> color_map{std::nullopt};
     Step8Params machine_toolpath{Step8Params{.ik_samples_per_axis = 10, .ik_refine_iterations = 8, .ik_refine_step_multiplier = 0.5, .singularity_radius_epsilon = 0.001, .travel_feedrate = 0.0, .default_feedrate = 1000.0, .max_unreachable_angular_error_deg = 5.0, .clamp_angle_rates = false, .free_axis_median_window = 9, .per_point_normal = true, .per_point_normal_nodal = false}};

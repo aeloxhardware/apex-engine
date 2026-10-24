@@ -60,6 +60,12 @@ class InfillPattern(Enum):
     # l'axe u du repere local une couche sur deux et selon l'axe v l'autre
     # (voir `_infill_angle_for_layer`)
     CROSSED_ZIGZAG = "crossed_zigzag"
+    # spirale d'Archimede autour de l'AXE DU PLATEAU, oscillante : r(theta)
+    # avec theta qui ne recule jamais (le plateau tourne toujours dans le meme
+    # sens, les pics sont des mouvements radiaux). MEME ligne mediane a toutes
+    # les couches (elles se superposent) ; seules les asperites different
+    # d'une couche a l'autre (phase opposee, tirages differents).
+    OSCILLATING_SPIRAL = "oscillating_spiral"
 
 
 @dataclass
@@ -134,6 +140,34 @@ class Step6Params:
     # jonction reste monotone, elle prend le sens du troncon suivant), et les
     # contours n=0 recoivent leur point de fermeture. False = historique.
     continuous_rings: bool = False
+
+    # Amplitude minimale (mm) d'un changement de sens pour COUPER un troncon
+    # monotone. Le defaut 1e-12 reproduit l'ancien comportement (toute
+    # oscillation, meme numerique, coupe). Mesure sur un cylindre plein
+    # (couche plate) : l'anneau exterieur a 257 points et une etendue d'offset
+    # de 3,8 um, soit 122 changements de sens -> 160 polylignes par couche au
+    # lieu de 4, chacune avec son trajet a vide. Une oscillation sous cette
+    # amplitude est du bruit du marching tetrahedra, bien en dessous de
+    # l'epaisseur d'un cordon : elle ne cree aucun appui manquant.
+    run_split_min_amplitude: float = 1e-12
+
+    # --- OSCILLATING_SPIRAL (opt-in) --------------------------------------
+    # Point de l'axe du plateau (x, y, z, repere machine) : centre de la
+    # spirale. Source de verite unique = MachineProfile.platform_origin
+    # (renseigne par main) ; None = centre de la zone (la monotonie de theta
+    # n'est alors garantie qu'autour de ce centre, pas autour de l'axe).
+    spiral_axis_origin: tuple[float, float, float] | None = None
+    # "Seuil d'Alternance" (mm) : ecart radial des pics. None = 0,6 x la
+    # limite (pas - buse) / 2. Toujours plafonne a (pas - buse) / 2 : deux
+    # tours voisins ne se touchent jamais.
+    spiral_alternation_threshold: float | None = None
+    # Distance (mm, le long de la trajectoire) entre deux pics. None = 4 buses.
+    spiral_peak_spacing: float | None = None
+    # "Seuil de Randomisation" dans [0, 1] : 0 = oscillation reguliere,
+    # 1 = amplitude, espacement, forme (pic net / courbe) et pics purement
+    # radiaux tires au hasard. Graine fixe : resultat reproductible.
+    spiral_randomization_threshold: float = 0.5
+    spiral_seed: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -709,6 +743,211 @@ def _boundary_connector(
     return None
 
 
+# ---------------------------------------------------------------------------
+# OSCILLATING_SPIRAL
+# ---------------------------------------------------------------------------
+
+_SPIRAL_SAMPLE_STEP_FACTOR = 0.5       # pas d'echantillonnage = 0,5 buse
+_SPIRAL_MIN_RADIUS_PITCHES = 0.5       # rayon de depart : pres de l'axe, C tourne tres vite
+_SPIRAL_DENSITY_TOLERANCE = 0.05
+_SPIRAL_DENSITY_ITERATIONS = 6
+_SPIRAL_STOP_PROBABILITY = 0.3         # part (x randomisation) de pics purement radiaux
+
+
+def _layer_rank(layer: Layer, isovalue_rank: dict) -> int:
+    if layer.isovalue is not None and layer.isovalue in isovalue_rank:
+        return int(isovalue_rank[layer.isovalue])
+    return int(layer.id)
+
+
+def _plate_axis_in_local_2d(
+    local_frame: tuple[np.ndarray, np.ndarray, np.ndarray], axis_origin: tuple[float, float, float]
+) -> np.ndarray:
+    """
+    Intersection de l'axe du plateau (vertical, passant par `axis_origin`) avec
+    le plan de la couche, en coordonnees locales (u, v). Couche quasi
+    verticale (pas d'intersection stable) : projection du point lui-meme.
+    """
+    origin, axis_u, axis_v = (np.asarray(a, dtype=float) for a in local_frame)
+    normal = np.cross(axis_u, axis_v)
+    normal /= max(float(np.linalg.norm(normal)), 1e-12)
+    a0 = np.asarray(axis_origin, dtype=float)
+    denom = float(normal[2])
+    point = a0 if abs(denom) < 0.1 else a0 + np.array([0.0, 0.0, float(normal @ (origin - a0)) / denom])
+    d = point - origin
+    return np.array([float(d @ axis_u), float(d @ axis_v)])
+
+
+def _oscillating_spiral_polyline(
+    center: np.ndarray, r_min_zone: float, r_max: float, pitch: float, amplitude: float,
+    wavelength: float, randomization: float, nozzle_width: float, rng: np.random.Generator,
+    first_sign: float, angle_offset: float,
+) -> np.ndarray:
+    """
+    Spirale r = pitch * theta / 2pi, oscillante, en coordonnees polaires
+    (theta, r) autour de `center` : une suite de points de controle dont theta
+    ne decroit JAMAIS (deux points au meme theta = pic qui n'avance pas,
+    mouvement purement radial). Entre deux points, la deviation radiale suit
+    une droite (pic net) ou un cosinus (courbe), toujours monotone en theta.
+    `angle_offset` pivote toute la spirale (pi = decalage d'un demi-pas).
+    """
+    rho = float(np.clip(randomization, 0.0, 1.0))
+    cap = max(0.0, 0.5 * (pitch - nozzle_width))   # deux tours voisins restent a >= 1 buse
+    amp = min(amplitude, cap)
+    step = nozzle_width * _SPIRAL_SAMPLE_STEP_FACTOR
+    r_start = max(_SPIRAL_MIN_RADIUS_PITCHES * pitch, r_min_zone - 2.0 * amp)
+    theta = 2.0 * np.pi * r_start / pitch
+    theta_end = 2.0 * np.pi * (r_max + 2.0 * amp) / pitch
+    base = lambda th: pitch * th / (2.0 * np.pi)
+
+    ctrl_theta = [theta]
+    ctrl_dev = [0.0]
+    ctrl_curve = [False]
+    sign = first_sign
+    min_half = nozzle_width
+    k = 0
+    prev_stop = False
+    while theta < theta_end and amp > 0.0:
+        r_eff = max(base(theta), r_start)
+        half = max(min_half, 0.5 * wavelength * (1.0 + rho * 0.6 * rng.uniform(-1.0, 1.0)))
+        # jamais deux pics radiaux de suite : la tete repasserait sur la meme ligne
+        stop = k > 0 and not prev_stop and rng.random() < _SPIRAL_STOP_PROBABILITY * rho
+        prev_stop = stop
+        a_k = float(np.clip(amp * (1.0 + rho * rng.uniform(-0.6, 0.0)), 0.25 * amp, amp))
+        curve = bool(rho > 0.0 and rng.random() < 0.5)
+        theta = theta if stop else theta + half / r_eff
+        ctrl_theta.append(theta)
+        ctrl_dev.append(sign * a_k)
+        ctrl_curve.append(curve)
+        sign = -sign
+        k += 1
+    if amp <= 0.0:
+        ctrl_theta.append(theta_end)
+        ctrl_dev.append(0.0)
+        ctrl_curve.append(False)
+
+    thetas: list[np.ndarray] = [np.array([ctrl_theta[0]])]
+    devs: list[np.ndarray] = [np.array([ctrl_dev[0]])]
+    for i in range(1, len(ctrl_theta)):
+        t0, t1 = ctrl_theta[i - 1], ctrl_theta[i]
+        d0, d1 = ctrl_dev[i - 1], ctrl_dev[i]
+        r_eff = max(base(t1), r_start)
+        length = max((t1 - t0) * r_eff, abs(d1 - d0), 1e-9)
+        n = max(1, int(np.ceil(length / step)))
+        s = np.linspace(0.0, 1.0, n + 1)[1:]
+        thetas.append(t0 + (t1 - t0) * s)
+        ease = (1.0 - np.cos(np.pi * s)) / 2.0 if ctrl_curve[i] else s
+        devs.append(d0 + (d1 - d0) * ease)
+    th = np.concatenate(thetas)
+    r = base(th) + np.concatenate(devs)
+    ang = th + angle_offset
+    return np.column_stack([center[0] + r * np.cos(ang), center[1] + r * np.sin(ang)])
+
+
+def _angle_nondecreasing(points: np.ndarray, center: np.ndarray, tolerance: float = 1e-9) -> bool:
+    """Angle polaire autour de `center` (deroule) jamais decroissant le long de `points`."""
+    d = points - center
+    if np.any(np.hypot(d[:, 0], d[:, 1]) < 1e-9):
+        return True            # passage par l'axe : angle indetermine, rien a verifier
+    angles = np.unwrap(np.arctan2(d[:, 1], d[:, 0]))
+    return bool(np.all(np.diff(angles) >= -tolerance))
+
+
+def _generate_spiral_infill(
+    boundary: Polygon, params: "Step6Params", rank: int, axis_local: np.ndarray | None
+) -> list[np.ndarray]:
+    """
+    Remplissage OSCILLATING_SPIRAL d'une zone. Toutes les couches suivent la
+    MEME spirale mediane (elles se superposent) ; seules les asperites
+    different : oscillation en opposition de phase une couche sur deux et
+    tirages differents (graine + rang). Le pas est corrige
+    d'apres la longueur REELLEMENT deposee pour tenir `infill_density`.
+    Les raccords entre morceaux suivent le bord (comme le zigzag) et ne sont
+    pas garantis monotones en theta.
+    """
+    from shapely.prepared import prep
+
+    if boundary is None or boundary.is_empty or params.infill_density <= 0:
+        return []
+    width = params.nozzle_width
+    zone = boundary.buffer(-width / 2.0, join_style="mitre")
+    if zone.is_empty or zone.area <= 0:
+        return []
+    density = min(params.infill_density, 1.0)
+    coords_all = np.vstack([np.asarray(piece.exterior.coords) for piece in _polygon_pieces(zone)])
+    center = np.asarray(axis_local, dtype=float) if axis_local is not None else np.array(zone.centroid.coords[0])
+    radii = np.linalg.norm(coords_all - center, axis=1)
+    r_max = float(radii.max())
+    r_min_zone = 0.0 if zone.contains(shapely.Point(center)) else float(zone.distance(shapely.Point(center)))
+    minx, miny, maxx, maxy = zone.bounds
+    diagonal = float(np.hypot(maxx - minx, maxy - miny))
+    min_pitch = max(2.0 * diagonal / _MAX_INFILL_LINES, 1e-6)
+
+    pitch = max(width / density, min_pitch)
+    odd = rank % 2 == 1
+    best: LineString | None = None
+    # amplitude et longueur d'onde fixees UNE fois (a partir du pas nominal) :
+    # sinon le pas corrige les ferait varier et la correction de densite ne
+    # convergerait pas.
+    amplitude = (
+        params.spiral_alternation_threshold
+        if params.spiral_alternation_threshold is not None
+        else 0.6 * max(0.0, 0.5 * (pitch - width))
+    )
+    wavelength = params.spiral_peak_spacing if params.spiral_peak_spacing is not None else 4.0 * width
+    for _ in range(_SPIRAL_DENSITY_ITERATIONS):
+        rng = np.random.default_rng([int(params.spiral_seed) & 0xFFFFFFFF, int(rank)])
+        line = _oscillating_spiral_polyline(
+            center, r_min_zone, r_max, pitch, amplitude, wavelength,
+            params.spiral_randomization_threshold, width, rng,
+            first_sign=-1.0 if odd else 1.0, angle_offset=0.0,
+        )
+        clipped = LineString(line).intersection(zone)
+        length = float(clipped.length)
+        best = clipped
+        achieved = length * width / zone.area
+        ratio = achieved / density if density > 0 else 1.0
+        if abs(ratio - 1.0) <= _SPIRAL_DENSITY_TOLERANCE or length <= 0:
+            break
+        pitch = max(pitch * float(np.clip(ratio, 0.5, 2.0)), min_pitch)
+    if best is None or best.is_empty:
+        return []
+
+    pieces = [np.asarray(g.coords) for g in (best.geoms if hasattr(best, "geoms") else [best])
+              if g.geom_type == "LineString" and len(g.coords) >= 2]
+    if not pieces:
+        return []
+    # ordre le long de la spirale : position du premier point sur la ligne
+    line_geom = LineString(line)
+    order = shapely.line_locate_point(line_geom, shapely.points(np.array([p[0] for p in pieces])))
+    pieces = [pieces[i] for i in np.argsort(order, kind="stable")]
+
+    inside = prep(zone.buffer(max(1e-6, pitch * 1e-4)))
+    max_connector = _ZIGZAG_MAX_CONNECTOR_SPACINGS * pitch
+    rings = [LineString(ring.coords) for piece in _polygon_pieces(zone) for ring in (piece.exterior, *piece.interiors)]
+    chains: list[np.ndarray] = []
+    current = pieces[0]
+    for nxt in pieces[1:]:
+        end, start = current[-1], nxt[0]
+        gap = float(np.linalg.norm(start - end))
+        connector = _boundary_connector(end, start, rings, max_connector) if gap <= max_connector else None
+        if connector is None and gap > 0 and (gap > max_connector or not inside.covers(LineString([end, start]))):
+            chains.append(current)
+            current = nxt
+            continue
+        joint = np.vstack([end[None, :], connector if connector is not None else np.empty((0, 2)), start[None, :]])
+        if not _angle_nondecreasing(joint, center):
+            # un raccord qui ferait reculer le plateau : trajet a vide a la place
+            chains.append(current)
+            current = nxt
+            continue
+        parts = [current] + ([connector] if connector is not None and len(connector) else []) + [nxt]
+        current = np.vstack(parts)
+    chains.append(current)
+    return chains
+
+
+
 def _infill_angle_for_layer(layer: Layer, isovalue_rank: dict) -> float:
     """
     Orientation du balayage d'une couche normale (hors pont) en
@@ -845,7 +1084,7 @@ def _reorient_bridge_toolpath(
 # qu'un seul anneau dans le repere local 2D d'une seule couche.
 # ---------------------------------------------------------------------------
 
-def _monotonic_runs(offsets: np.ndarray) -> list[tuple[int, int]]:
+def _monotonic_runs(offsets: np.ndarray, min_amplitude: float = 1e-12) -> list[tuple[int, int]]:
     """
     Decoupe un anneau en troncons [start, stop) D'INDICES DISJOINTS (jamais de
     sommet partage entre deux troncons - un decoupage "un sommet partage a
@@ -854,11 +1093,14 @@ def _monotonic_runs(offsets: np.ndarray) -> list[tuple[int, int]]:
     independantes : bug reel mesure, l'anneau ressortait avec PLUS de points
     que l'original).
 
-    Troncons monotones en offset (croissant OU decroissant, un changement de
-    sens demarre un nouveau troncon). Un anneau plat (tous offsets egaux, cas
-    historique sans interpolation hors-plan) produit un seul troncon couvrant
-    tout l'anneau - non-regression : `_split_ring_into_runs` renvoie alors
-    l'anneau inchange, en une seule polyligne.
+    Troncons monotones en offset (croissant OU decroissant). Un changement de
+    sens ne coupe que si l'offset a recule de plus de `min_amplitude` depuis
+    l'extremum courant (hysteresis) : une oscillation plus petite est absorbee
+    par le troncon en cours. La coupure est placee juste apres l'extremum,
+    comme avant. Un anneau plat (tous offsets egaux, cas historique sans
+    interpolation hors-plan) produit un seul troncon couvrant tout l'anneau -
+    non-regression : `_split_ring_into_runs` renvoie alors l'anneau inchange,
+    en une seule polyligne.
     """
     n = len(offsets)
     if n <= 2:
@@ -866,19 +1108,32 @@ def _monotonic_runs(offsets: np.ndarray) -> list[tuple[int, int]]:
 
     runs: list[tuple[int, int]] = []
     start = 0
-    # direction courante : 0 = indeterminee (plateau), 1 = montee, -1 = descente
-    direction = 0
+    direction = 0                      # 0 = indeterminee, 1 = montee, -1 = descente
+    low = high = float(offsets[0])     # bornes tant que la direction est indeterminee
+    ext_index = 0
+    ext_value = float(offsets[0])      # extremum courant dans la direction suivie
     for i in range(1, n):
-        delta = offsets[i] - offsets[i - 1]
-        step_dir = 1 if delta > 1e-12 else (-1 if delta < -1e-12 else 0)
-        if step_dir == 0:
-            continue  # plateau : prolonge le troncon courant sans trancher
+        value = float(offsets[i])
         if direction == 0:
-            direction = step_dir
-        elif step_dir != direction:
-            runs.append((start, i))
-            start = i
-            direction = step_dir
+            low, high = min(low, value), max(high, value)
+            if value - low > min_amplitude:
+                direction, ext_index, ext_value = 1, i, value
+            elif high - value > min_amplitude:
+                direction, ext_index, ext_value = -1, i, value
+        elif direction == 1:
+            if value >= ext_value:
+                ext_index, ext_value = i, value
+            elif ext_value - value > min_amplitude:
+                runs.append((start, ext_index + 1))
+                start = ext_index + 1
+                direction, ext_index, ext_value = -1, i, value
+        else:
+            if value <= ext_value:
+                ext_index, ext_value = i, value
+            elif value - ext_value > min_amplitude:
+                runs.append((start, ext_index + 1))
+                start = ext_index + 1
+                direction, ext_index, ext_value = 1, i, value
     runs.append((start, n))
     return runs
 
@@ -983,7 +1238,9 @@ def _merge_short_runs(
     return merged
 
 
-def _split_ring_into_runs(ring: np.ndarray, share_vertices: bool = False) -> list[np.ndarray]:
+def _split_ring_into_runs(
+    ring: np.ndarray, share_vertices: bool = False, min_amplitude: float = 1e-12
+) -> list[np.ndarray]:
     """
     Decoupe un anneau FERME (K,3) (u, v, offset) en troncons monotones, chacun
     stocke dans le sens MONTANT - voir docstring de section pour la cause
@@ -1001,7 +1258,7 @@ def _split_ring_into_runs(ring: np.ndarray, share_vertices: bool = False) -> lis
     if len(ring) <= 2:
         return [ring]
 
-    runs = _monotonic_runs(ring[:, 2])
+    runs = _monotonic_runs(ring[:, 2], min_amplitude)
     if len(runs) <= 1:
         return [ring]
 
@@ -1020,7 +1277,10 @@ def _split_ring_into_runs(ring: np.ndarray, share_vertices: bool = False) -> lis
 
 
 def _split_rings_in_toolpath(
-    toolpath: list[np.ndarray], include_open_polylines: bool = False, share_vertices: bool = False
+    toolpath: list[np.ndarray],
+    include_open_polylines: bool = False,
+    share_vertices: bool = False,
+    min_amplitude: float = 1e-12,
 ) -> list[np.ndarray]:
     """
     Applique `_split_ring_into_runs` a chaque polyligne FERMEE de `toolpath`
@@ -1052,7 +1312,7 @@ def _split_rings_in_toolpath(
     result: list[np.ndarray] = []
     for poly in toolpath:
         if _is_closed_ring(poly) or include_open_polylines:
-            result.extend(_split_ring_into_runs(poly, share_vertices))
+            result.extend(_split_ring_into_runs(poly, share_vertices, min_amplitude))
         else:
             result.append(poly)
     return result
@@ -1193,7 +1453,7 @@ def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, pa
 
             if bridge_direction is not None:
                 generated = _reorient_bridge_toolpath(outer, holes, bridge_direction, params)
-            elif _native_fill_module() is not None:
+            elif _native_fill_module() is not None and params.infill_pattern in _NATIVE_PATTERN_CODES:
                 sweep_angle = (
                     _infill_angle_for_layer(layer, isovalue_rank)
                     if params.infill_pattern is InfillPattern.CROSSED_ZIGZAG
@@ -1217,10 +1477,19 @@ def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, pa
                     if params.infill_pattern is InfillPattern.CROSSED_ZIGZAG
                     else 0.0
                 )
-                infill = _generate_infill(
-                    innermost, params.infill_density, params.infill_pattern,
-                    params.nozzle_width, sweep_angle,
-                )
+                if params.infill_pattern is InfillPattern.OSCILLATING_SPIRAL:
+                    axis_local = (
+                        _plate_axis_in_local_2d(layer.local_frame, params.spiral_axis_origin)
+                        if params.spiral_axis_origin is not None else None
+                    )
+                    infill = _generate_spiral_infill(
+                        innermost, params, _layer_rank(layer, isovalue_rank), axis_local
+                    )
+                else:
+                    infill = _generate_infill(
+                        innermost, params.infill_density, params.infill_pattern,
+                        params.nozzle_width, sweep_angle,
+                    )
                 generated = infill + walls
 
             # contours d'origine n=0 (exterieur et trous), emis OUVERTS
@@ -1241,6 +1510,7 @@ def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, pa
             toolpath = _split_rings_in_toolpath(
                 toolpath, include_open_polylines=params.split_open_polylines,
                 share_vertices=params.continuous_rings,
+                min_amplitude=params.run_split_min_amplitude,
             )
 
         return replace(layer, toolpath_2d=toolpath)
