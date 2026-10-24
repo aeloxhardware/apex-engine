@@ -89,6 +89,18 @@ def _effective_field_solver_params(params: "PipelineParams"):
         return _replace(fs, radial_tilt_origin=np.asarray(m.platform_origin, dtype=float))
     return fs
 
+def _effective_toolpath2d_params(params: "PipelineParams"):
+    """Step6Params effectifs : `spiral_axis_origin` (centre de la spirale
+    OSCILLATING_SPIRAL) derive de `MachineProfile.platform_origin`, source de
+    verite unique de l'axe du plateau. Copie : `params` n'est jamais mute."""
+    from dataclasses import replace as _replace
+    tp = params.toolpath2d
+    origin = params.machine_profile.platform_origin
+    if tp.spiral_axis_origin is None and origin is not None:
+        return _replace(tp, spiral_axis_origin=tuple(float(x) for x in origin))
+    return tp
+
+
 def check_model_fits_machine(mesh_path: str, machine_profile: MachineProfile) -> None:
     """Refus DES L'ENTREE d'un modele qui ne tient sur le plateau dans aucune
     position (ModelTooLargeError), avant toute tetraedrisation. Placement-
@@ -632,7 +644,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
     print(f"[main]   {len(layers)} couche(s)")
 
     print("[main] Etape 6/10 - remplissage 2D par couche")
-    layers = toolpath2d_run(layers, mesh_data, overhang_map, params.toolpath2d)
+    layers = toolpath2d_run(layers, mesh_data, overhang_map, _effective_toolpath2d_params(params))
 
     print("[main] Etape 7/10 - couleur + ordonnancement")
     colored_layers, schedule = scheduling_run(
