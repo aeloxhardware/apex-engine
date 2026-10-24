@@ -1615,6 +1615,18 @@ def _finish_geometric_resolution(
     return current, None
 
 
+
+def _with_boundary_option(switches: str) -> str:
+    """Ajoute `Y` (aucun point de Steiner sur la surface) si APEX_TETGEN_Y=1.
+
+    Opt-in : certains maillages simplifies sont refuses par le raffinement
+    qualite de TetGen (`removevertexbyflips`) tant que la surface peut etre
+    decoupee ; avec `Y` ils passent. Aucun effet par defaut.
+    """
+    import os
+    return switches + "Y" if os.environ.get("APEX_TETGEN_Y") == "1" else switches
+
+
 def _tetrahedralize(
     mesh: trimesh.Trimesh,
     resolution: float,
@@ -2133,7 +2145,7 @@ def _tetrahedralize_once(
         # declare via add_region) ; -a sans valeur numerique explicite ne
         # fixe PAS de plafond global unique - verifie fonctionnel, aucun
         # crash, resultat mesure (CLAUDE.md).
-        tet.tetrahedralize(switches="pq1.2Aa")
+        tet.tetrahedralize(switches=_with_boundary_option("pq1.2Aa"))
     elif merged_junction_seed is not None:
         # Pas de raffinement plateau actif : 2 regions seulement ("junction"
         # + "rest"), sur le mesh brut (pas de PLC combine necessaire, aucune
@@ -2155,12 +2167,12 @@ def _tetrahedralize_once(
         # est le seul juge fiable de son propre comportement d'add_region).
         tet.add_region(1, rest_seed, max_tet_volume)
         tet.add_region(2, merged_junction_seed, junction_refinement_resolution ** 3)
-        tet.tetrahedralize(switches="pq1.2Aa")
+        tet.tetrahedralize(switches=_with_boundary_option("pq1.2Aa"))
     else:
         tet = tetgen.TetGen(mesh.vertices, mesh.faces)
         for hole_point in hole_points:
             tet.add_hole(hole_point)
-        tet.tetrahedralize(switches=f"pq1.2a{max_tet_volume:.10f}")
+        tet.tetrahedralize(switches=_with_boundary_option(f"pq1.2a{max_tet_volume:.10f}"))
 
     # Lire depuis les attributs de l'objet plutot que la valeur de retour :
     # le nombre de valeurs retournees par tetrahedralize() varie selon la
