@@ -510,12 +510,17 @@ def run_bird_pipeline(mesh_path: str, params: PipelineParams,
 
 
 def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_path: str,
-                         pivot_to_tip: Optional[float] = None, check_travel: bool = True):
+                         pivot_to_tip: Optional[float] = None, check_travel: bool = True,
+                         center_retract_radius=None):
     """Export G-code controle (comme scripts/export_model_gcode.py) : pointe jamais
     sous le plateau (`strict`), hauteur mini de la VRAIE tete selon B pour les
     degagements, L = derniere valeur de config/pivot_to_tip.json sinon 46 mm.
     `check_travel` : degagements controles contre la matiere deja deposee
-    (`material_travel_check`, comme la chaine de recherche), en natif si actif."""
+    (`material_travel_check`, comme la chaine de recherche), en natif si actif.
+    `center_retract_radius` : rayon (mm) de la zone centrale sans extrusion ou la
+    buse retracte au lieu de deposer (`file_io.center_zone`), ou "auto" = vitesse
+    d'impression / vitesse angulaire max du plateau (2,4 mm a 25 mm/s et 600 deg/s).
+    None = desactive."""
     from file_io.gcode_export import (GcodeParams, export_gcode, head_zlow_from_table, material_travel_check,
                                       toolpath_arrays)
     from file_io.pivot_length import current_pivot_to_tip
@@ -533,6 +538,16 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
                          [:, 2].min() for b in grid_b])
         head_zlow = head_zlow_from_table(grid_b, zlow)
     gp = GcodeParams(pivot_to_tip=pivot_to_tip, strict=True)
+    if center_retract_radius is not None:
+        from file_io.center_zone import apply_center_retract_zone, auto_center_radius
+        radius = (auto_center_radius(gp.print_speed, gp.fw_axis_speeds[1])
+                  if center_retract_radius == "auto" else float(center_retract_radius))
+        toolpath, zone = apply_center_retract_zone(toolpath, machine, radius)
+        if zone.applied:
+            print(f"[main] Zone centrale de retractation (rayon {zone.radius:.2f} mm) : "
+                  f"{zone.crossings} traversee(s), {zone.removed_length:.1f} mm de cordon non depose")
+        else:
+            print(f"[main] Zone centrale de retractation ignoree : {zone.skipped_reason}")
     arrays = toolpath_arrays(toolpath)
     travel_check = material_travel_check(arrays, machine, gp) if check_travel else None
     return export_gcode(arrays, machine, gp, out_path, head_zlow=head_zlow, travel_check=travel_check)
@@ -789,6 +804,12 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="G-code a produire (trajectoire ajustee, export controle : pointe jamais sous le plateau).",
     )
     parser.add_argument(
+        "--center-retract-radius", default=None, metavar="MM|auto",
+        help="Export G-code : rayon (mm) de la zone centrale ou la buse retracte au lieu de deposer "
+             "(plateau polaire : demi-tours a l'axe, pointe quasi immobile). 'auto' = vitesse "
+             "d'impression / vitesse angulaire max du plateau. Defaut : desactive.",
+    )
+    parser.add_argument(
         "--method", choices=("fem", "bird"), default="fem",
         help="Voie de tranchage : fem (champ scalaire, defaut) ou bird (deformation, limite #75).",
     )
@@ -803,6 +824,8 @@ def main(argv: Optional[list[str]] = None) -> int:
              "(chanfrein de pied). Defaut : aucun (comportement historique).",
     )
     args = parser.parse_args(argv)
+    center_radius = (None if args.center_retract_radius is None
+                     else "auto" if args.center_retract_radius == "auto" else float(args.center_retract_radius))
 
     params = PipelineParams(resolution=args.resolution)
     params.layers = LayerParams(layer_height_base=args.layer_height)
@@ -819,7 +842,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         bird_params.loop.base_min_height = args.base_min_height
         bird_result = run_bird_pipeline(args.mesh_path, params, bird=bird_params, loop_result=loop_result)
         if args.output_gcode:
-            _lines, report = export_gcode_checked(bird_result.adjusted_toolpath, params, args.output_gcode)
+            _lines, report = export_gcode_checked(bird_result.adjusted_toolpath, params, args.output_gcode,
+                                                  center_retract_radius=center_radius)
             print(f"[main] G-code ecrit : {args.output_gcode} ({report.moves} mouvements, "
                   f"{report.print_time_fw_s / 3600:.2f} h tous axes, Y cumule {report.y_turns:.1f} tours, "
                   f"degagements en contact {report.travel_collisions})")
@@ -827,7 +851,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     result = run_pipeline(args.mesh_path, params)
     if args.output_gcode:
-        _lines, report = export_gcode_checked(result.adjusted_toolpath, params, args.output_gcode)
+        _lines, report = export_gcode_checked(result.adjusted_toolpath, params, args.output_gcode,
+                                              center_retract_radius=center_radius)
         print(f"[main] G-code ecrit : {args.output_gcode} ({report.moves} mouvements)")
 
     if args.output_glb:

@@ -3341,6 +3341,41 @@ pour affichage/validation avant export G-code.
       porté (repli Python). Aucun gain mécanique mesuré : motif disponible, non
       recommandé par défaut. Tests : 8 (`tests/test_step6_toolpath2d.py`).
 
+82. **Zone centrale de rétractation à l'export (`file_io/center_zone.py`,
+    2026-10-24, opt-in `--center-retract-radius=MM|auto` /
+    `export_gcode_checked(center_retract_radius=...)`).** Constat de l'utilisateur
+    sur le cylindre imprimé : une « petite montagne » au centre (pas dans le
+    visualiseur). Mesuré dans le G-code AVANT correctif : aucune bosse en Z, pas
+    de surplus de matière par mm de trajet (0,033 mm de filament/mm constant),
+    **aucune rétractation à moins de 6 mm de l'axe** (199 sur 199 à R ≥ 14 mm) et
+    aucun début d'extrusion au centre. Cause retenue (hypothèse, NON prouvée sur
+    machine) : le zigzag est UNE polyligne continue qui traverse l'axe ; C étant
+    imposé par la position, le plateau doit y faire un demi-tour quasi instantané
+    (6 passages par couche à moins de 1 mm de l'axe), les limites de vitesse /
+    accélération du plateau ralentissent la pointe (vitesse estimée 4,6 à 7 mm/s
+    sous 1 mm au lieu de 25, pour une limite de 600 deg/s NON vérifiée) et le
+    filament continue d'être poussé sans avance de pression : suintement, amas.
+    - **Mécanisme** : tout segment extrudé est découpé au bord du disque de rayon
+      `r` centré sur `MachineProfile.platform_origin` ; la partie intérieure
+      devient un trajet à vide. L'export retracte déjà à chaque point sans
+      extrusion : rétractation, dégagement, dé-rétractation sortent sans rien
+      changer à `export_gcode`. Après la zone : un point de trajet puis un point
+      extrudé au même endroit (contrat step9 : une capsule exige deux points
+      extrudés consécutifs). L'angle de l'axe couplé des points créés est recalculé
+      depuis leur position (`coupled_axis_angle`).
+    - **Appliqué APRÈS la simulation** : step9/step9b/step10 voient la trajectoire
+      complète (collision prudente, matière supposée présente).
+    - **`auto`** : r = vitesse d'impression / vitesse angulaire max du plateau
+      (`GcodeParams.fw_axis_speeds[1]`, 600 deg/s par défaut) = 2,39 mm.
+    - **Coût assumé et chiffré** : de la matière n'est PAS déposée dans le disque.
+      Cylindre Ø30 × 10 à r = 2,39 mm : 100 traversées (2 par couche), 412,7 mm de
+      cordon non déposé, 200 rétractations en plus. Aucun cordon extrudé à moins de
+      2,39 mm de l'axe.
+    - **Non mesuré** : l'effet sur la bosse (à imprimer). Défaut `None` : jamais
+      activé sans mesure sur les quatre modèles. Hypothèse : axe du plateau
+      vertical. La voie Bird l'accepte aussi (même export).
+    - Tests : `tests/test_center_zone.py` (8).
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.
