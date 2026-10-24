@@ -71,7 +71,7 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
     fonctionne correctement quand il est reellement exerce).
     """
     t0 = time.time()
-    from main import _effective_field_solver_params, check_model_fits_machine
+    from main import _effective_field_solver_params, _effective_toolpath2d_params, check_model_fits_machine
     check_model_fits_machine(mesh_path, params.machine_profile)
 
     junction_zones = None
@@ -139,7 +139,7 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
     print(f"[preview]   {len(layers)} couche(s)")
 
     print("[preview] Etape 6/8 - remplissage 2D par couche")
-    layers = toolpath2d_run(layers, mesh_data, overhang_map, params.toolpath2d)
+    layers = toolpath2d_run(layers, mesh_data, overhang_map, _effective_toolpath2d_params(params))
 
     print("[preview] Etape 7/8 - couleur + ordonnancement")
     colored_layers, schedule = scheduling_run(
