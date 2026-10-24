@@ -1362,6 +1362,20 @@ def test_oscillating_spiral_is_reproducible_and_alternates_between_layers():
     assert not np.array_equal(a[0][: len(odd[0])], odd[0][: len(a[0])])
 
 
+def test_oscillating_spiral_layers_share_the_same_median_line():
+    """Les couches se superposent sur la meme ligne mediane : l'ecart radial
+    de chaque couche a la spirale de base reste borne (plus de decalage d'un
+    demi-pas entre couches)."""
+    pitch = 2.0
+    params = _spiral_params(spiral_randomization_threshold=0.7)
+    for rank in (0, 1):
+        for chain in _generate_spiral_infill(_disk(), params, rank, np.zeros(2)):
+            angles = np.unwrap(np.arctan2(chain[:, 1], chain[:, 0]))
+            radius = np.hypot(chain[:, 0], chain[:, 1])
+            offset = np.mod(radius - pitch * angles / (2 * np.pi) + pitch / 2, pitch) - pitch / 2
+            assert np.abs(offset).max() < 0.5 * pitch
+
+
 def test_oscillating_spiral_connectors_never_make_the_plate_go_backward():
     from pipeline.step6_toolpath2d import _angle_nondecreasing
     for rank in (0, 1):
