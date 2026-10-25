@@ -406,6 +406,8 @@ class GCode:
         self.pos: tuple[float, float, float] | None = None   # piece (x,y,z)
         self.c_min = 0.0
         self.c_max = 0.0
+        self.trace = None      # liste optionnelle (x, y, z, extrude, couche), pour les apercus
+        self.layer = 0
 
     def raw(self, s: str = "") -> None:
         self.lines.append(s)
@@ -440,6 +442,8 @@ class GCode:
         self.c, self._r, self._z = c, r, mz
         self.pos = (x, y, z)
         self.c_min, self.c_max = min(self.c_min, c), max(self.c_max, c)
+        if self.trace is not None:
+            self.trace.append((x, y, z, extrude and true_len > 0.0, self.layer))
 
     def dump(self) -> str:
         return "\n".join(self.lines) + "\n"
@@ -518,6 +522,7 @@ def _emit_base_disc(g: GCode, level: float) -> None:
       - chaque ligne de remplissage vient buter contre un cordon deja
         colle, au lieu d'avoir des extremites libres qui se relevent.
     """
+    g.layer += 1
     g.comment("couche 1 : contour puis disque plein (va-et-vient), B=0")
     pts = [(_TUBE_RADIUS * math.cos(2.0 * math.pi * i / 96),
             _TUBE_RADIUS * math.sin(2.0 * math.pi * i / 96), level)
@@ -655,6 +660,7 @@ def _planar_cut_run(g: "GCode") -> None:
         return [tuple(origin + a * u + bb * w) for a, bb in coords]
 
     def emit_layer(coords_list, origin, u, b_deg, speed, lift):
+        g.layer += 1
         first = True
         for coords in coords_list:
             pts = to3(coords, origin, u)
