@@ -1,7 +1,5 @@
 # Apex Algorithm
 
-![banner](./.github/assets/banner.svg)
-
 [English](README.md)
 
 The slicing engine behind **Apex Slicer**: it turns a mesh (STL/3MF) into a collision-checked toolpath for a **4-axis printer** (three linear axes plus one rotary axis), and exports it as G-code. The user interface lives in a separate repository, [apex-ui](https://github.com/aeloxhardware/apex-ui).
