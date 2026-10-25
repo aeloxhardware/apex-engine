@@ -850,16 +850,7 @@
        "type": "null"
       }
      ],
-     "default": {
-      "head_sample_spacing": 6.0,
-      "margin": 1.0,
-      "material_spacing": 1.5,
-      "neighbours": 4,
-      "nozzle_contact_clearance": 3.0,
-      "pose_spacing": 3.0,
-      "support_depth": 0.3,
-      "support_radius": 0.6
-     }
+     "default": null
     },
     "color_map": {
      "anyOf": [
@@ -910,7 +901,7 @@
       "direction_blend_power": 2.0,
       "direction_blend_radius": 10.0,
       "enable_platform_anchor": true,
-      "enforce_upward_growth": true,
+      "enforce_upward_growth": false,
       "geodesic_saddle_threshold_deg": 100.0,
       "geodesic_smoothing_iterations": 0,
       "geodesic_smoothing_step": 0.5,
@@ -918,7 +909,7 @@
       "gradient_baseline_weight": 1.0,
       "gradient_overhang_weight": 5.0,
       "heat_method_time_factor": 100.0,
-      "heat_project_reachable": false,
+      "heat_project_reachable": true,
       "laplacian_smoothness_weight": 1.0,
       "max_downward_growth_angle_deg": null,
       "max_solver_iterations": 2000,
@@ -957,7 +948,7 @@
       ],
       "upward_growth_epsilon": 1e-09,
       "use_geodesic_directions": false,
-      "use_heat_geodesic_field": false,
+      "use_heat_geodesic_field": true,
       "use_ilu_preconditioner": false
      }
     },
@@ -989,7 +980,7 @@
      "default": {
       "frontier_order": false,
       "geodesic_order": false,
-      "isovalue_order": false,
+      "isovalue_order": true,
       "layer_height_base": 0.2,
       "nozzle_width": null,
       "platform_contact_tolerance_factor": 2.5,

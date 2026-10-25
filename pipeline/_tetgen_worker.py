@@ -1,9 +1,9 @@
 """
-Tetraedrisation de la voie Bird dans un SOUS-PROCESSUS (meme raison que
+Tetraedrisation de l autodocteur dans un SOUS-PROCESSUS (meme raison que
 pipeline/_tetrahedralize_worker.py : TetGen peut planter nativement, et il ne
 doit jamais etre lie dans le meme processus que le noyau, CLAUDE.md limite #56).
 
-Appel : python -m pipeline.bird._tetgen_worker <entree.npz> <sortie.npz>
+Appel : python -m pipeline._tetgen_worker <entree.npz> <sortie.npz>
 entree : vertices, faces, switches (chaine vide = defauts du binding, comme
 `TetGen.tetrahedralize()` sans argument dans la recherche).
 sortie : node, elem -- les tableaux dont le binding construit sa grille.

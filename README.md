@@ -60,12 +60,11 @@ Each step is a pure function `run(input, params) -> output` in its own file unde
 | 9 | `step9_collision_sim.py` | collision report |
 | 10 | `step10_adjustment.py` | adjusted path and adjustment log |
 
-### Two ways to build the layers
+### How the layers are built
 
-- **`--method fem`** (default): the scalar-field path described above.
-- **`--method bird`**: a non-planar slicing path by mesh deformation, derived from S4 Slicer (see [Credits](#credits--citations)). It lives in [`pipeline/bird/`](pipeline/bird/) and is GPL-3.0.
+The scalar field φ is the **distance to the build plate through the matter**, computed with the heat method (Crane et al.) on the tetrahedral mesh. Layers are its isosurfaces, so every layer is a shell equidistant from the plate and what hangs is printed after what carries it.
 
-Both end in the same machine-path, collision and G-code steps.
+The mesh-deformation path (Bird) was removed and the directional-field path (FEM) is no longer the default; its remaining code is to be cleaned up. Bird is kept in the git branch `bird_old`.
 
 ## Target machine
 
@@ -104,7 +103,6 @@ python main.py res/test_models/l_shape_overhang.stl --output-gcode out/l_shape.g
 |---|---|
 | `--resolution` | target tetrahedron size in mm (default 1.5) |
 | `--layer-height` | target layer height in mm (default 0.2) |
-| `--method fem\|bird` | layer-building path (default `fem`) |
 | `--output-gcode` | G-code to write, with a check that the tip never goes below the plate |
 | `--output-glb` | inspectable 3D scene (mesh, layers, path) |
 
@@ -126,7 +124,7 @@ APEX_USE_CPP=1 pytest        # must pass in both positions
 
 ```
 main.py         orchestrator and CLI
-pipeline/       the steps, plus pipeline/bird/
+pipeline/       the pipeline steps
 core/           shared types, geometry, spatial indexes, native loader
 config/         parameters and JSON schema (bridge to the UI)
 file_io/        mesh and toolhead loading, G-code and GLB export
@@ -148,18 +146,18 @@ Apex Algorithm builds on the work below. Licences were read from the files vendo
 
 **Algorithm and research**
 
-- [Joshua Bird](https://github.com/jyjblrd) and his [S4 Slicer](https://github.com/jyjblrd/S4_Slicer) (GPL-3.0). The code in `pipeline/bird/` derives from it, so it keeps the GPL-3.0 notice and this attribution:
+- **Thank you to [Joshua Bird](https://github.com/jyjblrd) and his [S4 Slicer](https://github.com/jyjblrd/S4_Slicer)** (GPL-3.0), whose work inspired this project. The Bird path has been removed from this branch but is kept in the git branch `bird_old`, with its notices. Please cite it (see `CITATION.cff`):
 
   ```bibtex
   @software{bird_s4_slicer,
     author  = {Bird, Joshua},
-    title   = {S4 Slicer},
+    title   = {S4 Slicer -- Generic Non-Planar Slicer},
     license = {GPL-3.0},
     url     = {https://github.com/jyjblrd/S4_Slicer}
   }
   ```
 
-- Heat method for geodesic distance: Crane, Weischedel and Wardetzky, *Geodesics in Heat* (used by the optional heat-based field in step 4)
+- Heat method for geodesic distance: Crane, Weischedel and Wardetzky, *Geodesics in Heat* (the field of step 4)
 - Minimum-weight polygon triangulation: Klincsek, used to refill holes in step 1
 - Triangle-triangle intersection: Möller's method, in the self-intersection resolver
 - Classic building blocks: Dijkstra shortest paths, marching tetrahedra, the Viterbi algorithm, the Householder QR and the Hann window
