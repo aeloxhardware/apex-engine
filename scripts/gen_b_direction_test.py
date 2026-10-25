@@ -17,6 +17,7 @@ a ne PAS lancer sur la machine, l'extrudeur est froid). Lecture correcte
 
 Usage : .venv/Scripts/python.exe scripts/gen_b_direction_test.py [--out=out/test_b_direction.gcode]
         [--radius=60] [--height=40] [--b-max=60] [--step=20] [--b-sign=1] [--feed=1500] [--preview]
+        [--repeat=N : N allers-retours de B, defaut 1]
         [--pivot-to-tip=<mm>]   (defaut : derniere valeur de config/pivot_to_tip.json, sinon 46)
 
 Avec le bon L, la pointe reste fixe ; une erreur dL la fait deriver d'environ dL sin(B) en XY.
@@ -102,6 +103,8 @@ def main():
     tip = np.array([radius, 0.0, height])
     up = np.arange(0.0, b_max + 1e-9, step)
     sequence = list(up) + list(up[-2::-1])
+    repeat = max(1, int(float(flags.get("--repeat", 1))))
+    sequence = sequence + (sequence[1:] * (repeat - 1))
     lines = [
         "; Apex -- essai A SEC du sens de B (sans extrusion, sans chauffe)",
         f"; pointe immobile en R={radius:g} mm, Z={height:g} mm ; pivot a {params.pivot_to_tip:g} mm de la pointe",
