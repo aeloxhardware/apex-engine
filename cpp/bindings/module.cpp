@@ -15,8 +15,6 @@
 #include <stdexcept>
 #include <vector>
 
-#include "apex/bird_locate.hpp"
-#include "apex/bird_lsq.hpp"
 #include "apex/bvh.hpp"
 #include "apex/field_solver.hpp"
 #include "apex/gcode_export.hpp"
@@ -33,7 +31,6 @@
 #include "apex/params.hpp"
 #include "apex/past_material.hpp"
 #include "apex/segmentation.hpp"
-#include "apex/skin_check.hpp"
 #include "apex/printed_index.hpp"
 #include "apex/scheduling.hpp"
 #include "apex/support.hpp"
@@ -1361,55 +1358,6 @@ PYBIND11_MODULE(apex_core, m) {
             return py::make_tuple(out_layers, passes);
         });
 
-    m.def(
-        "bird_lsq_deform",
-        [](const DoubleArray& base, const IntArray& cells, const IntArray& column, const DoubleArray& old,
-           int max_nfev, double ftol, double xtol, double gtol) {
-            if (base.ndim() != 2 || base.shape(1) != 3) throw std::invalid_argument("base doit etre (N,3)");
-            if (cells.ndim() != 2 || cells.shape(1) != 4) throw std::invalid_argument("cells doit etre (T,4)");
-            if (column.ndim() != 1 || column.shape(0) != base.shape(0)) throw std::invalid_argument("column (N,)");
-            if (old.ndim() != 3 || old.shape(0) != cells.shape(0) || old.shape(1) != 3 || old.shape(2) != 4)
-                throw std::invalid_argument("old doit etre (T,3,4)");
-            const std::int64_t n_free = std::count_if(column.data(), column.data() + column.size(),
-                                                      [](std::int64_t c) { return c >= 0; });
-            apex::LsqResult r;
-            {
-                py::gil_scoped_release release;
-                r = apex::bird_lsq_deform(base.data(), base.shape(0), cells.data(), cells.shape(0), column.data(),
-                                          n_free, old.data(), max_nfev, ftol, xtol, gtol);
-            }
-            py::array_t<double> x(static_cast<py::ssize_t>(r.x.size()));
-            std::copy(r.x.begin(), r.x.end(), x.mutable_data());
-            return py::make_tuple(x, r.cost, r.nfev, r.status);
-        },
-        py::arg("base"), py::arg("cells"), py::arg("column"), py::arg("old"), py::arg("max_nfev"),
-        py::arg("ftol") = 1e-8, py::arg("xtol") = 1e-8, py::arg("gtol") = 1e-8,
-        "Deformation de Bird (moindres carres TRF/LSMR, transcription de scipy) : (x, cout, nfev, statut).");
-
-    m.def(
-        "bird_lsq_rotation",
-        [](const IntArray& pairs, const IntArray& targets, const DoubleArray& initial, const IntArray& column,
-           double weight, int max_nfev, double ftol, double xtol, double gtol) {
-            if (pairs.ndim() != 2 || pairs.shape(1) != 2) throw std::invalid_argument("pairs doit etre (P,2)");
-            if (initial.ndim() != 1 || column.ndim() != 1 || column.shape(0) != initial.shape(0))
-                throw std::invalid_argument("initial et column doivent etre (T,)");
-            const std::int64_t n_free = std::count_if(column.data(), column.data() + column.size(),
-                                                      [](std::int64_t c) { return c >= 0; });
-            apex::LsqResult r;
-            {
-                py::gil_scoped_release release;
-                r = apex::bird_lsq_rotation(pairs.data(), pairs.shape(0), targets.data(), targets.size(),
-                                            initial.data(), initial.shape(0), column.data(), n_free, weight,
-                                            max_nfev, ftol, xtol, gtol);
-            }
-            py::array_t<double> x(static_cast<py::ssize_t>(r.x.size()));
-            std::copy(r.x.begin(), r.x.end(), x.mutable_data());
-            return py::make_tuple(x, r.cost, r.nfev, r.status);
-        },
-        py::arg("pairs"), py::arg("targets"), py::arg("initial"), py::arg("column"), py::arg("weight"),
-        py::arg("max_nfev"), py::arg("ftol") = 1e-6, py::arg("xtol") = 1e-8, py::arg("gtol") = 1e-8,
-        "Rotations de Bird (moindres carres TRF/LSMR, x_scale = 1) : (x, cout, nfev, statut).");
-
     // Socle Vulkan (phase 1 du plan Bird/Vulkan, 2026-10-13). Jamais d'exception
     // pour l'absence de GPU : gpu_status() rend la raison.
     m.def(
@@ -1454,120 +1402,4 @@ PYBIND11_MODULE(apex_core, m) {
         },
         py::arg("a"), py::arg("x"), py::arg("y"));
 
-    m.def("bird_lsq_set_threads", &apex::bird_lsq_set_threads, py::arg("threads"), py::arg("min_parallel") = 4096,
-          "Fils du solveur LSQ de Bird (0 = tous les coeurs, 1 = sequentiel) ; resultat identique au bit.");
-
-    m.def(
-        "bird_lsq_last_profile",
-        []() {
-            const apex::LsqProfile p = apex::bird_lsq_last_profile();
-            py::dict d;
-            d["total_s"] = p.total_s; d["matvec_s"] = p.matvec_s; d["rmatvec_s"] = p.rmatvec_s;
-            d["fun_s"] = p.fun_s; d["jac_s"] = p.jac_s;
-            d["matvec_calls"] = p.matvec_calls; d["rmatvec_calls"] = p.rmatvec_calls;
-            d["fun_calls"] = p.fun_calls; d["jac_calls"] = p.jac_calls;
-            d["lsmr_calls"] = p.lsmr_calls; d["lsmr_iterations"] = p.lsmr_iterations; d["nfev"] = p.nfev;
-            d["rows"] = p.rows; d["cols"] = p.cols; d["nnz"] = p.nnz;
-            return d;
-        },
-        "Compteurs du dernier appel bird_lsq_deform / bird_lsq_rotation (mesure seule).");
-
-    m.def(
-        "viterbi_choice",
-        [](const DoubleArray& mapped, const py::array_t<bool, py::array::c_style | py::array::forcecast>& valid) {
-            if (mapped.ndim() != 3 || mapped.shape(2) != 3) throw std::invalid_argument("mapped doit etre (n,k,3)");
-            if (valid.ndim() != 2 || valid.shape(0) != mapped.shape(0) || valid.shape(1) != mapped.shape(1))
-                throw std::invalid_argument("valid doit etre (n,k)");
-            const auto n = static_cast<std::int64_t>(mapped.shape(0)), k = static_cast<std::int64_t>(mapped.shape(1));
-            py::array_t<std::int64_t> choice(static_cast<py::ssize_t>(n));
-            {
-                py::gil_scoped_release release;
-                apex::viterbi_choice(mapped.data(), reinterpret_cast<const std::uint8_t*>(valid.data()), n, k,
-                                     choice.mutable_data());
-            }
-            return choice;
-        },
-        py::arg("mapped"), py::arg("valid"),
-        "Chemin le plus continu parmi k candidats par point (Viterbi de map_polyline), au bit pres.");
-
-    m.def(
-        "tet_barycentric_candidates",
-        [](const DoubleArray& points, const DoubleArray& deformed, const DoubleArray& original, const IntArray& cand,
-           int threads) {
-            if (points.ndim() != 2 || points.shape(1) != 3) throw std::invalid_argument("points doit etre (n,3)");
-            if (deformed.ndim() != 3 || deformed.shape(1) != 4 || deformed.shape(2) != 3)
-                throw std::invalid_argument("deformed doit etre (t,4,3)");
-            if (original.ndim() != 3 || original.shape(0) != deformed.shape(0) || original.shape(1) != 4 ||
-                original.shape(2) != 3)
-                throw std::invalid_argument("original doit etre (t,4,3), comme deformed");
-            if (cand.ndim() != 2 || cand.shape(0) != points.shape(0))
-                throw std::invalid_argument("cand doit etre (n,k)");
-            const auto n = static_cast<py::ssize_t>(points.shape(0)), k = static_cast<py::ssize_t>(cand.shape(1));
-            py::array_t<double> score({n, k});
-            py::array_t<double> mapped({n, k, static_cast<py::ssize_t>(3)});
-            {
-                py::gil_scoped_release release;
-                apex::tet_barycentric_candidates(points.data(), n, deformed.data(), original.data(),
-                                                 static_cast<std::int64_t>(deformed.shape(0)), cand.data(), k,
-                                                 score.mutable_data(), mapped.mutable_data(), threads);
-            }
-            return py::make_tuple(score, mapped);
-        },
-        py::arg("points"), py::arg("deformed"), py::arg("original"), py::arg("cand"), py::arg("threads") = 0,
-        "(score (n,k), mapped (n,k,3)) du retour Bird deforme -> origine ; tolerance declaree vs LAPACK.");
-
-    py::class_<apex::SkinCheckIndex>(m, "SkinCheckIndex",
-                                     "Controle de collision du lissage Bird (grille incrementale).")
-        .def(py::init<double>(), py::arg("cell"))
-        .def("size", &apex::SkinCheckIndex::size)
-        .def(
-            "add_polylines",
-            [](apex::SkinCheckIndex& self, const DoubleArray& pts, const IntArray& starts, double step) {
-                if (pts.ndim() != 2 || pts.shape(1) != 3) throw std::invalid_argument("pts doit etre (N,3)");
-                py::gil_scoped_release release;
-                self.add_polylines(pts.data(), starts.data(), static_cast<std::int64_t>(starts.size()) - 1, step);
-            },
-            py::arg("pts"), py::arg("starts"), py::arg("step"))
-        .def(
-            "check_zone",
-            [](const apex::SkinCheckIndex& self, const DoubleArray& head, const DoubleArray& axes,
-               const DoubleArray& pts, const IntArray& starts, const DoubleArray& cosv, const DoubleArray& sinv,
-               const IntArray& tested, double plate_radius, double margin, double reach, double step) {
-                const auto n_tested = static_cast<py::ssize_t>(tested.size());
-                py::array_t<bool> plate(n_tested);
-                py::array_t<double> dist(n_tested);
-                {
-                    py::gil_scoped_release release;
-                    self.check_zone(head.data(), head.shape(0), axes.data(), axes.shape(0), pts.data(),
-                                    starts.data(), static_cast<std::int64_t>(starts.size()) - 1, cosv.data(),
-                                    sinv.data(), tested.data(), n_tested, plate_radius, margin, reach, step,
-                                    reinterpret_cast<std::uint8_t*>(plate.mutable_data()), dist.mutable_data());
-                }
-                return py::make_tuple(plate, dist);
-            },
-            py::arg("head"), py::arg("axes"), py::arg("pts"), py::arg("starts"), py::arg("cos"), py::arg("sin"),
-            py::arg("tested"), py::arg("plate_radius"), py::arg("margin"), py::arg("reach"), py::arg("step"))
-        .def(
-            "check_zone_parallel",
-            [](const apex::SkinCheckIndex& self, const DoubleArray& head, const DoubleArray& axes,
-               const DoubleArray& pts, const IntArray& starts, const DoubleArray& cosv, const DoubleArray& sinv,
-               const IntArray& tested, double plate_radius, double margin, double reach, double step, int threads) {
-                const auto n_tested = static_cast<py::ssize_t>(tested.size());
-                py::array_t<bool> plate(n_tested);
-                py::array_t<double> dist(n_tested);
-                {
-                    py::gil_scoped_release release;
-                    self.check_zone_parallel(head.data(), head.shape(0), axes.data(), axes.shape(0), pts.data(),
-                                             starts.data(), static_cast<std::int64_t>(starts.size()) - 1,
-                                             cosv.data(), sinv.data(), tested.data(), n_tested, plate_radius,
-                                             margin, reach, step,
-                                             reinterpret_cast<std::uint8_t*>(plate.mutable_data()),
-                                             dist.mutable_data(), threads);
-                }
-                return py::make_tuple(plate, dist);
-            },
-            py::arg("head"), py::arg("axes"), py::arg("pts"), py::arg("starts"), py::arg("cos"), py::arg("sin"),
-            py::arg("tested"), py::arg("plate_radius"), py::arg("margin"), py::arg("reach"), py::arg("step"),
-            py::arg("threads") = 0,
-            "Meme resultat que check_zone (au bit), points testes repartis sur `threads` fils (0 = coeurs).");
 }

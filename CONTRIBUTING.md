@@ -45,7 +45,7 @@ On Windows use `.venv\Scripts\python.exe`. `pymeshfix` is optional. The native C
 Apex Algorithm is released under the [GNU GPL 3.0](LICENSE). By contributing, you agree that your contribution is released under the same licence.
 
 - Only submit code you wrote, or code whose licence is compatible with GPL-3.0. Name the source and its licence in the pull request.
-- Keep the notices in `pipeline/bird/`. That code derives from [S4 Slicer](https://github.com/jyjblrd/S4_Slicer) by Joshua Bird (GPL-3.0), and any derived code must keep the notice and the attribution.
+- Keep the credit to [S4 Slicer](https://github.com/jyjblrd/S4_Slicer) by Joshua Bird (GPL-3.0) in the README and `CITATION.cff`. Code derived from it (branch `bird_old`) must keep its notice and attribution.
 - Add every new third-party library to the credits table in the README, with its version and licence.
 
 ## Review
