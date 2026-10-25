@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 320" width="1200" height="320" role="img" aria-label="Apex Algorithm: non-planar slicing for a 4-axis printer">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0b1020"/><stop offset="1" stop-color="#16213e"/></linearGradient>
+    <linearGradient id="layer" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+  </defs>
+  <rect width="1200" height="320" rx="20" fill="url(#bg)"/>
+  <g fill="none" stroke="url(#layer)" stroke-width="3" stroke-linecap="round" opacity="0.9">
+    <path d="M640 250 C 760 250, 800 250, 900 230 S 1060 150, 1140 90" opacity="0.35"/>
+    <path d="M640 226 C 760 226, 800 224, 900 204 S 1050 130, 1140 70" opacity="0.5"/>
+    <path d="M640 202 C 760 202, 800 198, 900 178 S 1040 110, 1140 50" opacity="0.65"/>
+    <path d="M640 178 C 760 178, 800 172, 900 152 S 1030 90, 1140 30" opacity="0.8"/>
+    <path d="M640 154 C 760 154, 800 146, 900 126 S 1020 70, 1130 14"/>
+  </g>
+  <line x1="640" y1="262" x2="1140" y2="262" stroke="#475569" stroke-width="3"/>
+  <text x="60" y="140" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="68" font-weight="800" fill="#e2e8f0">Apex <tspan fill="#22d3ee">Algorithm</tspan></text>
+  <text x="62" y="186" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="26" fill="#94a3b8">Non-planar slicing engine for a 4-axis printer</text>
+  <text x="62" y="228" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="20" fill="#64748b">Curved layers · no supports · C++ core · GPL-3.0</text>
+  <rect x="62" y="252" width="118" height="30" rx="15" fill="#f59e0b" opacity="0.18"/>
+  <text x="121" y="273" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" font-weight="700" fill="#fbbf24">PRE-RELEASE</text>
+</svg>

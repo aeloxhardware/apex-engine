@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 300" width="1000" height="300" role="img" aria-label="Python reference and C++ native core, switched by APEX_USE_CPP">
+  <defs><marker id="m" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#64748b"/></marker></defs>
+  <rect width="1000" height="300" rx="16" fill="#0b1020"/>
+  <g font-family="Inter,Segoe UI,Arial,sans-serif">
+    <text x="500" y="36" text-anchor="middle" font-size="22" font-weight="700" fill="#e2e8f0">Two implementations, one oracle</text>
+    <rect x="40" y="70" width="260" height="150" rx="14" fill="#121a2e" stroke="#334155" stroke-width="1.5"/>
+    <text x="170" y="104" text-anchor="middle" font-size="18" font-weight="700" fill="#fbbf24">Python reference</text>
+    <text x="170" y="134" text-anchor="middle" font-size="14" fill="#94a3b8">numpy · scipy · trimesh</text>
+    <text x="170" y="156" text-anchor="middle" font-size="14" fill="#94a3b8">default, no compiler needed</text>
+    <text x="170" y="190" text-anchor="middle" font-size="14" fill="#64748b">pipeline/ · core/</text>
+    <rect x="700" y="70" width="260" height="150" rx="14" fill="#121a2e" stroke="#22d3ee" stroke-width="1.5"/>
+    <text x="830" y="104" text-anchor="middle" font-size="18" font-weight="700" fill="#22d3ee">C++20 native core</text>
+    <text x="830" y="134" text-anchor="middle" font-size="14" fill="#94a3b8">Eigen · Clipper2 · pybind11</text>
+    <text x="830" y="156" text-anchor="middle" font-size="14" fill="#94a3b8">optional Vulkan compute</text>
+    <text x="830" y="190" text-anchor="middle" font-size="14" fill="#64748b">cpp/ → apex_core</text>
+    <rect x="370" y="90" width="260" height="110" rx="14" fill="#22d3ee" opacity="0.12" stroke="#22d3ee" stroke-dasharray="6 5"/>
+    <text x="500" y="124" text-anchor="middle" font-size="16" font-weight="700" fill="#22d3ee">tests/test_cpp_equivalence.py</text>
+    <text x="500" y="148" text-anchor="middle" font-size="14" fill="#cbd5e1">same inputs, same outputs</text>
+    <text x="500" y="168" text-anchor="middle" font-size="14" fill="#cbd5e1">bit-exact or declared tolerance</text>
+    <text x="500" y="188" text-anchor="middle" font-size="13" fill="#64748b">APEX_USE_CPP=0 / 1</text>
+    <line x1="300" y1="145" x2="368" y2="145" stroke="#64748b" stroke-width="2" marker-end="url(#m)"/>
+    <line x1="700" y1="145" x2="632" y2="145" stroke="#64748b" stroke-width="2" marker-end="url(#m)"/>
+    <text x="500" y="262" text-anchor="middle" font-size="15" fill="#94a3b8">The whole test suite must pass with the switch in both positions.</text>
+  </g>
+</svg>

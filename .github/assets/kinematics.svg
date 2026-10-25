@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1060 400" width="1060" height="400" role="img" aria-label="R, C, Z, B kinematics of the current machine">
+  <defs>
+    <marker id="k" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#22d3ee"/></marker>
+  </defs>
+  <rect width="1060" height="400" rx="16" fill="#0b1020"/>
+  <text x="530" y="36" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#e2e8f0">Current machine: R · C · Z · B</text>
+  <!-- side view -->
+  <g font-family="Inter,Segoe UI,Arial,sans-serif">
+    <text x="230" y="76" text-anchor="middle" font-size="16" fill="#94a3b8">Side view (radial plane)</text>
+    <ellipse cx="230" cy="320" rx="170" ry="16" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+    <text x="230" y="352" text-anchor="middle" font-size="14" fill="#64748b">rotating plate (C)</text>
+    <line x1="230" y1="320" x2="230" y2="110" stroke="#334155" stroke-dasharray="5 5"/>
+    <path d="M230 320 H370" stroke="#22d3ee" stroke-width="2" marker-end="url(#k)"/>
+    <text x="300" y="342" text-anchor="middle" font-size="14" fill="#22d3ee">R</text>
+    <path d="M190 120 V300" stroke="#22d3ee" stroke-width="2" marker-end="url(#k)"/>
+    <text x="176" y="214" text-anchor="end" font-size="14" fill="#22d3ee">Z</text>
+    <!-- pivot and head tilted -->
+    <circle cx="330" cy="150" r="7" fill="#a78bfa"/>
+    <text x="344" y="140" font-size="14" fill="#a78bfa">B pivot</text>
+    <g transform="rotate(32 330 150)"><rect x="318" y="150" width="24" height="120" rx="6" fill="#1e293b" stroke="#a78bfa" stroke-width="2"/><polygon points="324,270 336,270 330,288" fill="#fbbf24"/></g>
+    <path d="M330 190 A40 40 0 0 1 352 184" fill="none" stroke="#a78bfa" stroke-width="2"/>
+    <text x="364" y="204" font-size="14" fill="#a78bfa">B</text>
+  </g>
+  <!-- top view -->
+  <g font-family="Inter,Segoe UI,Arial,sans-serif">
+    <text x="520" y="76" font-size="16" fill="#94a3b8">Top view</text>
+    <circle cx="570" cy="220" r="110" fill="#1e293b" stroke="#475569" stroke-width="2"/>
+    <circle cx="570" cy="220" r="4" fill="#64748b"/>
+    <path d="M570 220 L650 160" stroke="#22d3ee" stroke-width="2" marker-end="url(#k)"/>
+    <text x="624" y="182" font-size="14" fill="#22d3ee">R</text>
+    <path d="M600 292 A74 74 0 0 0 644 262" fill="none" stroke="#a78bfa" stroke-width="2" marker-end="url(#k)"/>
+    <text x="656" y="286" font-size="14" fill="#a78bfa">C</text>
+  </g>
+  <g font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" fill="#cbd5e1">
+    <text x="740" y="130" font-weight="700" fill="#e2e8f0">What this implies</text>
+    <text x="740" y="160">• R, Z: linear; C: plate rotation</text>
+    <text x="740" y="184">• B ∈ [0°, 185°]: head tilt in the</text>
+    <text x="752" y="204">radial plane, one side only</text>
+    <text x="740" y="232">• C is <tspan fill="#fbbf24">imposed by the position</tspan> of</text>
+    <text x="752" y="252">the point (polar angle): B is the</text>
+    <text x="752" y="272">only free orientation axis</text>
+    <text x="740" y="300">• Firmware does no kinematics: the</text>
+    <text x="752" y="320">slicer emits the pivot compensation</text>
+  </g>
+</svg>
