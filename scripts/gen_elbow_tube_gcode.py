@@ -626,7 +626,8 @@ def _planar_cut_run(g: "GCode") -> None:
             return None
         return unary_union(polys)
 
-    def rings_of(geom):
+    def rings_of(geom, full=None):
+        full = FULL_INFILL if full is None else full
         """Anneaux concentriques (pas = largeur de cordon), du centre au bord."""
         out = []
         pieces = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
@@ -641,7 +642,7 @@ def _planar_cut_run(g: "GCode") -> None:
                     break
                 levels.append((k * EXTRUSION_WIDTH, cur))
                 k += 1
-            if not FULL_INFILL:
+            if not full:
                 levels = levels[:1]
             else:
                 kd = k * EXTRUSION_WIDTH - EXTRUSION_WIDTH * 0.5
@@ -687,6 +688,53 @@ def _planar_cut_run(g: "GCode") -> None:
                     g.go(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t,
                          z0 + (z1 - z0) * t, b_deg, speed, extrude=True)
 
+    def emit_full(geom, origin, u, b_deg, speed, lift, parity):
+        """Contour, puis (si --full-infill) lignes pleines CROISEES comme la couche 1.
+
+        Meme logique que _emit_base_disc : contour d'abord, puis lignes
+        paralleles pleines en va-et-vient, trajets a vide entre lignes. La
+        direction alterne a chaque couche (parite) : une couche selon b (Y),
+        la suivante selon a (axe u du plan) -> les lignes se croisent.
+        """
+        if not FULL_INFILL:
+            emit_layer(rings_of(geom), origin, u, b_deg, speed, lift)
+            return
+        emit_layer(rings_of(geom, full=False), origin, u, b_deg, speed, lift)
+        inner = geom.buffer(-EXTRUSION_WIDTH / 2.0)
+        if inner.is_empty:
+            return
+        minx, miny, maxx, maxy = inner.bounds
+        along_b = (parity % 2 == 0)           # lignes a a=const, parcourues selon b
+        lo, hi = (minx, maxx) if along_b else (miny, maxy)
+        n = max(1, int(math.ceil((hi - lo) / EXTRUSION_WIDTH)))
+        step = (hi - lo) / n
+        flip = False
+        for i in range(n + 1):
+            t = lo + step * i
+            ln = (LineString([(t, miny - 1.0), (t, maxy + 1.0)]) if along_b
+                  else LineString([(minx - 1.0, t), (maxx + 1.0, t)]))
+            hit = inner.intersection(ln)
+            parts = [hit] if hit.geom_type == "LineString" else list(
+                getattr(hit, "geoms", []))
+            parts = [q for q in parts if q.geom_type == "LineString" and q.length > 1e-6]
+            key = (lambda q: q.coords[0][1]) if along_b else (lambda q: q.coords[0][0])
+            for q in sorted(parts, key=lambda q: min(c[1] if along_b else c[0] for c in q.coords)):
+                c0_, c1_ = q.coords[0], q.coords[-1]
+                if (c0_[1] > c1_[1]) if along_b else (c0_[0] > c1_[0]):
+                    c0_, c1_ = c1_, c0_
+                if flip:
+                    c0_, c1_ = c1_, c0_
+                p0 = to3([c0_], origin, u)[0]
+                p1 = to3([c1_], origin, u)[0]
+                g.go(*p0, b_deg, TRAVEL_SPEED, extrude=False)
+                seg = math.dist(p0, p1)
+                steps = max(1, int(math.ceil(seg / MAX_CHORD_MM)))
+                for kk in range(1, steps + 1):
+                    tt = kk / steps
+                    g.go(p0[0] + (p1[0] - p0[0]) * tt, p0[1] + (p1[1] - p0[1]) * tt,
+                         p0[2] + (p1[2] - p0[2]) * tt, b_deg, speed, extrude=True)
+            flip = not flip
+
     e_z = np.array([0.0, 0.0, 1.0])
     u_pl = np.array([1.0, 0.0, 0.0])
 
@@ -705,8 +753,8 @@ def _planar_cut_run(g: "GCode") -> None:
         if geom.is_empty or geom.area < EXTRUSION_WIDTH ** 2:
             break
         speed = FIRST_LAYER_SPEED if k <= SOLID_BASE_LAYER_COUNT else PRINT_SPEED
-        emit_layer(rings_of(geom), np.array([0.0, 0.0, z]), u_pl, 0.0, speed,
-                   lift=(k == 2))
+        emit_full(geom, np.array([0.0, 0.0, z]), u_pl, 0.0, speed,
+                  (k == 2), k)
         n_planar += 1
         k += 1
 
@@ -722,8 +770,8 @@ def _planar_cut_run(g: "GCode") -> None:
         origin = nrm * c
         geom = slice_polys(nrm, origin, u_inc)
         if geom is not None and not geom.is_empty and geom.area >= EXTRUSION_WIDTH ** 2:
-            emit_layer(rings_of(geom), origin, u_inc, OVERHANG_ANGLE_DEG,
-                       PRINT_SPEED, lift=(n_incl == 0))
+            emit_full(geom, origin, u_inc, OVERHANG_ANGLE_DEG,
+                      PRINT_SPEED, (n_incl == 0), n_incl)
             n_incl += 1
         j += 1
     g.comment(f"planar-cut : {n_planar + 1} couches planes, {n_incl} inclinees, "
