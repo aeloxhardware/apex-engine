@@ -18,21 +18,15 @@
     <line x1="80" y1="320" x2="430" y2="320" stroke="#475569" stroke-width="3"/>
   </g>
   <!-- right: same part, curved layers -->
-  <g>
-    <path d="M610 320 H710 V170 H900 V120 H610 Z" fill="#1e293b" stroke="#64748b" stroke-width="2"/>
-    <g fill="none" stroke="url(#g)" stroke-width="2.2" stroke-linecap="round">
-      <path d="M610 304 H710"/>
-      <path d="M610 270 H710"/>
-      <path d="M610 236 H694 Q728 236 738 170"/>
-      <path d="M610 204 H690 Q752 204 790 170"/>
-      <path d="M610 174 H684 Q770 170 842 170"/>
-      <path d="M610 148 H900"/>
-      <path d="M610 132 H900"/>
-    </g>
-    <defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="610" y1="0" x2="900" y2="0"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs>
-    <line x1="580" y1="320" x2="930" y2="320" stroke="#475569" stroke-width="3"/>
-    <text x="805" y="250" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" fill="#4ade80">nothing underneath</text>
-  </g>
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="320" x2="0" y2="120"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient>
+    <clipPath id="part"><path d="M610 320 H710 V170 H900 V120 H610 Z"/></clipPath>
+  </defs>
+  <path d="M610 320 H710 V170 H900 V120 H610 Z" fill="#1e293b"/>
+  <g clip-path="url(#part)" fill="none" stroke="url(#g)" stroke-width="2" stroke-linecap="round"><path d="M600 336 H668 C740 336 800 318 910 236"/><path d="M600 321 H668 C740 321 800 303 910 221"/><path d="M600 306 H668 C740 306 800 288 910 206"/><path d="M600 291 H668 C740 291 800 273 910 191"/><path d="M600 276 H668 C740 276 800 258 910 176"/><path d="M600 261 H668 C740 261 800 243 910 161"/><path d="M600 246 H668 C740 246 800 228 910 146"/><path d="M600 231 H668 C740 231 800 213 910 131"/><path d="M600 216 H668 C740 216 800 198 910 116"/><path d="M600 201 H668 C740 201 800 183 910 101"/><path d="M600 186 H668 C740 186 800 168 910 86"/><path d="M600 171 H668 C740 171 800 153 910 71"/><path d="M600 156 H668 C740 156 800 138 910 56"/><path d="M600 141 H668 C740 141 800 123 910 41"/><path d="M600 126 H668 C740 126 800 108 910 26"/><path d="M600 111 H668 C740 111 800 93 910 11"/></g>
+  <path d="M610 320 H710 V170 H900 V120 H610 Z" fill="none" stroke="#64748b" stroke-width="2"/>
+  <line x1="580" y1="320" x2="930" y2="320" stroke="#475569" stroke-width="3"/>
+  <text x="810" y="250" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" fill="#4ade80">nothing underneath</text>
   <g font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#94a3b8">
     <text x="250" y="362" text-anchor="middle">flat layers → the arm hangs in the air</text>
     <text x="750" y="362" text-anchor="middle">layers follow a scalar field, the head tilts</text>
