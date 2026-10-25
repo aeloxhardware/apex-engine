@@ -17,24 +17,14 @@
     <text x="305" y="250" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" fill="#f87171">support</text>
     <line x1="80" y1="320" x2="430" y2="320" stroke="#475569" stroke-width="3"/>
   </g>
-  <!-- right: same part, curved layers -->
-  <g>
-    <path d="M610 320 H710 V170 H900 V120 H610 Z" fill="#1e293b" stroke="#64748b" stroke-width="2"/>
-    <g fill="none" stroke="url(#g)" stroke-width="2.2" stroke-linecap="round">
-      <path d="M610 304 H710"/>
-      <path d="M610 270 H710"/>
-      <path d="M610 236 H694 Q728 236 738 170"/>
-      <path d="M610 204 H690 Q752 204 790 170"/>
-      <path d="M610 174 H684 Q770 170 842 170"/>
-      <path d="M610 148 H900"/>
-      <path d="M610 132 H900"/>
-    </g>
-    <defs><linearGradient id="g" gradientUnits="userSpaceOnUse" x1="610" y1="0" x2="900" y2="0"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#a78bfa"/></linearGradient></defs>
-    <line x1="580" y1="320" x2="930" y2="320" stroke="#475569" stroke-width="3"/>
-    <text x="805" y="250" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" fill="#4ade80">nothing underneath</text>
-  </g>
+  <!-- right: same part, layers rotating around the inner corner -->
+  <path d="M610 320 H710 V170 H900 V120 H610 Z" fill="#1e293b"/>
+  <g stroke-width="2" stroke-linecap="round"><line x1="610.0" y1="310.0" x2="710.0" y2="310.0" stroke="#22d3ee"/><line x1="610.0" y1="294.0" x2="710.0" y2="294.0" stroke="#27d1ee"/><line x1="610.0" y1="278.0" x2="710.0" y2="278.0" stroke="#2bceef"/><line x1="610.0" y1="262.0" x2="710.0" y2="262.0" stroke="#30ccef"/><line x1="610.0" y1="246.0" x2="710.0" y2="246.0" stroke="#34c9f0"/><line x1="610.0" y1="230.0" x2="710.0" y2="230.0" stroke="#39c7f0"/><line x1="610.0" y1="214.0" x2="710.0" y2="214.0" stroke="#3ec4f0"/><line x1="610.0" y1="198.0" x2="710.0" y2="198.0" stroke="#42c2f1"/><line x1="610.0" y1="182.0" x2="710.0" y2="182.0" stroke="#47bff1"/><line x1="710.0" y1="170.0" x2="610.0" y2="170.0" stroke="#4bbdf2"/><line x1="710.0" y1="170.0" x2="610.0" y2="152.4" stroke="#50baf2"/><line x1="710.0" y1="170.0" x2="610.0" y2="133.6" stroke="#54b8f3"/><line x1="710.0" y1="170.0" x2="623.4" y2="120.0" stroke="#59b5f3"/><line x1="710.0" y1="170.0" x2="650.4" y2="120.0" stroke="#5eb3f3"/><line x1="710.0" y1="170.0" x2="668.0" y2="120.0" stroke="#62b0f4"/><line x1="710.0" y1="170.0" x2="681.1" y2="120.0" stroke="#67aef4"/><line x1="710.0" y1="170.0" x2="691.8" y2="120.0" stroke="#6babf5"/><line x1="710.0" y1="170.0" x2="701.2" y2="120.0" stroke="#70a9f5"/><line x1="710.0" y1="170.0" x2="710.0" y2="120.0" stroke="#75a6f5"/><line x1="726.0" y1="170.0" x2="726.0" y2="120.0" stroke="#79a4f6"/><line x1="742.0" y1="170.0" x2="742.0" y2="120.0" stroke="#7ea1f6"/><line x1="758.0" y1="170.0" x2="758.0" y2="120.0" stroke="#829ff7"/><line x1="774.0" y1="170.0" x2="774.0" y2="120.0" stroke="#879cf7"/><line x1="790.0" y1="170.0" x2="790.0" y2="120.0" stroke="#8b9af8"/><line x1="806.0" y1="170.0" x2="806.0" y2="120.0" stroke="#9097f8"/><line x1="822.0" y1="170.0" x2="822.0" y2="120.0" stroke="#9595f8"/><line x1="838.0" y1="170.0" x2="838.0" y2="120.0" stroke="#9992f9"/><line x1="854.0" y1="170.0" x2="854.0" y2="120.0" stroke="#9e90f9"/><line x1="870.0" y1="170.0" x2="870.0" y2="120.0" stroke="#a28dfa"/><line x1="886.0" y1="170.0" x2="886.0" y2="120.0" stroke="#a78bfa"/></g>
+  <path d="M610 320 H710 V170 H900 V120 H610 Z" fill="none" stroke="#64748b" stroke-width="2"/>
+  <line x1="580" y1="320" x2="930" y2="320" stroke="#475569" stroke-width="3"/>
+  <text x="810" y="250" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="18" fill="#4ade80">nothing underneath</text>
   <g font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" fill="#94a3b8">
     <text x="250" y="362" text-anchor="middle">flat layers → the arm hangs in the air</text>
-    <text x="750" y="362" text-anchor="middle">layers follow a scalar field, the head tilts</text>
+    <text x="750" y="362" text-anchor="middle">layers rotate around the corner, the head tilts</text>
   </g>
 </svg>
