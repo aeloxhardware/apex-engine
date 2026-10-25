@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 520" width="1100" height="520" role="img" aria-label="The ten steps of the Apex pipeline">
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#64748b"/></marker>
+    <style>
+      .c{fill:#121a2e;stroke:#334155;stroke-width:1.5}
+      .n{font:700 13px Inter,Segoe UI,Arial,sans-serif;fill:#22d3ee}
+      .t{font:700 16px Inter,Segoe UI,Arial,sans-serif;fill:#e2e8f0}
+      .d{font:13px Inter,Segoe UI,Arial,sans-serif;fill:#94a3b8}
+    </style>
+  </defs>
+  <rect width="1100" height="520" rx="16" fill="#0b1020"/>
+  <text x="550" y="38" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="22" font-weight="700" fill="#e2e8f0">Pipeline — ten pure steps, <tspan fill="#22d3ee">run(input, params) → output</tspan></text>
+  <!-- row 1 -->
+  <g>
+    <rect class="c" x="30" y="70" width="190" height="100" rx="12"/><text class="n" x="46" y="94">STEP 1</text><text class="t" x="46" y="118">Ingest</text><text class="d" x="46" y="140">mesh repair, TetGen</text><text class="d" x="46" y="157">tetrahedral mesh</text>
+    <rect class="c" x="250" y="70" width="190" height="100" rx="12"/><text class="n" x="266" y="94">STEP 2</text><text class="t" x="266" y="118">Overhangs</text><text class="d" x="266" y="140">risk score per face</text><text class="d" x="266" y="157">internal bridges</text>
+    <rect class="c" x="470" y="70" width="190" height="100" rx="12"/><text class="n" x="486" y="94">STEP 3</text><text class="t" x="486" y="118">Segmentation</text><text class="d" x="486" y="140">regions + directions</text><text class="d" x="486" y="157">dependency tree</text>
+    <rect class="c" x="690" y="70" width="190" height="100" rx="12"/><text class="n" x="706" y="94">STEP 4</text><text class="t" x="706" y="118">Scalar field</text><text class="d" x="706" y="140">FEM on the tet mesh</text><text class="d" x="706" y="157">φ per node</text>
+    <rect class="c" x="910" y="70" width="160" height="100" rx="12"/><text class="n" x="926" y="94">STEP 5</text><text class="t" x="926" y="118">Layers</text><text class="d" x="926" y="140">isosurfaces of φ</text><text class="d" x="926" y="157">+ print order</text>
+  </g>
+  <g stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#a)">
+    <line x1="220" y1="120" x2="248" y2="120"/><line x1="440" y1="120" x2="468" y2="120"/><line x1="660" y1="120" x2="688" y2="120"/><line x1="880" y1="120" x2="908" y2="120"/>
+    <path d="M990 170 V215 H125 V250"/>
+  </g>
+  <!-- row 2 -->
+  <g>
+    <rect class="c" x="30" y="250" width="190" height="100" rx="12"/><text class="n" x="46" y="274">STEP 6</text><text class="t" x="46" y="298">Toolpath 2D</text><text class="d" x="46" y="320">walls, infill, bridges</text><text class="d" x="46" y="337">per layer</text>
+    <rect class="c" x="250" y="250" width="190" height="100" rx="12"/><text class="n" x="266" y="274">STEP 7</text><text class="t" x="266" y="298">Colour &amp; schedule</text><text class="d" x="266" y="320">holes vs purges</text><text class="d" x="266" y="337">pass ordering</text>
+    <rect class="c" x="470" y="250" width="190" height="100" rx="12"/><text class="n" x="486" y="274">STEP 8</text><text class="t" x="486" y="298">Machine path</text><text class="d" x="486" y="320">N-axis inverse</text><text class="d" x="486" y="337">kinematics</text>
+    <rect class="c" x="690" y="250" width="190" height="100" rx="12"/><text class="n" x="706" y="274">STEP 9</text><text class="t" x="706" y="298">Collision sim</text><text class="d" x="706" y="320">real toolhead model</text><text class="d" x="706" y="337">vs printed part</text>
+    <rect class="c" x="910" y="250" width="160" height="100" rx="12"/><text class="n" x="926" y="274">STEP 10</text><text class="t" x="926" y="298">Adjustment</text><text class="d" x="926" y="320">reorient → resegment</text><text class="d" x="926" y="337">→ fallback support</text>
+  </g>
+  <g stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#a)">
+    <line x1="220" y1="300" x2="248" y2="300"/><line x1="440" y1="300" x2="468" y2="300"/><line x1="660" y1="300" x2="688" y2="300"/><line x1="880" y1="300" x2="908" y2="300"/>
+  </g>
+  <!-- outputs -->
+  <path d="M990 350 V400" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#a)"/>
+  <rect x="860" y="402" width="210" height="48" rx="12" fill="#22d3ee" opacity="0.15" stroke="#22d3ee"/>
+  <text x="965" y="432" text-anchor="middle" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="16" font-weight="700" fill="#22d3ee">G-code (R C Z B)</text>
+  <!-- legend -->
+  <g font-family="Inter,Segoe UI,Arial,sans-serif" font-size="14" fill="#94a3b8">
+    <text x="30" y="420">Intermediate steps live between these ten: 5b (layer order constrained by the head),</text>
+    <text x="30" y="442">8b (travel lift-and-traverse routing), 9b (unsupported-deposit diagnostic).</text>
+    <text x="30" y="480" fill="#64748b">Every step is a pure function: the orchestrator can replay any slice of the chain.</text>
+  </g>
+</svg>
