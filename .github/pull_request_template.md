@@ -31,7 +31,7 @@
 
 - [ ] My contribution is under GPL-3.0, or the source and its licence are named below
 - [ ] New third-party libraries are added to the credits in the README
-- [ ] Notices in `pipeline/bird/` are kept intact
+- [ ] The credit to S4 Slicer (README, `CITATION.cff`) is kept intact
 
 ## Notes for the reviewer
 

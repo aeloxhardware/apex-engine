@@ -5,6 +5,14 @@
 Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session : `LAST_SESSION.md`.
 **Tests : 505/505 dans les positions `APEX_USE_CPP=0`, `=1` et `=1` + `APEX_USE_GPU=1`** (2026-10-13 soir, suite complète).
 
+
+## 2026-10-25 — Decision : voie principale = CHALEUR ; Bird retire ; FEM directionnel plus par defaut
+- 🟢 Bird supprime (pipeline/bird, tests, scripts, noyau C++ bird_lsq/bird_locate/skin_check, artefacts out/). **Sauvegarde integrale : branche `bird_old`** (poussee, commit 79549f08). L'autodocteur de surface (utilise par step1) est extrait dans `pipeline/mesh_doctor.py`.
+- 🟢 Remerciement et citation de S4 Slicer (Joshua Bird) conserves : README (Credits) et `CITATION.cff`.
+- 🟢 `PipelineParams` par defaut = variante `heat_iso_reach` (chaleur, flux projete, `isovalue_order`, sans step5b).
+- ⬛ A FAIRE : retirer le code FEM directionnel restant (step4 `build_static_system`, step4b multibranch, step4c planar parts, options geodesiques/feedback, `Constraint[]` utilisateur qui en dependent) — non fait faute de pouvoir mesurer la non-regression ; les tests step4 couvrent encore ce code.
+- Tests : echecs deja presents hors de ce chantier dans cet environnement Linux/Python 3.13 : test_shape_gradients (nb de tetra), 5 tests gcode natif identique, test_branch_indicator.
+
 ## ⚠️ RAPPELS PERMANENTS — à répéter à CHAQUE réponse tant que la case n'est pas cochée (demande de l'utilisateur, 2026-10-18)
 - ♦️ **[ ] Modifier les paramètres du firmware** dans `config.g` : `M203 Z8000` et `M201 Z1500` (Z actuel : 400 mm/min, 70 mm/s²). Bloquant : le pivot couple Z à B, le Benchy passe de 1,66 h à ~9,7 h, et les temps d'impression du salon (MFR 2026) en dépendent. **Cocher « [x] » ici quand l'utilisateur dit l'avoir fait ; seulement alors, cesser le rappel.**
 - 🟢 **[x] Champ scalaire multibranche : ESSAYÉ (2026-10-19, par Claude à la demande de l'utilisateur), verdict dans `CLAUDE.md` #78.** Résultat MITIGÉ, comme les mécanismes précédents : `multibranch=True, multibranch_direction_mode="up"` (variante `mbr_up`) divise par ~2 la matière sans appui sur death (−56 %) et benchy (−53 %), neutre sur real_overhang/dino/l_shape/l-triple, mais dégrade fig (+17 %) et deer (+23 %). Reste opt-in. Rappel arrêté.

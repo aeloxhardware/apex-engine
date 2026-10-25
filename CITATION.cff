@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "Apex Slicer was inspired by S4 Slicer by Joshua Bird. Thank you. If you use this work, please cite S4 Slicer."
+title: "Apex Algorithm"
+type: software
+license: GPL-3.0-only
+references:
+  - type: software
+    title: "S4 Slicer -- Generic Non-Planar Slicer"
+    authors:
+      - family-names: Bird
+        given-names: Joshua
+    license: GPL-3.0-only
+    url: "https://github.com/jyjblrd/S4_Slicer"

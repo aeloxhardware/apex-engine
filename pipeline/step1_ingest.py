@@ -95,7 +95,7 @@ class IngestReport:
     tet_volume_ratio: float = 0.0                             # volume tetra / volume du modele
     surface_outside_volume_clusters: list = field(default_factory=list)  # (aire mm2, centre) par amas
     # Reparation SYSTEMATIQUE de la surface (2026-10-22) : defauts detectes par
-    # l'autodocteur (`pipeline.bird.deformation.diagnose_surface`) et libelle de la
+    # l'autodocteur (`pipeline.mesh_doctor.diagnose_surface`) et libelle de la
     # reparation retenue (None = surface saine ou acceptee telle quelle par TetGen).
     # Donnee explicite : un modele repare n'est plus tout a fait le fichier source.
     surface_problems: list = field(default_factory=list)
@@ -2266,10 +2266,10 @@ def _tetrahedralize_with_translation_retry(
 def _tet_mesh_unusable(tm: TetMesh) -> Optional[str]:
     """Raison pour laquelle un maillage tetraedrique est inexploitable (valences
     aberrantes : millions de tetraedres de 1e-18 mm3 autour de details quasi coincidents,
-    Fighter jet F18), ou None. Meme critere que la voie Bird."""
-    from pipeline.bird.deformation import BirdTet, tet_mesh_problem
+    Fighter jet F18), ou None. Meme critere que l autodocteur."""
+    from pipeline.mesh_doctor import SurfaceTet, tet_mesh_problem
 
-    return tet_mesh_problem(BirdTet(points=np.asarray(tm.tet_vertices), cells=np.asarray(tm.tetrahedra)))
+    return tet_mesh_problem(SurfaceTet(points=np.asarray(tm.tet_vertices), cells=np.asarray(tm.tetrahedra)))
 
 
 def _repair_and_tetrahedralize(
@@ -2277,14 +2277,14 @@ def _repair_and_tetrahedralize(
     near_platform_margin, platform_z, junction_zones, junction_refinement_resolution,
 ) -> tuple[trimesh.Trimesh, TetMesh, str]:
     """REPARATION SYSTEMATIQUE de la surface (2026-10-22), appelee quand l'autodocteur trouve un
-    defaut AVANT TetGen, ou quand TetGen refuse / produit un maillage inexploitable. Meme cascade
-    que la voie Bird (`pipeline.bird.deformation.repair_candidates` : soudure des aretes courtes,
+    defaut AVANT TetGen, ou quand TetGen refuse / produit un maillage inexploitable. Cascade
+    que la voie Bird (`pipeline.mesh_doctor.repair_candidates` : soudure des aretes courtes,
     union des coques qui se traversent, resolution geometrique, pymeshfix), chaque candidat passe
     par la tetraedrisation FEM habituelle, rejete s'il ampute la piece (etendue) ou donne un
     maillage inexploitable ; en dernier recours TetGen sans point de Steiner en surface (`Y`).
     Rend (surface retenue, maillage tetraedrique, libelle) ; leve `MeshIngestError` avec TOUTES
     les raisons si rien ne passe - jamais un maillage faux en silence."""
-    from pipeline.bird.deformation import repair_candidates, tetrahedralize as bird_tetrahedralize
+    from pipeline.mesh_doctor import repair_candidates, tetrahedralize as doctor_tetrahedralize
 
     cleaned, labelled = repair_candidates(mesh)
     reference = np.asarray(mesh.extents, dtype=float)
@@ -2310,13 +2310,13 @@ def _repair_and_tetrahedralize(
         return candidate, tm, label
     for label, candidate in usable:
         try:
-            bird = bird_tetrahedralize(np.asarray(candidate.vertices), np.asarray(candidate.faces),
+            doctor_mesh = doctor_tetrahedralize(np.asarray(candidate.vertices), np.asarray(candidate.faces),
                                        resolution ** 3, keep_boundary=True)
         except RuntimeError as exc:
             errors.append(f"{label} + Y : TetGen refuse ({str(exc)[-200:]})")
             continue
-        tm = TetMesh(tet_vertices=np.asarray(bird.points, dtype=float), tetrahedra=np.asarray(bird.cells),
-                     tet_adjacency=_build_tet_adjacency(np.asarray(bird.cells), len(bird.points)))
+        tm = TetMesh(tet_vertices=np.asarray(doctor_mesh.points, dtype=float), tetrahedra=np.asarray(doctor_mesh.cells),
+                     tet_adjacency=_build_tet_adjacency(np.asarray(doctor_mesh.cells), len(doctor_mesh.points)))
         problem = _tet_mesh_unusable(tm)
         if problem is not None:
             errors.append(f"{label} + Y : maillage tetraedrique inexploitable ({problem})")
@@ -2423,7 +2423,7 @@ def run(
     # degeneres : Fighter jet F18) ; reparation aussi apres un refus de TetGen ou un maillage
     # inexploitable. Une surface saine n'est jamais modifiee. Une auto-intersection dans UNE
     # coque garde la cascade historique de `_tetrahedralize` (TetGen pour juge, limite #43).
-    from pipeline.bird.deformation import diagnose_surface
+    from pipeline.mesh_doctor import diagnose_surface
 
     diagnosis = diagnose_surface(cleaned_mesh)
     report.surface_problems = list(diagnosis.problems)
