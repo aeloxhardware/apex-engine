@@ -18,6 +18,8 @@ a ne PAS lancer sur la machine, l'extrudeur est froid). Lecture correcte
 Usage : .venv/Scripts/python.exe scripts/gen_b_direction_test.py [--out=out/test_b_direction.gcode]
         [--radius=60] [--height=40] [--b-max=60] [--step=20] [--b-sign=1] [--feed=1500] [--preview]
         [--repeat=N : N allers-retours de B, defaut 1]
+        [--mode=full|b|xz : B+X+Z (defaut), B seul (pivot fixe), ou X+Z seuls (B=0)]
+        [--pause-at=1,5,10,20 --pause-s=8 : pause G4 apres ces cycles, a B=0]
         [--pivot-to-tip=<mm>]   (defaut : derniere valeur de config/pivot_to_tip.json, sinon 46)
 
 Avec le bon L, la pointe reste fixe ; une erreur dL la fait deriver d'environ dL sin(B) en XY.
@@ -102,9 +104,12 @@ def main():
     params = GcodeParams(b_sign=float(flags.get("--b-sign", 1.0)), pivot_to_tip=pivot_to_tip)
     tip = np.array([radius, 0.0, height])
     up = np.arange(0.0, b_max + 1e-9, step)
-    sequence = list(up) + list(up[-2::-1])
+    cycle = list(up) + list(up[-2::-1])
     repeat = max(1, int(float(flags.get("--repeat", 1))))
-    sequence = sequence + (sequence[1:] * (repeat - 1))
+    mode = flags.get("--mode", "full")          # full | b | xz
+    pause_at = {int(v) for v in flags.get("--pause-at", "").split(",") if v.strip()}
+    pause_s = float(flags.get("--pause-s", 8))
+    sequence = cycle + cycle[1:] * (repeat - 1)
     lines = [
         "; Apex -- essai A SEC du sens de B (sans extrusion, sans chauffe)",
         f"; pointe immobile en R={radius:g} mm, Z={height:g} mm ; pivot a {params.pivot_to_tip:g} mm de la pointe",
@@ -113,11 +118,22 @@ def main():
         "G21", "G90",
     ]
     prev_y = None
-    for b in sequence:
-        x, y, z, bf = machine_to_firmware(tip, float(b), params.pivot_to_tip, prev_y, params.singularity_radius,
-                                          params.tilt_sign, params.z_reference, params.b_sign)
-        prev_y = y
-        lines.append(f"G00 X{x:.4f} Y{y:.4f} Z{z:.4f} B{(bf if bf else 0.0):g} F{feed:g} ; B Apex {b:g}")
+    x0 = y0 = z0 = None
+    for n_cycle in range(repeat):
+        for k, b in enumerate(cycle if n_cycle == 0 else cycle[1:]):
+            x, y, z, bf = machine_to_firmware(tip, float(b), params.pivot_to_tip, prev_y, params.singularity_radius,
+                                              params.tilt_sign, params.z_reference, params.b_sign)
+            prev_y = y
+            bf = bf if bf else 0.0
+            if mode == "b":            # B seul : pivot fixe a sa position de B=0
+                if x0 is None:
+                    x0, y0, z0 = x, y, z
+                x, y, z = x0, y0, z0
+            elif mode == "xz":         # X, Z seuls : memes deplacements, B fige a 0
+                bf = 0.0
+            lines.append(f"G00 X{x:.4f} Y{y:.4f} Z{z:.4f} B{bf:g} F{feed:g} ; cycle {n_cycle + 1} B Apex {b:g}")
+        if (n_cycle + 1) in pause_at:
+            lines.append(f"G4 S{pause_s:g} ; pause : relever la pointe (B=0) apres {n_cycle + 1} cycles")
     lines.append("; fin")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", newline="\n") as f:
