@@ -72,9 +72,10 @@ CE QUE CE SCRIPT NE PEUT PAS GARANTIR (a verifier avant de lancer)
    Si votre firmware ignore les axes rotatifs dans son calcul de vitesse,
    mettre CONSTANT_FEED = True pour retrouver le comportement de septembre.
 
-Usage : python scripts/gen_elbow_tube_gcode.py [sortie.gcode] [--speed N] [--pivot L] [--full-infill]
+Usage : python scripts/gen_elbow_tube_gcode.py [sortie.gcode] [--speed N] [--pivot L] [--full-infill] [--planar-cut [--cut-offset mm]]
   --speed N : multiplie TOUTES les vitesses par N (defaut 1)
   --full-infill : remplissage 100 % sur toutes les couches (anneaux concentriques)
+  --planar-cut : plans horizontaux coupes a 45 deg puis couches inclinees (numpy, trimesh, shapely)
   --pivot L : distance pivot B -> pointe de buse, mm (defaut 0)
 """
 
@@ -125,7 +126,7 @@ PART_OFFSET_R = 15.0
 LAYER_HEIGHT = 0.2
 EXTRUSION_WIDTH = 0.4
 FILAMENT_DIAMETER = 1.75
-NOZZLE_TEMP = 195
+NOZZLE_TEMP = 210
 # None = AUCUNE commande de plateau dans le fichier (ni M140, ni M190, ni
 # extinction en fin) : le plateau n'est pas chauffe par ce G-code.
 BED_TEMP = None
@@ -155,6 +156,8 @@ MAX_CHORD_MM = 0.6          # subdivision max entre deux points commandes
 # Multiplicateur global de TOUTES les vitesses (impression, premiere couche,
 # trajets a vide). Surcharge en ligne de commande : --speed 2
 SPEED_FACTOR = 1.0
+PLANAR_CUT = False          # --planar-cut : plans horizontaux coupes a 45 deg, puis couches inclinees
+CUT_OFFSET = 0.0            # --cut-offset : decalage du plan de coupe le long de sa normale, mm
 FULL_INFILL = False         # --full-infill : remplissage 100 % (anneaux concentriques)
 
 _TUBE_RADIUS = TUBE_DIAMETER / 2.0
@@ -546,6 +549,181 @@ def _emit_span(g: GCode, x0: float, y0: float, x1: float, y1: float,
              extrude=True)
 
 
+
+# ---------------------------------------------------------------------------
+# Mode --planar-cut : couches planes COUPEES a 45 deg, puis couches inclinees
+# ---------------------------------------------------------------------------
+#
+# Au lieu de l'eventail continu, les plans horizontaux sont tronques
+# progressivement par un plan a OVERHANG_ANGLE_DEG (chaque couche plane est
+# plus courte que la precedente de LAYER_HEIGHT / tan(angle) : un escalier a
+# 45 deg, imprimable sans support). Les couches inclinees, PARALLELES a ce plan,
+# commencent ensuite posees dessus. Le plan de coupe passe par le pivot de
+# l'ancien eventail (centre du coude) : il coupe alors le tube selon sa section
+# circulaire a mi-coude, ou les deux parois sont a 45 deg de la verticale.
+#
+# Contrairement au mode historique (contours generes generatrice par
+# generatrice), ce mode tranche un VRAI maillage du tube : necessite numpy,
+# trimesh et shapely, importes seulement ici.
+
+def _planar_cut_run(g: "GCode") -> None:
+    import numpy as np
+    import trimesh
+    from shapely.geometry import Polygon, box
+    from shapely.ops import polygonize, unary_union
+    from shapely.geometry import LineString
+
+    beta = _BETA_MAX
+    nrm = np.array([math.sin(beta), 0.0, math.cos(beta)])
+    u_inc = np.array([math.cos(beta), 0.0, -math.sin(beta)])
+    w = np.array([0.0, 1.0, 0.0])
+    c0 = _FAN_PIVOT[0] * nrm[0] + _FAN_PIVOT[1] * nrm[2] + CUT_OFFSET
+
+    # maillage ferme du tube
+    ds = 0.2
+    ns = int(math.ceil(_SPINE_TOTAL / ds))
+    nphi = 128
+    verts = []
+    for si in range(ns + 1):
+        sv = _SPINE_TOTAL * si / ns
+        for pi in range(nphi):
+            verts.append(tube_point(sv, 2.0 * math.pi * pi / nphi))
+    faces = []
+    for si in range(ns):
+        for pi in range(nphi):
+            a = si * nphi + pi
+            b = si * nphi + (pi + 1) % nphi
+            c = (si + 1) * nphi + pi
+            d = (si + 1) * nphi + (pi + 1) % nphi
+            faces += [(a, b, c), (b, d, c)]
+    for si, sv in ((0, 0.0), (ns, _SPINE_TOTAL)):
+        x, z, _tx, _tz = spine_at(sv)
+        verts.append((x, 0.0, z))
+        ci = len(verts) - 1
+        for pi in range(nphi):
+            faces.append((ci, si * nphi + pi, si * nphi + (pi + 1) % nphi))
+    mesh = trimesh.Trimesh(np.array(verts), np.array(faces), process=False)
+    v_all = mesh.vertices @ nrm
+    v_max = float(v_all.max())
+
+    def slice_polys(normal, origin, u):
+        seg = trimesh.intersections.mesh_plane(mesh, normal, origin)
+        if len(seg) == 0:
+            return None
+        lines = []
+        for a, b in seg:
+            pa = (round(float((a - origin) @ u), 6), round(float(a @ w), 6))
+            pb = (round(float((b - origin) @ u), 6), round(float(b @ w), 6))
+            if pa != pb:
+                lines.append(LineString([pa, pb]))
+        polys = list(polygonize(unary_union(lines)))
+        if not polys:
+            return None
+        return unary_union(polys)
+
+    def rings_of(geom):
+        """Anneaux concentriques (pas = largeur de cordon), du centre au bord."""
+        out = []
+        pieces = list(geom.geoms) if hasattr(geom, "geoms") else [geom]
+        for poly in pieces:
+            if poly.is_empty or poly.area < EXTRUSION_WIDTH ** 2:
+                continue
+            levels = []
+            k = 0
+            while True:
+                cur = poly.buffer(-k * EXTRUSION_WIDTH) if k else poly
+                if cur.is_empty:
+                    break
+                levels.append((k * EXTRUSION_WIDTH, cur))
+                k += 1
+            if not FULL_INFILL:
+                levels = levels[:1]
+            else:
+                kd = k * EXTRUSION_WIDTH - EXTRUSION_WIDTH * 0.5
+                core = poly.buffer(-kd)
+                if not core.is_empty:
+                    levels.append((kd, core))
+            for _d, cur in reversed(sorted(levels, key=lambda t: t[0])):
+                for gg in (cur.geoms if hasattr(cur, "geoms") else [cur]):
+                    for ring in [gg.exterior, *gg.interiors]:
+                        coords = list(ring.simplify(0.01).coords)
+                        if len(coords) >= 4:
+                            out.append(coords)
+        return out
+
+    def to3(coords, origin, u):
+        return [tuple(origin + a * u + bb * w) for a, bb in coords]
+
+    def emit_layer(coords_list, origin, u, b_deg, speed, lift):
+        first = True
+        for coords in coords_list:
+            pts = to3(coords, origin, u)
+            if g.pos is not None and not (first and lift):
+                # depart le plus proche de la position courante
+                px, py, pz = g.pos
+                i0 = min(range(len(pts) - 1),
+                         key=lambda i: math.dist(pts[i], (px, py, pz)))
+                pts = pts[i0:-1] + pts[:i0] + [pts[i0]]
+            x, y, z = pts[0]
+            if first and lift:
+                g.go(x, y, z + 2.0, b_deg, TRAVEL_SPEED, extrude=False)
+                g.go(x, y, z, b_deg, TRAVEL_SPEED, extrude=False)
+            else:
+                g.go(x, y, z, b_deg, TRAVEL_SPEED, extrude=False)
+            first = False
+            for i in range(1, len(pts)):
+                x0, y0, z0 = pts[i - 1]
+                x1, y1, z1 = pts[i]
+                seg = math.dist(pts[i - 1], pts[i])
+                steps = max(1, int(math.ceil(seg / MAX_CHORD_MM)))
+                for kk in range(1, steps + 1):
+                    t = kk / steps
+                    g.go(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t,
+                         z0 + (z1 - z0) * t, b_deg, speed, extrude=True)
+
+    e_z = np.array([0.0, 0.0, 1.0])
+    u_pl = np.array([1.0, 0.0, 0.0])
+
+    g.raw()
+    g.comment("--- couches planes (B=0) tronquees par le plan a "
+              f"{OVERHANG_ANGLE_DEG:g} deg ---")
+    k = 2
+    n_planar = 0
+    while True:
+        z = k * LAYER_HEIGHT
+        geom = slice_polys(e_z, np.array([0.0, 0.0, z]), u_pl)
+        if geom is None:
+            break
+        xc = (c0 - z * nrm[2]) / nrm[0]
+        geom = geom.intersection(box(-1e3, -1e3, xc, 1e3))
+        if geom.is_empty or geom.area < EXTRUSION_WIDTH ** 2:
+            break
+        speed = FIRST_LAYER_SPEED if k <= SOLID_BASE_LAYER_COUNT else PRINT_SPEED
+        emit_layer(rings_of(geom), np.array([0.0, 0.0, z]), u_pl, 0.0, speed,
+                   lift=(k == 2))
+        n_planar += 1
+        k += 1
+
+    g.raw()
+    g.comment(f"--- couches inclinees (B={OVERHANG_ANGLE_DEG:g}), paralleles "
+              "au plan de coupe ---")
+    j = 1
+    n_incl = 0
+    while True:
+        c = c0 + j * LAYER_HEIGHT
+        if c > v_max - 1e-6:
+            break
+        origin = nrm * c
+        geom = slice_polys(nrm, origin, u_inc)
+        if geom is not None and not geom.is_empty and geom.area >= EXTRUSION_WIDTH ** 2:
+            emit_layer(rings_of(geom), origin, u_inc, OVERHANG_ANGLE_DEG,
+                       PRINT_SPEED, lift=(n_incl == 0))
+            n_incl += 1
+        j += 1
+    g.comment(f"planar-cut : {n_planar + 1} couches planes, {n_incl} inclinees, "
+              f"plan de coupe c0={c0:.3f}")
+
+
 def build() -> GCode:
     g = GCode()
     total_layers = int(math.floor(_max_field_level() / LAYER_HEIGHT))
@@ -577,7 +755,10 @@ def build() -> GCode:
     g.raw()
 
     phase = None
-    for k in range(1, total_layers + 1):
+    if PLANAR_CUT:
+        _emit_base_disc(g, LAYER_HEIGHT)
+        _planar_cut_run(g)
+    for k in (range(1, total_layers + 1) if not PLANAR_CUT else ()):
         level = k * LAYER_HEIGHT
         if k == 1:
             _emit_base_disc(g, level)
@@ -671,8 +852,15 @@ def _max_field_level() -> float:
 
 
 def main() -> None:
-    global SPEED_FACTOR, FULL_INFILL
+    global SPEED_FACTOR, FULL_INFILL, PLANAR_CUT, CUT_OFFSET
     args = sys.argv[1:]
+    if "--planar-cut" in args:
+        PLANAR_CUT = True
+        args.remove("--planar-cut")
+    if "--cut-offset" in args:
+        i = args.index("--cut-offset")
+        CUT_OFFSET = float(args[i + 1])
+        del args[i:i + 2]
     if "--full-infill" in args:
         FULL_INFILL = True
         args.remove("--full-infill")
