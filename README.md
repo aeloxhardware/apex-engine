@@ -1,2 +1,3 @@
-# apex-beta
-DEV VERSION. ACCESS RESTRICTED.
+# Apex Algorithm
+
+5-axis slicer algorithm. Pre-release.
