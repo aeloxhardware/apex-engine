@@ -72,8 +72,9 @@ CE QUE CE SCRIPT NE PEUT PAS GARANTIR (a verifier avant de lancer)
    Si votre firmware ignore les axes rotatifs dans son calcul de vitesse,
    mettre CONSTANT_FEED = True pour retrouver le comportement de septembre.
 
-Usage : python scripts/gen_elbow_tube_gcode.py [sortie.gcode] [--speed N] [--pivot L]
+Usage : python scripts/gen_elbow_tube_gcode.py [sortie.gcode] [--speed N] [--pivot L] [--full-infill]
   --speed N : multiplie TOUTES les vitesses par N (defaut 1)
+  --full-infill : remplissage 100 % sur toutes les couches (anneaux concentriques)
   --pivot L : distance pivot B -> pointe de buse, mm (defaut 0)
 """
 
@@ -154,6 +155,7 @@ MAX_CHORD_MM = 0.6          # subdivision max entre deux points commandes
 # Multiplicateur global de TOUTES les vitesses (impression, premiere couche,
 # trajets a vide). Surcharge en ligne de commande : --speed 2
 SPEED_FACTOR = 1.0
+FULL_INFILL = False         # --full-infill : remplissage 100 % (anneaux concentriques)
 
 _TUBE_RADIUS = TUBE_DIAMETER / 2.0
 _FILAMENT_AREA = math.pi * (FILAMENT_DIAMETER / 2.0) ** 2
@@ -206,7 +208,8 @@ def spine_at(s: float) -> tuple[float, float, float, float]:
     return BEND_RADIUS + d, _HORIZONTAL_Z, 1.0, 0.0
 
 
-def tube_point(s: float, phi: float) -> tuple[float, float, float]:
+def tube_point(s: float, phi: float,
+               radius: float | None = None) -> tuple[float, float, float]:
     """Point de la SURFACE du tube : section circulaire a l'abscisse s.
 
     phi = 0 pointe vers l'exterieur du virage (dos du tube), phi = pi vers
@@ -214,12 +217,13 @@ def tube_point(s: float, phi: float) -> tuple[float, float, float]:
     plan PERPENDICULAIRE a la tangente : c'est ce qui fait un tube ROND,
     et non le cylindre oblique ecrase que produisait l'ancien script.
     """
+    rad = _TUBE_RADIUS if radius is None else radius
     x, z, tx, tz = spine_at(s)
     # normale dans le plan (X,Z), perpendiculaire a la tangente
     nx, nz = tz, -tx
-    return (x + _TUBE_RADIUS * math.cos(phi) * nx,
-            _TUBE_RADIUS * math.sin(phi),
-            z + _TUBE_RADIUS * math.cos(phi) * nz)
+    return (x + rad * math.cos(phi) * nx,
+            rad * math.sin(phi),
+            z + rad * math.cos(phi) * nz)
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +291,8 @@ def head_angle_deg(x: float, z: float) -> float:
     return math.degrees(min(max(ang, 0.0), _BETA_MAX))
 
 
-def _bracket_s(phi: float, target: float) -> float | None:
+def _bracket_s(phi: float, target: float,
+               radius: float | None = None) -> float | None:
     """Trouve s tel que height_field(surface(s, phi)) == target (bissection).
 
     Retourne None si le niveau ne coupe pas cette generatrice. Le champ est
@@ -299,7 +304,7 @@ def _bracket_s(phi: float, target: float) -> float | None:
     lo, hi = 0.0, _SPINE_TOTAL
 
     def f(s: float) -> float:
-        x, _y, z = tube_point(s, phi)
+        x, _y, z = tube_point(s, phi, radius)
         return height_field(x, z) - target
 
     flo, fhi = f(lo), f(hi)
@@ -450,7 +455,8 @@ def _local_thickness(x: float, z: float) -> float:
     return LAYER_HEIGHT * rho / BEND_RADIUS
 
 
-def _section_points(level: float) -> list[tuple[float, float, float]]:
+def _section_points(level: float, radius: float | None = None
+                    ) -> list[tuple[float, float, float]]:
     """Contour ferme d'une couche : intersection du niveau avec le tube.
 
     Pour chaque generatrice phi du tube, on cherche l'abscisse s ou le champ
@@ -462,10 +468,10 @@ def _section_points(level: float) -> list[tuple[float, float, float]]:
     pts: list[tuple[float, float, float]] = []
     for i in range(n + 1):                      # +1 : referme le contour
         phi = 2.0 * math.pi * (i % n) / n
-        s = _bracket_s(phi, level)
+        s = _bracket_s(phi, level, radius)
         if s is None:
             return []
-        pts.append(tube_point(s, phi))
+        pts.append(tube_point(s, phi, radius))
     return pts
 
 
@@ -596,7 +602,34 @@ def build() -> GCode:
                 g.comment("--- surplomb : B=45 constant, R et C oscillent ---")
 
         speed = FIRST_LAYER_SPEED if k <= SOLID_BASE_LAYER_COUNT else PRINT_SPEED
-        _emit_section(g, pts, speed, first_point_travel=(k == 2))
+        if FULL_INFILL:
+            # remplissage 100 % : anneaux concentriques, du centre vers la
+            # paroi (regle "interieur vers exterieur"), pas = largeur de cordon.
+            rings = []
+            r = _TUBE_RADIUS - EXTRUSION_WIDTH
+            while r >= EXTRUSION_WIDTH / 2.0 - 1e-9:
+                inner = _section_points(level, r)
+                if inner:
+                    rings.append(inner)
+                r -= EXTRUSION_WIDTH
+            rings.reverse()
+            first = True
+            for ring in rings:
+                x, y, z = ring[0]
+                if first:
+                    first = False
+                    _emit_section(g, ring, speed, first_point_travel=(k == 2))
+                else:
+                    g.go(x, y, z, head_angle_deg(x, z), TRAVEL_SPEED,
+                         extrude=False)
+                    _emit_section(g, ring, speed, first_point_travel=False)
+            if rings:
+                x, y, z = pts[0]
+                g.go(x, y, z, head_angle_deg(x, z), TRAVEL_SPEED, extrude=False)
+            _emit_section(g, pts, speed,
+                          first_point_travel=(k == 2 and not rings))
+        else:
+            _emit_section(g, pts, speed, first_point_travel=(k == 2))
 
     g.raw()
     g.comment("fin")
@@ -638,8 +671,11 @@ def _max_field_level() -> float:
 
 
 def main() -> None:
-    global SPEED_FACTOR
+    global SPEED_FACTOR, FULL_INFILL
     args = sys.argv[1:]
+    if "--full-infill" in args:
+        FULL_INFILL = True
+        args.remove("--full-infill")
     if "--speed" in args:
         i = args.index("--speed")
         SPEED_FACTOR = float(args[i + 1])
