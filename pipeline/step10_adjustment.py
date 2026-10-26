@@ -366,8 +366,12 @@ def _collisions_at_points(
     # l'etape 10 plutot qu'elimine.
     if sim_params.fast_kdtree:
         checker = _fast_checker(toolpath, machine_profile, sim_params)
-        return [e for i in sorted(set(point_indices)) if i < len(toolpath.points)
-                for e in _fast_events(checker, i, toolpath.points[i])]
+        indices = [i for i in sorted(set(point_indices)) if i < len(toolpath.points)]
+        from pipeline.step9_collision_sim import fast_batch_events
+        batch = fast_batch_events(checker, toolpath, indices)
+        if batch is not None:
+            return batch
+        return [e for i in indices for e in _fast_events(checker, i, toolpath.points[i])]
 
     # Zone de contact de la buse retiree, EXACTEMENT comme step9 : sans ce
     # filtre (oublie ici jusqu'au 2026-10-01), la pointe touche toujours le

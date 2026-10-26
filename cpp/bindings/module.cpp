@@ -987,6 +987,36 @@ PYBIND11_MODULE(apex_core, m) {
         "Tri topologique stable (step5b) : (ordre, contraintes violees).");
 
     m.def(
+        "fast_penetrations_batch",
+        [](const apex::PastMaterialIndex& material, const DoubleArray& samples, const DoubleArray& axes,
+           const DoubleArray& positions, const DoubleArray& angles, const IntArray& limits, double reach,
+           const py::object& plate_origin, double plate_radius, double plate_half_height,
+           double plate_center_offset, double safety_margin) {
+            apex::FastBatchInput in;
+            in.axis_count = static_cast<std::int64_t>(axes.shape(0));
+            in.axes = axes.data();
+            in.samples = samples.data();
+            in.sample_count = static_cast<std::int64_t>(samples.shape(0));
+            in.reach = reach;
+            if (!plate_origin.is_none()) {
+                DoubleArray o = plate_origin.cast<DoubleArray>();
+                in.has_plate = true;
+                for (int i = 0; i < 3; ++i) in.plate_origin[i] = o.data()[i];
+            }
+            in.plate_radius = plate_radius; in.plate_half_height = plate_half_height;
+            in.plate_center_offset = plate_center_offset; in.safety_margin = safety_margin;
+            const auto n = static_cast<py::ssize_t>(positions.shape(0));
+            py::array_t<double> plate(n), part(n);
+            {
+                py::gil_scoped_release release;
+                apex::fast_penetrations_batch(in, material, positions.data(), angles.data(), limits.data(), n,
+                                              plate.mutable_data(), part.mutable_data());
+            }
+            return py::make_tuple(std::move(plate), std::move(part));
+        },
+        "Penetrations plateau / piece (NaN = aucune) pour un lot de poses, en parallele.");
+
+    m.def(
         "clamp_head_height_apply",
         [](const DoubleArray& z, const DoubleArray& current, const DoubleArray& grid,
            const DoubleArray& zlow, double plate_z, double safety_margin) {

@@ -101,4 +101,25 @@ struct LocalReorientationInput {
 bool try_local_reorientation_coupled(const LocalReorientationInput& in,
                                      const PastMaterialIndex& material, double* out);
 
+// Controle rapide de step9 pour un LOT de poses (`FastCollisionChecker.penetrations` x m),
+// en parallele : tete positionnee (rotations d'axe interne a externe, translation),
+// distance au plateau (disque d'axe Z) puis a la matiere DEJA deposee
+// (`limits[k]` = indice du point de trajectoire). `plate_pen`/`part_pen` (m) :
+// penetration, ou NaN si aucune.
+struct FastBatchInput {
+    std::int64_t axis_count = 0;
+    const double* axes = nullptr;         // axis_count*3 unitaires
+    const double* samples = nullptr;      // S*3
+    std::int64_t sample_count = 0;
+    double reach = 0.0;
+    bool has_plate = false;
+    double plate_origin[3] = {0, 0, 0};
+    double plate_radius = 150.0, plate_half_height = 0.5, plate_center_offset = -0.5;
+    double safety_margin = 1.0;
+};
+
+void fast_penetrations_batch(const FastBatchInput& in, const PastMaterialIndex& material,
+                             const double* positions, const double* angles, const std::int64_t* limits,
+                             std::int64_t count, double* plate_pen, double* part_pen);
+
 }  // namespace apex

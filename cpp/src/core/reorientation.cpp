@@ -3,6 +3,9 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <thread>
+
+#include "apex/internal/parallel_pool.hpp"
 
 namespace apex {
 
@@ -296,6 +299,48 @@ bool try_local_reorientation_coupled(const LocalReorientationInput& in,
         }
     }
     return false;
+}
+
+void fast_penetrations_batch(const FastBatchInput& in, const PastMaterialIndex& material,
+                             const double* positions, const double* angles, const std::int64_t* limits,
+                             std::int64_t count, double* plate_pen, double* part_pen) {
+    static internal::ParallelPool* pool =
+        new internal::ParallelPool(std::max(1u, std::thread::hardware_concurrency()));
+    const std::int64_t A = in.axis_count;
+    pool->run(count, [&](std::int64_t b, std::int64_t e) {
+        std::vector<double> verts(static_cast<std::size_t>(in.sample_count) * 3);
+        std::vector<double> cs(static_cast<std::size_t>(A)), sn(static_cast<std::size_t>(A));
+        for (std::int64_t k = b; k < e; ++k) {
+            const double* ang = angles + k * A;
+            const double* pos = positions + 3 * k;
+            for (std::int64_t a = 0; a < A; ++a) {
+                cs[static_cast<std::size_t>(a)] = std::cos(ang[a] * kDeg2Rad);
+                sn[static_cast<std::size_t>(a)] = std::sin(ang[a] * kDeg2Rad);
+            }
+            for (std::int64_t s = 0; s < in.sample_count; ++s) {
+                double v[3] = {in.samples[3 * s], in.samples[3 * s + 1], in.samples[3 * s + 2]};
+                for (std::int64_t a = A - 1; a >= 0; --a) {
+                    rodrigues(v, in.axes + 3 * a, cs[static_cast<std::size_t>(a)], sn[static_cast<std::size_t>(a)]);
+                }
+                for (int c = 0; c < 3; ++c) verts[3 * static_cast<std::size_t>(s) + c] = v[c] + pos[c];
+            }
+            plate_pen[k] = NAN;
+            if (in.has_plate) {
+                double minimum = INFINITY;
+                for (std::int64_t s = 0; s < in.sample_count; ++s) {
+                    const double lx = verts[3 * static_cast<std::size_t>(s)] - in.plate_origin[0];
+                    const double ly = verts[3 * static_cast<std::size_t>(s) + 1] - in.plate_origin[1];
+                    const double lz = verts[3 * static_cast<std::size_t>(s) + 2] - in.plate_origin[2];
+                    const double dr = std::max(std::hypot(lx, ly) - in.plate_radius, 0.0);
+                    const double dz = std::max(std::abs(lz - in.plate_center_offset) - in.plate_half_height, 0.0);
+                    minimum = std::min(minimum, std::hypot(dr, dz));
+                }
+                if (!(minimum >= in.safety_margin)) plate_pen[k] = in.safety_margin - minimum;
+            }
+            const double best = material.min_past_distance(verts.data(), in.sample_count, limits[k], in.reach);
+            part_pen[k] = best < in.reach ? in.reach - best : NAN;
+        }
+    }, 4);
 }
 
 }  // namespace apex

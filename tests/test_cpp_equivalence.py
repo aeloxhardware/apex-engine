@@ -2566,3 +2566,40 @@ def test_step6_native_layers_match_per_layer_path(restore_switch):
         assert length(a.toolpath_2d) == pytest.approx(length(b.toolpath_2d), rel=2e-3)
         differing += len(a.toolpath_2d) != len(b.toolpath_2d)
     assert differing > 0        # garde : la fixture contient bien des couches en pont
+
+
+def test_fast_batch_events_match_python_checker(restore_switch):
+    import trimesh
+    from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
+    from pipeline import step9_collision_sim as s9
+
+    head = trimesh.creation.box(extents=[6, 6, 20])
+    head.apply_translation([0, 0, 13])
+    machine = MachineProfile(
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+                       RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
+        platform_origin=np.array([0.0, 0.0, -0.3]), nozzle_model=head, nozzle_diameter=0.4)
+    rng = np.random.default_rng(2)
+    pts = []
+    for k in range(60):
+        pts.append(ToolpathPoint(position=np.array([10.0, 0.0, 0.2 * k]), axis_angles=[90.0, float(rng.uniform(0, 40))],
+                                 extrusion=1.0, feedrate=1.0, color_id=None))
+    for k in range(40):
+        pts.append(ToolpathPoint(position=np.array([10.0 + 0.25 * k, 2.0, 0.2]),
+                                 axis_angles=[90.0, float(rng.uniform(0, 185))], extrusion=1.0, feedrate=1.0,
+                                 color_id=None))
+    tp = ToolpathMachine(points=pts)
+    params = s9.CollisionSimParams(path_sampling_step=0.1, safety_margin=1.0, fast_kdtree=True)
+    samples = s9._filter_nozzle_contact_zone(s9._surface_sample_points(head, params.toolhead_sample_spacing),
+                                             params.nozzle_contact_clearance)
+    indices = list(range(len(pts)))
+    _cpp.set_enabled(False)
+    ref = s9._run_fast_kdtree(tp, machine, params, samples, indices)
+    _cpp.set_enabled(True)
+    checker = s9.FastCollisionChecker(tp, machine, params, samples)
+    nat = s9.fast_batch_events(checker, tp, indices)
+    assert nat is not None and len(ref) > 5                                  # garde anti-faux-vert
+    key = lambda e: (e.point_index, e.obstacle_type)
+    assert [key(e) for e in ref] == [key(e) for e in nat]
+    assert np.allclose([e.penetration_depth for e in ref], [e.penetration_depth for e in nat], atol=1e-9)
+    assert {e.obstacle_type for e in ref} == {"printed_part", "platform"}    # les deux voies sont exercees
