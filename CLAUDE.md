@@ -12,6 +12,20 @@ sans redemander les spécifications déjà actées. L'IA peut et doit modifier c
 
 ---
 
+## NUMÉRO DE VERSION ET DÉPÔT COMMUN (décision de l'utilisateur, 2026-10-26)
+
+L'application Apex (moteur + interface) a **un seul numéro de version**, rangé dans le dépôt
+commun **`aeloxhardware/apex`** : fichier `VERSION` (source de vérité) et `VERSIONS.md`
+(journal). **À chaque changement de version du moteur**, la session met aussi à jour ces deux
+fichiers dans `apex` (récupérer d'abord son dernier état : l'interface a pu changer le numéro
+entre-temps), et commence ses messages de commit par le numéro complet. Format du numéro,
+niveaux à monter et règle des conflits : `apex/integration/RULES.md`, §9. Le détail des
+changements du moteur reste dans le DT et les limites numérotées de ce fichier.
+
+Le moteur et l'interface se développent séparément, une session par dépôt :
+`apex/integration/RULES.md` (règles et contrat entre les deux) et
+`apex/integration/REQUESTS.md` (demandes ouvertes, à lire en début de session).
+
 ## RAPPELS PERMANENTS À L'UTILISATEUR (demande du 2026-10-18)
 
 **À la fin de CHAQUE réponse, rappeler en une ligne le point ci-dessous, tant que
