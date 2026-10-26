@@ -21,7 +21,17 @@ Mailleur tétraédrique du moteur Apex. Lire d'abord `README.md`. Il vit pour l'
 7. **Dire les échecs.** Un cas hors tolérance est un résultat explicite (statut + raison),
    jamais un maillage dégradé en silence.
 
-## État
+## État (2026-10-26)
 
-Basepack posé, aucun algorithme écrit. Prochaine étape : le plan du prototype (donné dans la
-conversation du 2026-10-26), puis le corpus et ses seuils, puis le code.
+- Phase 0 : référence TetGen mesurée avec `tools/baseline_tetgen.py` (death : 47 s ici, 318 183
+  tétraèdres, binding Python, 4 cœurs) ; les grosses pièces tournent encore.
+- Phase 1 : `tools/vtk_export.py` (VTK binaire + qualité des tétraèdres).
+- Phases 2-4 (premier jet) : `src/tetranet.cpp` — BVH, signe par pseudonormales, composantes
+  hors bande, réseau BCC, ramené à la peau, tri des tétraèdres, contrôles. CLI :
+  `tools/tetranet_cli.cpp`.
+- **Vitesse** : confirmée (death_hi-res, 226 156 faces, h = 0,6 : 3,9 s, dont 2,6 s de contrôles).
+- **Qualité : NON atteinte.** Angle dièdre minimal ~0,5-0,7°, centaines de tétraèdres
+  dégénérés écartés, arêtes de bord non manifold, écart de peau jusqu'à 1 mm sur les pièces
+  fines. Cause identifiée : on ramène les sommets à la peau sans les découpes du schéma de
+  Labelle-Shewchuk. Prochaine étape : ajouter ces découpes (points de coupe sur les arêtes
+  qui traversent la peau) au lieu d'écarter les tétraèdres.

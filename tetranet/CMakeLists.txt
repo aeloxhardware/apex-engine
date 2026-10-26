@@ -14,6 +14,12 @@ endif()
 add_library(tetranet STATIC src/tetranet.cpp)
 target_include_directories(tetranet PUBLIC include)
 
+find_package(Threads REQUIRED)
+target_link_libraries(tetranet PUBLIC Threads::Threads)
+
+add_executable(tetranet_cli tools/tetranet_cli.cpp)
+target_link_libraries(tetranet_cli PRIVATE tetranet)
+
 enable_testing()
 add_executable(tetranet_smoke tests/smoke.cpp)
 target_link_libraries(tetranet_smoke PRIVATE tetranet)
