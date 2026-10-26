@@ -5414,15 +5414,13 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
       distribué traîne alors la clause réseau de l'AGPL, **inerte pour un
       logiciel de bureau** (elle ne se déclenche que sur une interaction à
       travers un réseau).
-    - **Séparation à distance de bras, déjà en place par accident heureux** :
-      `pipeline/_tetrahedralize_worker.py` est un exécutable SÉPARÉ recevant
-      deux chemins de fichiers sur `sys.argv`. Selon les critères de la FSF,
-      communiquer par arguments de ligne de commande et fichiers indique
-      normalement des programmes distincts — au contraire du partage d'un
-      espace d'adressage. Cette architecture existe pour isoler les segfaults
-      de TetGen (limite #35) et se trouve avoir cette conséquence juridique
-      par effet de bord. Terrain juridiquement CONTESTÉ : ne pas concevoir
-      autour de cet argument sans avis professionnel.
+    - **Licence : lier TetGen est permis (précisé le 2026-10-26, sur remarque de
+      l'utilisateur).** Le logiciel étant sous GPL-3.0 et TetGen sous AGPL-3.0, la
+      combinaison est autorisée (article 13 de chaque licence) ; l'ensemble distribué
+      porte la clause réseau de l'AGPL, inerte pour un logiciel de bureau. L'argument
+      « programmes distincts » (`pipeline/_tetrahedralize_worker.py` reçoit deux chemins
+      de fichiers) est une précaution SUPPLÉMENTAIRE, terrain juridiquement contesté, et
+      n'est PAS la raison de garder TetGen séparé. Pas un avis juridique.
 
     **Conséquences directes sur le plan de portage, toutes des simplifications :**
 
@@ -5434,12 +5432,21 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
     - la géométrie reste **identique au bit près** ;
     - il n'existe donc **aucun endroit du portage qui déplace la métrique**.
 
-    **RÈGLE D'ARCHITECTURE QUI EN DÉCOULE, à respecter au portage de step1 :
-    TetGen ne doit JAMAIS être lié dans `apex_core`.** Il doit rester dans un
-    exécutable dédié (`apex_tetgen_worker`), invoqué en sous-processus avec des
-    chemins de fichiers. Le lier détruirait d'un coup les DEUX protections :
-    l'isolation contre ses segfaults reproductibles, et la séparation
-    « programmes distincts » qui laisse le choix de licence ouvert.
+    **RÈGLE D'ARCHITECTURE (reformulée le 2026-10-26) : TetGen reste dans un
+    exécutable séparé (`apex_tetgen_worker`, sous-processus, chemins de fichiers) pour
+    des raisons de ROBUSTESSE, pas de licence.**
+    - TetGen plante nativement (segfault) de façon reproductible sur certaines entrées
+      (limite #35). En sous-processus, le plantage est une erreur récupérable
+      (`_TetgenCrashError`, replis de step1) ; lié dans `apex_core`, il tuerait le
+      moteur et l'interface TypeScript avec lui.
+    - Le sous-processus permet de lancer deux tétraédrisations en parallèle (step1 de
+      death : 15,6 s → 8 s) et garde le mailleur remplaçable.
+    - Il ne coûte rien en vitesse : les ~14 s de death sont du calcul TetGen.
+    - Lier TetGen reste PERMIS par la licence. Ce serait un choix de robustesse à
+      assumer (perte de l'isolation et du parallélisme), à décider explicitement.
+    - Un worker 100 % C++ (sans Python) est possible : il remplacerait
+      `_tetrahedralize_worker.py`, toujours en exécutable séparé. Il exige la SOURCE de
+      TetGen, absente du dépôt (le wheel `tetgen` n'embarque que le binaire).
 
     ### Ce que le portage avait rendu visible (conservé pour mémoire)
 
