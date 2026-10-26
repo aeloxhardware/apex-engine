@@ -65,6 +65,8 @@ struct Report {
 };
 
 const char* version();
-Report mesh(const SurfaceMesh& surface, const Params& params, TetMesh& out);
+// `cleaned` (facultatif) reçoit la surface réellement utilisée : sommets soudés, faces dégénérées
+// retirées, orientation remise en cohérence.
+Report mesh(const SurfaceMesh& surface, const Params& params, TetMesh& out, SurfaceMesh* cleaned = nullptr);
 
 }  // namespace tetranet

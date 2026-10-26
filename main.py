@@ -215,6 +215,12 @@ class PipelineParams:
     # Sans pose, death et turkish flottaient au-dessus du plateau : collision
     # plateau jamais exercee, et un G-code qui demarre en l'air.
     place_on_platform: bool = True
+    # Mailleur volumique de l'etape 1 : "tetgen" (defaut, reference) ou "tetranet" (reseau BCC,
+    # nombre d'enroulement : tolere trous et faces retournees, pas de reparation). TetraNet
+    # reste opt-in tant qu'il n'est pas mesure sur les quatre modeles (tetranet/docs/RAPPORT.md).
+    # Sans noyau natif, ou avec des zones de jonction, le moteur retombe sur TetGen.
+    mesher: str = "tetgen"
+    tetranet_refuse_ratio: float = 0.05   # points ambigus / sommets de la bande : au-dela, modele refuse
     overhang: OverhangParams = field(default_factory=OverhangParams)
     # anchor_growth_weight VOLONTAIREMENT NON ACTIVE ici (defaut de la
     # dataclass = None). Il l'a ete brievement, puis retire APRES MESURE sur
@@ -463,6 +469,8 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
         light_mesh_data, light_tet_mesh, light_ingest_report = ingest_run(
             mesh_path, resolution=params.resolution, allow_multi_mesh=params.allow_multi_mesh,
             place_on_platform=params.place_on_platform,
+            mesher=params.mesher,
+            tetranet_refuse_ratio=params.tetranet_refuse_ratio,
         )
         light_overhang_map = overhang_run(light_mesh_data, params.overhang)
         light_segmentation_params = (
@@ -491,6 +499,8 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
         junction_zones=junction_zones,
         junction_refinement_resolution=params.junction_refinement_resolution,
         place_on_platform=params.place_on_platform,
+        mesher=params.mesher,
+        tetranet_refuse_ratio=params.tetranet_refuse_ratio,
     )
     print(
         f"[main]   watertight avant/apres reparation : "
@@ -680,12 +690,29 @@ def main(argv: Optional[list[str]] = None) -> int:
         "--output-gcode", default=None,
         help="G-code a produire (trajectoire ajustee, export controle : pointe jamais sous le plateau).",
     )
+    parser.add_argument(
+        "--mesher", choices=("tetgen", "tetranet"), default="tetgen",
+        help="Mailleur volumique de l'etape 1 (defaut : tetgen). tetranet tolere trous et faces retournees.",
+    )
     args = parser.parse_args(argv)
 
-    params = PipelineParams(resolution=args.resolution)
+    params = PipelineParams(resolution=args.resolution, mesher=args.mesher)
     params.layers = LayerParams(layer_height_base=args.layer_height)
 
-    result = run_pipeline(args.mesh_path, params)
+    from pipeline.step1_ingest import MeshIngestError, SurfaceInconsistentError
+
+    try:
+        result = run_pipeline(args.mesh_path, params)
+    except MeshIngestError as exc:
+        # Modele refuse (RULES du depot apex, §5.2 : code de sortie 3) - message lisible par l'utilisateur.
+        import json as _json
+
+        diagnostic = getattr(exc, "diagnostic", None)
+        print(_json.dumps({"type": "log", "level": "error", "code": "surface_inconsistent"
+                           if isinstance(exc, SurfaceInconsistentError) else "model_refused",
+                           "message": str(exc), "diagnostic": diagnostic}, default=str), file=sys.stderr)
+        print(str(exc), file=sys.stderr)
+        return 3
     if args.output_gcode:
         _lines, report = export_gcode_checked(result.adjusted_toolpath, params, args.output_gcode)
         print(f"[main] G-code ecrit : {args.output_gcode} ({report.moves} mouvements)")

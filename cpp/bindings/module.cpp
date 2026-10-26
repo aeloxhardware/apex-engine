@@ -45,6 +45,7 @@
 #include "apex/toolpath2d.hpp"
 #include "apex/types.hpp"
 #include "apex/internal/parallel_pool.hpp"
+#include "tetranet/tetranet.hpp"
 
 namespace py = pybind11;
 
@@ -1784,4 +1785,47 @@ PYBIND11_MODULE(apex_core, m) {
         },
         py::arg("a"), py::arg("x"), py::arg("y"));
 
+
+    // TetraNet : maillage volumique par reseau BCC (dossier tetranet/, futur depot). Rend la surface
+    // nettoyee (soudee, orientee), le maillage et le diagnostic chiffre.
+    m.def(
+        "tetranet_mesh",
+        [](const DoubleArray& vertices, const IntArray& faces, double cell_size, double snap_alpha,
+           double skin_tolerance, double refuse_ratio, unsigned threads) {
+            tetranet::SurfaceMesh in;
+            in.vertices.assign(vertices.data(), vertices.data() + vertices.size());
+            in.faces.resize(static_cast<size_t>(faces.size()));
+            for (py::ssize_t i = 0; i < faces.size(); ++i) in.faces[static_cast<size_t>(i)] = static_cast<int32_t>(faces.data()[i]);
+            tetranet::Params p;
+            p.cell_size = cell_size; p.snap_alpha = snap_alpha; p.skin_tolerance = skin_tolerance;
+            p.refuse_conflict_ratio = refuse_ratio; p.threads = threads;
+            tetranet::TetMesh out; tetranet::SurfaceMesh cleaned; tetranet::Report r;
+            {
+                py::gil_scoped_release release;
+                r = tetranet::mesh(in, p, out, &cleaned);
+            }
+            py::dict d;
+            py::array_t<double> tv({static_cast<py::ssize_t>(out.vertices.size() / 3), static_cast<py::ssize_t>(3)});
+            std::copy(out.vertices.begin(), out.vertices.end(), tv.mutable_data());
+            py::array_t<std::int64_t> tt({static_cast<py::ssize_t>(out.tetrahedra.size() / 4), static_cast<py::ssize_t>(4)});
+            for (size_t i = 0; i < out.tetrahedra.size(); ++i) tt.mutable_data()[i] = out.tetrahedra[i];
+            py::array_t<double> sv({static_cast<py::ssize_t>(cleaned.vertices.size() / 3), static_cast<py::ssize_t>(3)});
+            std::copy(cleaned.vertices.begin(), cleaned.vertices.end(), sv.mutable_data());
+            py::array_t<std::int64_t> sf({static_cast<py::ssize_t>(cleaned.faces.size() / 3), static_cast<py::ssize_t>(3)});
+            for (size_t i = 0; i < cleaned.faces.size(); ++i) sf.mutable_data()[i] = cleaned.faces[i];
+            d["tet_vertices"] = std::move(tv); d["tetrahedra"] = std::move(tt);
+            d["surface_vertices"] = std::move(sv); d["surface_faces"] = std::move(sf);
+            d["status"] = static_cast<int>(r.status); d["reason"] = r.reason; d["seconds"] = r.seconds;
+            d["tets"] = r.tets; d["sign_conflicts"] = r.sign_conflicts; d["ambiguous_points"] = r.ambiguous_points;
+            d["band_vertices"] = r.band_vertices; d["conflict_ratio"] = r.conflict_ratio; d["ambiguous_ratio"] = r.ambiguous_ratio;
+            d["volume_ratio"] = r.volume_ratio; d["min_dihedral_deg"] = r.min_dihedral_deg; d["skin_max_error"] = r.skin_max_error;
+            d["surface_faces_count"] = r.surface_faces; d["surface_open_edges"] = r.surface_open_edges; d["surface_holes"] = r.surface_holes;
+            d["surface_nonmanifold_edges"] = r.surface_nonmanifold_edges; d["surface_flipped_edges"] = r.surface_flipped_edges;
+            d["surface_degenerate_faces"] = r.surface_degenerate_faces; d["surface_duplicate_faces"] = r.surface_duplicate_faces;
+            d["surface_reoriented_faces"] = r.surface_reoriented_faces; d["warning"] = r.warning;
+            return d;
+        },
+        py::arg("vertices"), py::arg("faces"), py::arg("cell_size"), py::arg("snap_alpha") = 0.5,
+        py::arg("skin_tolerance") = 0.05, py::arg("refuse_ratio") = 0.05, py::arg("threads") = 0u,
+        "Maillage tetraedrique TetraNet : dict (maillage, surface nettoyee, diagnostic).");
 }

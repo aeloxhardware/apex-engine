@@ -44,9 +44,12 @@ pybind11_add_module(apex_core
   third_party/clipper2/src/clipper.offset.cpp
   third_party/clipper2/src/clipper.rectclip.cpp
   bindings/module.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/src/tetranet.cpp
 )
 
-target_include_directories(apex_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_include_directories(apex_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/include)
+find_package(Threads REQUIRED)
+target_link_libraries(apex_core PRIVATE Threads::Threads)
 
 # Eigen (MPL-2.0), header-only, vendore dans third_party/ - voir CLAUDE.md
 # limite #56 pour le choix de licence. Introduit au pas 7 (step4) seulement :

@@ -351,7 +351,7 @@ double tet_volume(const V3& a, const V3& b, const V3& c, const V3& d) { return d
 
 const char* version() { return "0.0.1"; }
 
-Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
+Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh* cleaned) {
     auto t_all = Clock::now();
     Report rep;
     out.vertices.clear();
@@ -363,6 +363,12 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
         rep.status = Status::InvalidInput;
         rep.reason = "surface vide ou taille de maille invalide";
         return rep;
+    }
+    if (cleaned) {
+        cleaned->vertices.clear(); cleaned->faces.clear();
+        cleaned->vertices.reserve(surf.p.size() * 3); cleaned->faces.reserve(surf.tri.size() * 3);
+        for (const V3& q : surf.p) { cleaned->vertices.push_back(q.x); cleaned->vertices.push_back(q.y); cleaned->vertices.push_back(q.z); }
+        for (const auto& t : surf.tri) { cleaned->faces.push_back(t[0]); cleaned->faces.push_back(t[1]); cleaned->faces.push_back(t[2]); }
     }
     auto t0 = Clock::now();
     Bvh bvh;
@@ -414,7 +420,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
                 double w = wn.query(pos[v], hit.found ? 0.0 : 1.2);   // loin de la peau : dipôle grossier, le signe a de la marge
                 wval[v] = float(w);
                 sgn[v] = w > 0.5 ? -1 : 1;
-                if (hit.found && std::fabs(w - 0.5) < 0.25) ambiguous[v] = 1;
+                if (hit.found && std::fabs(w - 0.5) < 0.25 && hit.d2 > 4e-4 * h * h) ambiguous[v] = 1;   // un sommet SUR la peau vaut 0,5 sans que rien ne soit cassé
             } else if (hit.found) sgn[v] = ps_sign[v];
         }
     });

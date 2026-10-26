@@ -100,10 +100,23 @@ class IngestReport:
     # Donnee explicite : un modele repare n'est plus tout a fait le fichier source.
     surface_problems: list = field(default_factory=list)
     surface_repair: Optional[str] = None
+    # Mailleur utilise ("tetgen" ou "tetranet") et, pour TetraNet, son diagnostic chiffre de la
+    # surface d'entree (trous, faces retournees, points incoherents...) : donnee explicite.
+    mesher: str = "tetgen"
+    mesher_report: Optional[dict] = None
 
 
 class MeshIngestError(Exception):
     """Levee quand le mesh source ne peut pas etre charge ou exploite."""
+
+
+class SurfaceInconsistentError(MeshIngestError):
+    """Surface trop abimee pour distinguer l'interieur de l'exterieur (R-016) : `str(exc)` est le
+    message de l'utilisateur, `exc.diagnostic` le diagnostic chiffre de TetraNet."""
+
+    def __init__(self, message: str, diagnostic: dict):
+        super().__init__(message)
+        self.diagnostic = diagnostic
 
 
 # Tentative finale de TetGen lancee en parallele de la sonde de
@@ -2436,6 +2449,77 @@ def _repair_and_tetrahedralize(
     raise MeshIngestError("surface irreparable : " + " | ".join(errors))
 
 
+# Arete du reseau de TetraNet par unite de `resolution` : TetGen borne le VOLUME d'un tetraedre
+# a resolution^3 ; TetraNet fait des tetraedres de volume cell^3 / 12. Le facteur 2/3 donne a
+# resolution 1,5 la maille de 1,0 mm validee sur le Benchy (tetranet/docs, CLAUDE.md).
+TETRANET_CELL_PER_RESOLUTION = 2.0 / 3.0
+TETRANET_STATUS_INCONSISTENT_SURFACE = 4
+
+
+def tetranet_available() -> bool:
+    """Le noyau natif est charge ET contient TetraNet (jamais une erreur s'il manque)."""
+    if not _cpp.enabled():
+        return False
+    module = _cpp.module()
+    return module is not None and hasattr(module, "tetranet_mesh")
+
+
+def _ingest_with_tetranet(
+    raw_mesh: trimesh.Trimesh, resolution: float, platform_z: Optional[float], place_on_platform: bool,
+    check_surface_coverage: bool, refuse_ratio: float,
+) -> tuple[MeshData, TetMesh, IngestReport]:
+    """Etape 1 SANS reparation de surface : TetraNet mesure, soude, remet les faces dans le bon sens
+    et tetraedrise en un appel natif. Aucune reparation (pymeshfix, union booleenne, TetGen comme
+    juge) : le nombre d'enroulement tolere trous et faces retournees. Une surface trop abimee leve
+    `SurfaceInconsistentError` avec le message de l'utilisateur (R-016)."""
+    vertices = np.ascontiguousarray(raw_mesh.vertices, dtype=np.float64)
+    faces = np.ascontiguousarray(raw_mesh.faces, dtype=np.int64)
+    placement_offset = 0.0
+    if place_on_platform and len(vertices):
+        target_z = 0.0 if platform_z is None else float(platform_z)
+        placement_offset = target_z - float(vertices[:, 2].min())
+        if placement_offset != 0.0:
+            vertices = vertices + np.array([0.0, 0.0, placement_offset])
+    out = _cpp.module().tetranet_mesh(vertices, faces, float(resolution) * TETRANET_CELL_PER_RESOLUTION,
+                                      0.5, 0.05, float(refuse_ratio), 0)
+    mesher_report = {k: v for k, v in out.items()
+                     if k not in ("tet_vertices", "tetrahedra", "surface_vertices", "surface_faces")}
+    if out["tets"] == 0 or out["status"] == TETRANET_STATUS_INCONSISTENT_SURFACE:
+        from core.surface_message import surface_error_message
+        cleaned = trimesh.Trimesh(out["surface_vertices"], out["surface_faces"], process=False) \
+            if len(out["surface_faces"]) else raw_mesh
+        self_intersections = int(_count_self_intersecting_faces(cleaned))
+        volume_pct = 100.0 * float(out["volume_ratio"])
+        raise SurfaceInconsistentError(surface_error_message(mesher_report, volume_pct, self_intersections),
+                                       mesher_report)
+    mesh = trimesh.Trimesh(out["surface_vertices"], out["surface_faces"], process=False)
+    tet_mesh = TetMesh(tet_vertices=np.asarray(out["tet_vertices"], dtype=np.float64),
+                       tetrahedra=np.asarray(out["tetrahedra"], dtype=np.int64))
+    tet_mesh.tet_adjacency = _build_tet_adjacency(tet_mesh.tetrahedra, tet_mesh.tet_vertices.shape[0])
+    resolved_platform_z = float(mesh.vertices[:, 2].min()) if platform_z is None else float(platform_z)
+    report = IngestReport(
+        was_watertight_initially=bool(out["surface_open_edges"] == 0 and out["surface_nonmanifold_edges"] == 0
+                                      and out["surface_flipped_edges"] == 0),
+        is_watertight_after_repair=bool(mesh.is_watertight),
+        faces_removed_degenerate=int(out["surface_degenerate_faces"]),
+        vertices_merged=max(0, int(raw_mesh.vertices.shape[0]) - int(mesh.vertices.shape[0])),
+        tetrahedra_generated=int(tet_mesh.tet_count),
+        source_face_count=int(mesh.faces.shape[0]), source_vertex_count=int(mesh.vertices.shape[0]),
+        platform_z_used=resolved_platform_z, placement_offset_z=placement_offset,
+        mesher="tetranet", mesher_report=mesher_report,
+    )
+    mesh_data = _build_mesh_data(mesh)
+    if check_surface_coverage:
+        from core.tet_coverage import surface_outside_volume
+        coverage = surface_outside_volume(mesh.vertices, mesh.faces, tet_mesh.tet_vertices, tet_mesh.tetrahedra)
+        report.surface_outside_volume_fraction = coverage.far_fraction
+        report.surface_outside_volume_area = coverage.far_area
+        report.surface_max_distance_to_tets = coverage.max_distance
+        report.tet_volume_ratio = coverage.volume_ratio
+        report.surface_outside_volume_clusters = [(c.area, c.center) for c in coverage.clusters[:10]]
+    return mesh_data, tet_mesh, report
+
+
 def run(
     mesh_path: str,
     resolution: float,
@@ -2447,6 +2531,8 @@ def run(
     junction_refinement_resolution: Optional[float] = None,
     check_surface_coverage: bool = False,
     place_on_platform: bool = False,
+    mesher: str = "tetgen",
+    tetranet_refuse_ratio: float = 0.05,
 ) -> tuple[MeshData, TetMesh, IngestReport]:
     """
     Charge, nettoie et prepare le mesh source pour le reste du pipeline.
@@ -2514,6 +2600,16 @@ def run(
             etre reduit a un volume tetraedrisable meme apres reparation.
     """
     raw_mesh = _load_raw_mesh(mesh_path, allow_multi_mesh)
+    if mesher == "tetranet":
+        if junction_zones:
+            print("[step1] TetraNet : zones de jonction non prises en charge, retour a TetGen")
+        elif not tetranet_available():
+            print("[step1] TetraNet : noyau natif absent, retour a TetGen")
+        else:
+            if near_platform_resolution is not None:
+                print("[step1] TetraNet : raffinement pres du plateau pas encore porte, ignore")
+            return _ingest_with_tetranet(raw_mesh, resolution, platform_z, place_on_platform,
+                                         check_surface_coverage, tetranet_refuse_ratio)
     cleaned_mesh, report = _clean_and_repair(raw_mesh)
 
     if place_on_platform and len(cleaned_mesh.vertices):
