@@ -14,6 +14,9 @@ struct SurfaceMesh {
 struct Params {
     double cell_size = 1.5;          // arête du réseau BCC (mm)
     double skin_tolerance = 0.05;    // écart toléré entre peau du maillage et surface (mm)
+    bool use_cuts = true;            // découpes de Labelle-Shewchuk (sinon : ramenage simple, sans coupe)
+    double alpha_long = 0.25;        // une arête longue (h) dont la coupe est à moins de alpha*L d'un bout y ramène ce sommet
+    double alpha_short = 0.41;       // idem pour les arêtes courtes (0,866 h)
     double snap_alpha = 0.4;         // un sommet à moins de alpha*cell_size de la peau y est ramené
     double min_volume_ratio = 0.01;  // volume minimal d'un tétraèdre / volume nominal (cell^3/12)
     bool has_platform = false;

@@ -28,3 +28,7 @@ add_test(NAME smoke COMMAND tetranet_smoke)
 add_executable(tetranet_defects tests/test_defects.cpp)
 target_link_libraries(tetranet_defects PRIVATE tetranet)
 add_test(NAME defects COMMAND tetranet_defects)
+
+add_executable(tetranet_quality tests/test_quality.cpp)
+target_link_libraries(tetranet_quality PRIVATE tetranet)
+add_test(NAME quality COMMAND tetranet_quality)

@@ -463,12 +463,67 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     }
     for (int64_t v = 0; v < N; ++v) if (isband[v]) ++rep.band_vertices;
     // --- ramener à la peau les sommets proches
-    const double snap = prm.snap_alpha * h;
-    std::vector<V3> pos0;  // positions d'origine des seuls sommets déplacés
-    pos0 = pos;
-    parallel_for(N, threads, [&](int64_t b, int64_t e, unsigned) {
-        for (int64_t v = b; v < e; ++v) if (isband[v] && dist[v] <= snap) { pos[v] = qpt[v]; sgn[v] = 0; }
-    });
+    std::vector<V3> pos0 = pos;                         // positions de référence (réseau régulier)
+    std::vector<V3> cut_pos, cut_ref;                   // sommets de coupe : position réelle (sur la peau) et position linéaire
+    std::unordered_map<uint64_t, int64_t> cut_id;       // arête (u,v) -> indice du sommet de coupe
+    if (!prm.use_cuts) {
+        const double snap = prm.snap_alpha * h;
+        parallel_for(N, threads, [&](int64_t b, int64_t e, unsigned) {
+            for (int64_t v = b; v < e; ++v) if (isband[v] && dist[v] <= snap) { pos[v] = qpt[v]; sgn[v] = 0; }
+        });
+    } else {
+        // 1. arêtes du réseau dont les deux bouts sont de signes opposés ("violées")
+        struct VEdge { int64_t u, v; bool is_short; };
+        std::vector<VEdge> viol;
+        auto consider = [&](int64_t u, int64_t v, bool is_short) {
+            if (isband[u] && isband[v] && sgn[u] * sgn[v] < 0) viol.push_back({u, v, is_short});
+        };
+        for (int k = 0; k <= nz; ++k) for (int j = 0; j <= ny; ++j) for (int i = 0; i <= nx; ++i) {
+            int64_t a = idA(i, j, k);
+            if (i < nx) consider(a, idA(i + 1, j, k), false);
+            if (j < ny) consider(a, idA(i, j + 1, k), false);
+            if (k < nz) consider(a, idA(i, j, k + 1), false);
+        }
+        for (int k = 0; k < nz; ++k) for (int j = 0; j < ny; ++j) for (int i = 0; i < nx; ++i) {
+            int64_t bq = idB(i, j, k);
+            for (int dk = 0; dk < 2; ++dk) for (int dj = 0; dj < 2; ++dj) for (int di = 0; di < 2; ++di) consider(bq, idA(i + di, j + dj, k + dk), true);
+            if (i + 1 < nx) consider(bq, idB(i + 1, j, k), false);
+            if (j + 1 < ny) consider(bq, idB(i, j + 1, k), false);
+            if (k + 1 < nz) consider(bq, idB(i, j, k + 1), false);
+        }
+        // 2. point de coupe de chaque arête : interpolation des distances, ramenée sur la peau
+        std::vector<V3> cuts(viol.size()), refs(viol.size());
+        parallel_for(int64_t(viol.size()), threads, [&](int64_t b, int64_t e, unsigned) {
+            for (int64_t k = b; k < e; ++k) {
+                const auto& ed = viol[k];
+                double du = dist[ed.u], dv = dist[ed.v];
+                double t = (du + dv) > 0 ? du / (du + dv) : 0.5;
+                V3 lin = pos[ed.u] + (pos[ed.v] - pos[ed.u]) * t;
+                refs[k] = lin;
+                Hit hit = nearest(bvh, lin, 2.0 * h);
+                cuts[k] = hit.found ? hit.q : lin;
+            }
+        });
+        // 3. ramenage : un sommet à moins de alpha*L d'une coupe de ses arêtes violées va sur la coupe la plus proche
+        std::vector<float> ratio(N, 1.0f);
+        std::vector<V3> target(N);
+        for (size_t k = 0; k < viol.size(); ++k) {
+            const auto& ed = viol[k];
+            const double L = norm(pos[ed.u] - pos[ed.v]), alpha = ed.is_short ? prm.alpha_short : prm.alpha_long;
+            for (int64_t w : {ed.u, ed.v}) {
+                double r = norm(pos[w] - cuts[k]) / (alpha * L);
+                if (r < ratio[w]) { ratio[w] = float(r); target[w] = cuts[k]; }
+            }
+        }
+        for (int64_t v = 0; v < N; ++v) if (ratio[v] < 1.0f) { pos[v] = target[v]; sgn[v] = 0; }
+        // 4. arêtes encore violées : un sommet de coupe chacune
+        for (size_t k = 0; k < viol.size(); ++k) {
+            const auto& ed = viol[k];
+            if (sgn[ed.u] == 0 || sgn[ed.v] == 0) continue;
+            cut_id[ekey(int(ed.u), int(ed.v))] = N + int64_t(cut_pos.size());
+            cut_pos.push_back(cuts[k]); cut_ref.push_back(refs[k]);
+        }
+    }
     for (int64_t v = 0; v < N; ++v) if (isband[v] && sgn[v] == 0) ++rep.snapped_vertices;
     rep.t_classify = since(t0);
 
@@ -504,6 +559,60 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
         if (!(v1 > vmin)) { ++L.dropped; return; }
         for (int k = 0; k < 4; ++k) L.tets.push_back(int32_t(t[k]));
     };
+
+    // ---- version avec découpes : sous-tétraèdres de la partie intérieure de chaque tétraèdre du réseau
+    auto P = [&](int64_t v) -> const V3& { return v < N ? pos[v] : cut_pos[size_t(v - N)]; };
+    auto R = [&](int64_t v) -> const V3& { return v < N ? pos0[v] : cut_ref[size_t(v - N)]; };
+    auto cutv = [&](int64_t u, int64_t v) -> int64_t { auto it = cut_id.find(ekey(int(u), int(v))); return it == cut_id.end() ? -1 : it->second; };
+    auto push = [&](Local& L, int64_t p0, int64_t p1, int64_t p2, int64_t p3) {
+        if (p0 < 0 || p1 < 0 || p2 < 0 || p3 < 0) { ++L.dropped; return; }
+        if (tet_volume(R(p0), R(p1), R(p2), R(p3)) < 0) std::swap(p2, p3);     // orientation de référence positive
+        if (!(tet_volume(P(p0), P(p1), P(p2), P(p3)) > vmin)) { ++L.dropped; return; }
+        L.tets.push_back(int32_t(p0)); L.tets.push_back(int32_t(p1)); L.tets.push_back(int32_t(p2)); L.tets.push_back(int32_t(p3));
+    };
+    // prisme (p0 p1 p2 | q0 q1 q2) en trois tétraèdres : les diagonales des faces carrées passent par le plus petit indice
+    auto prism = [&](Local& L, int64_t t1[3], int64_t t2[3]) {
+        int64_t* a = t1; int64_t* b = t2;
+        int64_t mn = a[0]; int where = 0; bool in_second = false;
+        for (int k = 0; k < 3; ++k) { if (a[k] < mn) { mn = a[k]; where = k; in_second = false; } if (b[k] < mn) { mn = b[k]; where = k; in_second = true; } }
+        if (in_second) std::swap(a, b);
+        const int64_t p0 = a[where], p1 = a[(where + 1) % 3], p2 = a[(where + 2) % 3];
+        const int64_t q0 = b[where], q1 = b[(where + 1) % 3], q2 = b[(where + 2) % 3];
+        const int64_t m12 = std::min({p1, p2, q1, q2});
+        if (m12 == p1 || m12 == q2) { push(L, p0, p1, p2, q2); push(L, p0, p1, q1, q2); push(L, p0, q0, q1, q2); }
+        else                        { push(L, p0, p2, p1, q1); push(L, p0, p2, q2, q1); push(L, p0, q0, q2, q1); }
+    };
+    auto emit_cut = [&](Local& L, int64_t a, int64_t b, int64_t c, int64_t d) {
+        const int64_t v[4] = {a, b, c, d};
+        int64_t ng[4], ps[4], zr[4]; int nn = 0, np = 0, nz = 0;
+        for (int k = 0; k < 4; ++k) { if (sgn[v[k]] < 0) ng[nn++] = v[k]; else if (sgn[v[k]] > 0) ps[np++] = v[k]; else zr[nz++] = v[k]; }
+        if (np == 0) { if (nn > 0) push(L, a, b, c, d); return; }          // tout dedans (ou sur la peau)
+        if (nn == 0) return;                                               // tout dehors
+        if (nn == 1) {
+            int64_t q[3]; int m = 0;
+            for (int k = 0; k < np; ++k) q[m++] = cutv(ng[0], ps[k]);
+            for (int k = 0; k < nz; ++k) q[m++] = zr[k];
+            push(L, ng[0], q[0], q[1], q[2]);
+        } else if (nn == 2 && np == 2) {
+            int64_t t1[3] = {ng[0], cutv(ng[0], ps[0]), cutv(ng[0], ps[1])};
+            int64_t t2[3] = {ng[1], cutv(ng[1], ps[0]), cutv(ng[1], ps[1])};
+            if (t1[1] < 0 || t1[2] < 0 || t2[1] < 0 || t2[2] < 0) { ++L.dropped; return; }
+            prism(L, t1, t2);
+        } else if (nn == 3 && np == 1) {
+            int64_t t1[3] = {ng[0], ng[1], ng[2]};
+            int64_t t2[3] = {cutv(ng[0], ps[0]), cutv(ng[1], ps[0]), cutv(ng[2], ps[0])};
+            if (t2[0] < 0 || t2[1] < 0 || t2[2] < 0) { ++L.dropped; return; }
+            prism(L, t1, t2);
+        } else if (nn == 2 && np == 1 && nz == 1) {
+            const int64_t c1 = cutv(ng[0], ps[0]), c2 = cutv(ng[1], ps[0]);
+            if (c1 < 0 || c2 < 0) { ++L.dropped; return; }
+            const int64_t q0 = ng[0], q1 = ng[1], q2 = c2, q3 = c1;       // base : a, b, bc, ac
+            const int64_t m = std::min({q0, q1, q2, q3});
+            if (m == q0 || m == q2) { push(L, zr[0], q0, q1, q2); push(L, zr[0], q0, q2, q3); }
+            else                    { push(L, zr[0], q1, q2, q3); push(L, zr[0], q1, q3, q0); }
+        } else { ++L.dropped; }
+    };
+    auto emit_any = [&](Local& L, int64_t a, int64_t b, int64_t c, int64_t d) { if (prm.use_cuts) emit_cut(L, a, b, c, d); else emit(L, a, b, c, d); };
     parallel_for(int64_t(nz) * ny * nx, threads, [&](int64_t b, int64_t e, unsigned th) {
         Local& L = locals[th];
         for (int64_t q = b; q < e; ++q) {
@@ -512,29 +621,29 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
             if (i + 1 < nx) {  // face x = i+1, coins en (j,k)
                 int64_t B2 = idB(i + 1, j, k);
                 int64_t c00 = idA(i + 1, j, k), c10 = idA(i + 1, j + 1, k), c11 = idA(i + 1, j + 1, k + 1), c01 = idA(i + 1, j, k + 1);
-                emit(L, B1, B2, c00, c10); emit(L, B1, B2, c10, c11); emit(L, B1, B2, c11, c01); emit(L, B1, B2, c01, c00);
+                emit_any(L, B1, B2, c00, c10); emit_any(L, B1, B2, c10, c11); emit_any(L, B1, B2, c11, c01); emit_any(L, B1, B2, c01, c00);
             }
             if (j + 1 < ny) {
                 int64_t B2 = idB(i, j + 1, k);
                 int64_t c00 = idA(i, j + 1, k), c10 = idA(i + 1, j + 1, k), c11 = idA(i + 1, j + 1, k + 1), c01 = idA(i, j + 1, k + 1);
-                emit(L, B1, B2, c00, c10); emit(L, B1, B2, c10, c11); emit(L, B1, B2, c11, c01); emit(L, B1, B2, c01, c00);
+                emit_any(L, B1, B2, c00, c10); emit_any(L, B1, B2, c10, c11); emit_any(L, B1, B2, c11, c01); emit_any(L, B1, B2, c01, c00);
             }
             if (k + 1 < nz) {
                 int64_t B2 = idB(i, j, k + 1);
                 int64_t c00 = idA(i, j, k + 1), c10 = idA(i + 1, j, k + 1), c11 = idA(i + 1, j + 1, k + 1), c01 = idA(i, j + 1, k + 1);
-                emit(L, B1, B2, c00, c10); emit(L, B1, B2, c10, c11); emit(L, B1, B2, c11, c01); emit(L, B1, B2, c01, c00);
+                emit_any(L, B1, B2, c00, c10); emit_any(L, B1, B2, c10, c11); emit_any(L, B1, B2, c11, c01); emit_any(L, B1, B2, c01, c00);
             }
         }
     });
     std::vector<int32_t> tets;
     for (auto& L : locals) { tets.insert(tets.end(), L.tets.begin(), L.tets.end()); rep.dropped_degenerate += L.dropped; }
-    pos0.clear(); pos0.shrink_to_fit();
     // compactage des sommets
-    std::vector<int32_t> remap(N, -1);
+    const int64_t NT = N + int64_t(cut_pos.size());
+    std::vector<int32_t> remap(NT, -1);
     int32_t used = 0;
     for (int32_t& t : tets) { if (remap[t] < 0) remap[t] = used++; }
     out.vertices.resize(size_t(used) * 3);
-    for (int64_t v = 0; v < N; ++v) if (remap[v] >= 0) { size_t o = size_t(remap[v]) * 3; out.vertices[o] = pos[v].x; out.vertices[o + 1] = pos[v].y; out.vertices[o + 2] = pos[v].z; }
+    for (int64_t v = 0; v < NT; ++v) if (remap[v] >= 0) { const V3& q = P(v); size_t o = size_t(remap[v]) * 3; out.vertices[o] = q.x; out.vertices[o + 1] = q.y; out.vertices[o + 2] = q.z; }
     for (int32_t& t : tets) t = remap[t];
     out.tetrahedra = std::move(tets);
     rep.tets = int64_t(out.tetrahedra.size() / 4);
@@ -542,14 +651,14 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
 
     // --- contrôles
     t0 = Clock::now();
-    auto P = [&](int32_t i) { return V3(out.vertices[3 * size_t(i)], out.vertices[3 * size_t(i) + 1], out.vertices[3 * size_t(i) + 2]); };
+    auto OP = [&](int32_t i) { return V3(out.vertices[3 * size_t(i)], out.vertices[3 * size_t(i) + 1], out.vertices[3 * size_t(i) + 2]); };
     double vol = 0, minvol = 1e300, mind = 180.0;
     struct FK { int32_t a, b, c; bool operator==(const FK& o) const { return a == o.a && b == o.b && c == o.c; } };
     struct FH { size_t operator()(const FK& k) const { return size_t((uint64_t(uint32_t(k.a)) * 0x9E3779B97F4A7C15ull) ^ (uint64_t(uint32_t(k.b)) << 21) ^ (uint64_t(uint32_t(k.c)) * 0xC2B2AE3D27D4EB4Full)); } };
     std::unordered_map<FK, int32_t, FH> faces;  // face triée -> nombre de tétraèdres
     for (int64_t t = 0; t < rep.tets; ++t) {
         const int32_t* q = &out.tetrahedra[4 * size_t(t)];
-        V3 p[4] = {P(q[0]), P(q[1]), P(q[2]), P(q[3])};
+        V3 p[4] = {OP(q[0]), OP(q[1]), OP(q[2]), OP(q[3])};
         double v = tet_volume(p[0], p[1], p[2], p[3]);
         vol += v; minvol = std::min(minvol, v);
         static const int pr[6][2] = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
@@ -586,7 +695,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     std::vector<float> errs(bfaces.size(), 0.f);
     parallel_for(int64_t(bfaces.size()), threads, [&](int64_t b, int64_t e, unsigned) {
         for (int64_t f = b; f < e; ++f) {
-            V3 a = P(bfaces[f][0]), bb = P(bfaces[f][1]), c = P(bfaces[f][2]);
+            V3 a = OP(bfaces[f][0]), bb = OP(bfaces[f][1]), c = OP(bfaces[f][2]);
             V3 s[4] = {(a + bb + c) * (1.0 / 3), (a + bb) * 0.5, (bb + c) * 0.5, (c + a) * 0.5};
             double m = 0;
             for (auto& x : s) { Hit hit = nearest(bvh, x, 10 * h); m = std::max(m, hit.found ? std::sqrt(hit.d2) : 10 * h); }
