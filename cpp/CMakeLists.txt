@@ -21,6 +21,8 @@ pybind11_add_module(apex_core
   src/core/bvh.cpp
   src/core/field_solver.cpp
   src/core/linear_solver.cpp
+  src/core/heat_method.cpp
+  src/core/reorientation.cpp
   src/core/mesh_repair.cpp
   src/core/mesh_intersect.cpp
   src/core/interpolate.cpp

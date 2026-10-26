@@ -1326,6 +1326,29 @@ def _heat_method_distance(
     if len(source_nodes) == 0:
         return np.full(node_count, np.inf)
 
+    if _cpp.enabled() and not params.use_ilu_preconditioner and hasattr(_cpp.module(), "heat_method_distance"):
+        # Chemin natif (tolerance, pas le bit : LDLT/CG d'Eigen contre
+        # SuperLU/CG de scipy). None = non convergence : on retombe sur Python,
+        # qui leve l'erreur habituelle.
+        project = params.heat_project_reachable and params.radial_tilt_origin is not None
+        up = np.asarray(params.up_vector if params.up_vector is not None else [0.0, 0.0, 1.0], dtype=float)
+        native = _cpp.module().heat_method_distance(
+            np.ascontiguousarray(tet_mesh.tet_vertices, dtype=np.float64),
+            np.ascontiguousarray(tet_mesh.tetrahedra, dtype=np.int64),
+            np.ascontiguousarray(shape_gradients, dtype=np.float64),
+            np.ascontiguousarray(volumes, dtype=np.float64),
+            np.ascontiguousarray(source_nodes, dtype=np.int64),
+            float(params.heat_method_time_factor),
+            float(params.platform_anchor_weight),
+            float(params.convergence_tolerance),
+            int(params.max_solver_iterations),
+            int(params.direct_solve_node_threshold),
+            np.asarray(params.radial_tilt_origin, dtype=float) if project else None,
+            up,
+        )
+        if native is not None:
+            return native
+
     L = _assemble_stiffness_matrix(tet_mesh, shape_gradients, volumes)
     M = _assemble_lumped_mass_matrix(tet_mesh, volumes)
 

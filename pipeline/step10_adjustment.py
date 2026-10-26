@@ -31,6 +31,7 @@ from typing import Callable, Optional
 import numpy as np
 import trimesh
 
+from core import _cpp
 from core.geometry_utils import _rodrigues_rotate_single, composed_rotation_angles_and_directions
 from core.mesh_types import (
     AdjustmentLogEntry,
@@ -219,6 +220,30 @@ def reorient_coupled_tiers(
     ext = np.array([p.extrusion for p in points], dtype=float)
     new_angles = np.array([p.axis_angles for p in points], dtype=float)
     log = []
+    if checker.native is not None and hasattr(_cpp.module(), "reorient_coupled_tiers"):
+        # Coeur de la boucle en natif (memes candidats, memes paliers, meme
+        # propagation) ; seule la reconstruction des points reste ici.
+        from pipeline.step9_collision_sim import (
+            PLATFORM_CENTER_OFFSET, PLATFORM_HALF_HEIGHT, PLATFORM_RADIUS,
+        )
+        axis_units = np.array([np.asarray(a.axis, dtype=float) / np.linalg.norm(a.axis) for a in axes])
+        radius = getattr(machine_profile, "platform_radius", None)
+        origin = machine_profile.platform_origin
+        new_angles, native_log = _cpp.module().reorient_coupled_tiers(
+            np.ascontiguousarray(pos), np.ascontiguousarray(ext), np.ascontiguousarray(new_angles),
+            np.ascontiguousarray(axis_units), int(ax), np.ascontiguousarray(grid, dtype=float),
+            np.asarray(tiers_deg, dtype=float), np.ascontiguousarray(samples, dtype=float),
+            checker.native, float(checker.reach),
+            None if origin is None else np.asarray(origin, dtype=float),
+            float(PLATFORM_RADIUS if radius is None else radius), float(PLATFORM_HALF_HEIGHT),
+            float(PLATFORM_CENTER_OFFSET), float(sim_params.safety_margin), float(lo), float(hi),
+            float(full_mm), float(taper_mm),
+            np.asarray(sorted(set(contact_indices)), dtype=np.int64),
+        )
+        log = [(int(i), float(a) if f else None, int(t) if f else None) for i, f, a, t in native_log]
+        out = [replace(p, axis_angles=[float(v) for v in new_angles[i]])
+               if not np.array_equal(new_angles[i], p.axis_angles) else p for i, p in enumerate(points)]
+        return ToolpathMachine(points=out), log
     for idx in sorted(set(contact_indices)):
         a0 = list(points[idx].axis_angles)
         d0 = head_dir(a0)

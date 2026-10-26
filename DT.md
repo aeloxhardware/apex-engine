@@ -14,7 +14,7 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 - Tests : echecs deja presents hors de ce chantier dans cet environnement Linux/Python 3.13 : test_shape_gradients (nb de tetra), 5 tests gcode natif identique, test_branch_indicator.
 
 ## ⚠️ RAPPELS PERMANENTS — à répéter à CHAQUE réponse tant que la case n'est pas cochée (demande de l'utilisateur, 2026-10-18)
-- ♦️ **[ ] Modifier les paramètres du firmware** dans `config.g` : `M203 Z8000` et `M201 Z1500` (Z actuel : 400 mm/min, 70 mm/s²). Bloquant : le pivot couple Z à B, le Benchy passe de 1,66 h à ~9,7 h, et les temps d'impression du salon (MFR 2026) en dépendent. **Cocher « [x] » ici quand l'utilisateur dit l'avoir fait ; seulement alors, cesser le rappel.**
+- 🟢 **[x] Paramètres du firmware (`config.g`, Z) modifiés** (confirmé par l'utilisateur, 2026-10-26). Rappel arrêté. **Salon (MFR 2026) passé : récompense spéciale pour l'originalité du projet.** ⬛ **Le Benchy n'a toujours PAS été imprimé.**
 - 🟢 **[x] Champ scalaire multibranche : ESSAYÉ (2026-10-19, par Claude à la demande de l'utilisateur), verdict dans `CLAUDE.md` #78.** Résultat MITIGÉ, comme les mécanismes précédents : `multibranch=True, multibranch_direction_mode="up"` (variante `mbr_up`) divise par ~2 la matière sans appui sur death (−56 %) et benchy (−53 %), neutre sur real_overhang/dino/l_shape/l-triple, mais dégrade fig (+17 %) et deer (+23 %). Reste opt-in. Rappel arrêté.
 - Contexte : MFR 2026 commence ~2026-10-23. Le lot nocturne tourne sur la voie **Bird**.
 

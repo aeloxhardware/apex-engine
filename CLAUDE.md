@@ -17,8 +17,7 @@ sans redemander les spécifications déjà actées. L'IA peut et doit modifier c
 **À la fin de CHAQUE réponse, rappeler en une ligne le point ci-dessous, tant que
 `DT.md` (section « RAPPELS PERMANENTS ») ne le marque pas fait `[x]`.** Ne cesser un rappel
 que lorsque l'utilisateur dit l'avoir fait et que la case est cochée dans `DT.md`.
-1. **Modifier les paramètres du firmware** (`config.g` : `M203 Z8000`, `M201 Z1500`) — bloquant
-   pour les temps d'impression du salon.
+1. ~~Modifier les paramètres du firmware~~ : **fait** (confirmé par l'utilisateur, 2026-10-26, `DT.md` coché). Rappel arrêté. Salon MFR 2026 passé avec une récompense spéciale pour l'originalité du projet ; **le Benchy n'a toujours pas été imprimé**.
 2. ~~Essayer le champ scalaire multibranche~~ : **fait le 2026-10-19** (limite #78, résultat mitigé,
    opt-in). Rappel arrêté.
 

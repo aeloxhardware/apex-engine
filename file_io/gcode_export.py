@@ -405,14 +405,25 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
     amax = float(np.degrees(getattr(machine, "max_angular_acceleration", 0.0) or 0.0))
     _, _, slow = feed_plan(pos, ang, vmax, amax, coupled, params.print_speed) if n > 1 else (0, 0, np.ones(0))
 
-    out = ["; Apex -- G-code machine R C Z B (file_io/gcode_export.py)",
-           f"; pivot->pointe {L} mm compense ; retraction {params.retract_length} mm a {params.retract_speed} mm/s",
-           "G21", "G90", "M82", "G92 E0", f"M109 S{params.nozzle_temp:g}",
-           # Marqueur « tranche par Apex » lu par l'interface (onglet Edition : modification en
-           # place, sinon EXPORT COPY seulement ; cf. slicer_ux/CDC_INTEGRATION_NOEUDS.md, D4).
-           # En clair tant que le moteur n'ecrit pas le bloc d'en-tete chiffre Apex
-           # (slicer_ux/docs/APEX_HEADER_FORMAT.md), ou il rejoindra les metadonnees.
-           "; apex_sliced = 1"]
+    # En-tete natif (pas 24, suite) quand le format de repr(float) est le meme ;
+    # sinon (valeur hors [1e-4, 1e16)) le texte Python.
+    from core import _cpp
+    native_header = None
+    if _cpp.enabled() and hasattr(_cpp.module(), "gcode_header"):
+        native_header = _cpp.module().gcode_header(
+            float(L), float(params.retract_length), float(params.retract_speed),
+            float(params.nozzle_temp))
+    if native_header is not None:
+        out = native_header.split("\n")
+    else:
+        out = ["; Apex -- G-code machine R C Z B (file_io/gcode_export.py)",
+               f"; pivot->pointe {L} mm compense ; retraction {params.retract_length} mm a {params.retract_speed} mm/s",
+               "G21", "G90", "M82", "G92 E0", f"M109 S{params.nozzle_temp:g}",
+               # Marqueur « tranche par Apex » lu par l'interface (onglet Edition : modification en
+               # place, sinon EXPORT COPY seulement ; cf. slicer_ux/CDC_INTEGRATION_NOEUDS.md, D4).
+               # En clair tant que le moteur n'ecrit pas le bloc d'en-tete chiffre Apex
+               # (slicer_ux/docs/APEX_HEADER_FORMAT.md), ou il rejoindra les metadonnees.
+               "; apex_sliced = 1"]
     state = {"fw": None, "e": 0.0, "retracted": False}
     guard = {"x": [], "y": [], "z": []}
 
@@ -425,7 +436,6 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
     # compris depuis le 2026-10-07, controle des degagements depuis le 2026-10-13
     # (`material_travel_check`, porte en donnees). Hors de portee du natif : un
     # `travel_check` quelconque (rappel Python sans `.native`) ou un `head_zlow` sans table.
-    from core import _cpp
     table = getattr(head_zlow, "table", None) if head_zlow is not None else (np.zeros(0), np.zeros(0))
     travel_native = getattr(travel_check, "native", None) if travel_check is not None else None
     if (_cpp.enabled() and hasattr(_cpp.module(), "export_gcode_body")
@@ -594,7 +604,10 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
         retract(-1)
         axis, up = clearance_move(pos[-1], float(ang[-1, 1]), params, head_zlow)
         move(up, float(ang[-1, 1]), params.travel_speed, comment=f"degagement final {axis}")
-    out += ["M104 S0", "M84"]
+    if _cpp.enabled() and hasattr(_cpp.module(), "gcode_footer"):
+        out += _cpp.module().gcode_footer().split("\n")
+    else:
+        out += ["M104 S0", "M84"]
     printing = ext > 0
     if n > 1:
         seg = np.linalg.norm(np.diff(pos, axis=0), axis=1)

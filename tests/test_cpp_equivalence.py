@@ -2245,3 +2245,88 @@ def test_past_material_batch_matches_single_calls():
                        for k in range(300)])
     assert np.array_equal(batch, single)
     assert np.isfinite(batch).sum() > 30, "des poses doivent toucher de la matiere"
+
+
+# ---------------------------------------------------------------------------
+# Methode de la chaleur native (limite #79) : tolerance, pas le bit
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("solver", ["direct", "cg"])
+@pytest.mark.parametrize("project", [False, True])
+def test_heat_method_matches_python(solver, project, restore_switch):
+    import dataclasses
+    from pipeline.step4_field_solver import (
+        FieldSolverParams, _compute_shape_gradients, _heat_method_distance,
+    )
+
+    _mesh_data, tet_mesh, _overhang, _regions = _step4_inputs(resolution=2.0)
+    shape_gradients, volumes = _compute_shape_gradients(tet_mesh)
+    sources = np.flatnonzero(tet_mesh.tet_vertices[:, 2] < tet_mesh.tet_vertices[:, 2].min() + 1e-6)
+    assert len(sources) > 3 and tet_mesh.tet_count > 100
+
+    params = FieldSolverParams(
+        convergence_tolerance=1e-12, max_solver_iterations=20000,
+        direct_solve_node_threshold=10**9 if solver == "direct" else 1,
+        heat_project_reachable=project,
+        radial_tilt_origin=np.array([0.5, -0.3, 0.0]) if project else None,
+    )
+    _cpp.set_enabled(False)
+    py = _heat_method_distance(tet_mesh, shape_gradients, volumes, sources, params)
+    _cpp.set_enabled(True)
+    native = _heat_method_distance(tet_mesh, shape_gradients, volumes, sources, params)
+
+    assert np.isfinite(py).all() and py.max() > 1.0   # garde anti-faux-vert
+    assert np.abs(py - native).max() / py.max() < 1e-6
+
+
+@pytest.mark.parametrize("pivot,retract,speed,temp", [
+    (46.0, 0.8, 35.0, 195.0), (45.5, 1.0, 20.0, 210.5), (46.123456789, 0.25, 7.0, 0.0),
+    (100.0, 0.001, 1234.5, 250.0),
+])
+def test_gcode_header_footer_match_python_text(pivot, retract, speed, temp):
+    mod = _cpp.module()
+    if mod is None or not hasattr(mod, "gcode_header"):
+        pytest.skip("module natif absent")
+    expected = ["; Apex -- G-code machine R C Z B (file_io/gcode_export.py)",
+                f"; pivot->pointe {pivot} mm compense ; retraction {retract} mm a {speed} mm/s",
+                "G21", "G90", "M82", "G92 E0", f"M109 S{temp:g}", "; apex_sliced = 1"]
+    assert mod.gcode_header(pivot, retract, speed, temp).split("\n") == expected
+    assert mod.gcode_footer().split("\n") == ["M104 S0", "M84"]
+    assert mod.gcode_header(1e-9, retract, speed, temp) is None   # format diverge : repli Python
+
+
+def test_reorient_coupled_tiers_native_matches_python(restore_switch):
+    import trimesh
+    from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
+    from pipeline.step9_collision_sim import CollisionSimParams
+    from pipeline.step10_adjustment import reorient_coupled_tiers
+
+    rod = trimesh.creation.box(extents=[1.0, 1.0, 20.0])
+    rod.apply_translation([0.0, 0.0, 10.0])
+    machine = MachineProfile(
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+                       RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
+        platform_origin=np.array([0.0, 0.0, 0.0]), nozzle_model=rod, nozzle_diameter=0.4,
+        position_coupled_axes=[0], radial_direction=np.array([0.0, -1.0, 0.0]))
+    sim = CollisionSimParams(path_sampling_step=0.5, safety_margin=1.0, nozzle_contact_clearance=1.5,
+                             toolhead_sample_spacing=1.0)
+    pts = [ToolpathPoint(position=np.array([9.5, 0.0, 5.0]), axis_angles=[90.0, 0.0], extrusion=1.0, feedrate=1.0),
+           ToolpathPoint(position=np.array([10.5, 0.0, 5.0]), axis_angles=[90.0, 0.0], extrusion=1.0, feedrate=1.0)]
+    for i, x in enumerate(np.arange(6.0, 14.01, 0.5)):
+        pts.append(ToolpathPoint(position=np.array([x, 0.0, 0.2]), axis_angles=[90.0, 0.0],
+                                 extrusion=0.0 if i == 0 else 1.0, feedrate=1.0))
+    tp = ToolpathMachine(points=pts)
+    contacts = [8, 10, 12]
+
+    _cpp.set_enabled(False)
+    py_out, py_log = reorient_coupled_tiers(tp, contacts, machine, sim)
+    _cpp.set_enabled(True)
+    nat_out, nat_log = reorient_coupled_tiers(tp, contacts, machine, sim)
+
+    assert any(b is not None for _, b, _ in py_log)          # garde anti-faux-vert
+    assert [(i, t) for i, _, t in py_log] == [(i, t) for i, _, t in nat_log]
+    for (_, b0, _), (_, b1, _) in zip(py_log, nat_log):
+        assert (b0 is None) == (b1 is None) and (b0 is None or b0 == pytest.approx(b1))
+    a_py = np.array([p.axis_angles for p in py_out.points])
+    a_nat = np.array([p.axis_angles for p in nat_out.points])
+    assert np.abs(a_py - a_nat).max() < 1e-9

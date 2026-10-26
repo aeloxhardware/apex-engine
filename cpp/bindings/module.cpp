@@ -20,6 +20,7 @@
 #include "apex/gcode_export.hpp"
 #include "apex/gpu/vk_context.hpp"
 #include "apex/geometry2d.hpp"
+#include "apex/heat_method.hpp"
 #include "apex/kdtree.hpp"
 #include "apex/kinematics.hpp"
 #include "apex/interpolate.hpp"
@@ -32,6 +33,7 @@
 #include "apex/past_material.hpp"
 #include "apex/segmentation.hpp"
 #include "apex/printed_index.hpp"
+#include "apex/reorientation.hpp"
 #include "apex/scheduling.hpp"
 #include "apex/support.hpp"
 #include "apex/tet_topology.hpp"
@@ -730,6 +732,97 @@ PYBIND11_MODULE(apex_core, m) {
         "l'appelant doit retomber sur le solveur Python.");
 
     m.def(
+        "reorient_coupled_tiers",
+        [](const DoubleArray& positions, const DoubleArray& extrusion, const DoubleArray& angles,
+           const DoubleArray& axes, std::int64_t free_axis, const DoubleArray& grid,
+           const DoubleArray& tiers, const DoubleArray& samples,
+           const apex::PastMaterialIndex& material, double reach, const py::object& plate_origin,
+           double plate_radius, double plate_half_height, double plate_center_offset,
+           double safety_margin, double lo, double hi, double full_mm, double taper_mm,
+           const IntArray& contacts) {
+            apex::ReorientationInput in;
+            in.n = static_cast<std::int64_t>(positions.shape(0));
+            in.axis_count = static_cast<std::int64_t>(axes.shape(0));
+            in.positions = positions.data();
+            in.extrusion = extrusion.data();
+            in.angles = angles.data();
+            in.axes = axes.data();
+            in.free_axis = free_axis;
+            in.grid = grid.data();
+            in.grid_count = static_cast<std::int64_t>(grid.size());
+            in.tiers = tiers.data();
+            in.tier_count = static_cast<std::int64_t>(tiers.size());
+            in.samples = samples.data();
+            in.sample_count = static_cast<std::int64_t>(samples.shape(0));
+            in.reach = reach;
+            if (!plate_origin.is_none()) {
+                DoubleArray o = plate_origin.cast<DoubleArray>();
+                in.has_plate = true;
+                for (int i = 0; i < 3; ++i) in.plate_origin[i] = o.data()[i];
+            }
+            in.plate_radius = plate_radius;
+            in.plate_half_height = plate_half_height;
+            in.plate_center_offset = plate_center_offset;
+            in.safety_margin = safety_margin;
+            in.lo = lo; in.hi = hi; in.full_mm = full_mm; in.taper_mm = taper_mm;
+            py::array_t<double> out({in.n, in.axis_count});
+            std::vector<apex::ReorientationEntry> log;
+            {
+                py::gil_scoped_release release;
+                log = apex::reorient_coupled_tiers(in, material, contacts.data(),
+                                                   static_cast<std::int64_t>(contacts.size()),
+                                                   out.mutable_data());
+            }
+            py::list entries;
+            for (const auto& e : log) {
+                entries.append(py::make_tuple(e.index, e.found, e.angle, e.tier));
+            }
+            return py::make_tuple(std::move(out), std::move(entries));
+        },
+        "Reorientation par paliers (etape 10) : (angles (n,A), [(indice, trouve, angle, palier)]).");
+
+    m.def(
+        "heat_method_distance",
+        [](const DoubleArray& tet_vertices, const IntArray& tetrahedra,
+           const DoubleArray& shape_gradients, const DoubleArray& volumes,
+           const IntArray& source_nodes, double time_factor, double anchor_weight,
+           double tolerance, int max_iterations, std::int64_t direct_threshold,
+           const py::object& origin, const DoubleArray& up) {
+            const auto tet_count = static_cast<std::int64_t>(tetrahedra.shape(0));
+            const auto node_count = static_cast<std::int64_t>(tet_vertices.shape(0));
+            apex::HeatParams p;
+            p.time_factor = time_factor;
+            p.anchor_weight = anchor_weight;
+            p.tolerance = tolerance;
+            p.max_iterations = max_iterations;
+            p.direct_threshold = direct_threshold;
+            if (!origin.is_none()) {
+                DoubleArray o = origin.cast<DoubleArray>();
+                p.project_reachable = true;
+                for (int i = 0; i < 3; ++i) p.origin[i] = o.data()[i];
+                for (int i = 0; i < 3; ++i) p.up[i] = up.data()[i];
+            }
+            apex::HeatResult res;
+            {
+                py::gil_scoped_release release;
+                res = apex::heat_method_distance(
+                    tet_vertices.data(), tetrahedra.data(), tet_count, node_count,
+                    shape_gradients.data(), volumes.data(), source_nodes.data(),
+                    static_cast<std::int64_t>(source_nodes.size()), p);
+            }
+            if (!res.converged) return py::object(py::none());
+            py::array_t<double> phi(static_cast<py::ssize_t>(res.phi.size()));
+            std::copy(res.phi.begin(), res.phi.end(), phi.mutable_data());
+            return py::object(std::move(phi));
+        },
+        py::arg("tet_vertices"), py::arg("tetrahedra"), py::arg("shape_gradients"),
+        py::arg("volumes"), py::arg("source_nodes"), py::arg("time_factor"),
+        py::arg("anchor_weight"), py::arg("tolerance"), py::arg("max_iterations"),
+        py::arg("direct_threshold"), py::arg("origin"), py::arg("up"),
+        "Methode de la chaleur : distance au plateau par noeud, ou None si un solveur "
+        "n'a pas converge (l'appelant retombe sur le Python).");
+
+    m.def(
         "assemble_gradient_rhs",
         [](const IntArray& tetrahedra, const DoubleArray& shape_gradients,
            const DoubleArray& scale, const DoubleArray& directions, const Int32Array& active,
@@ -1082,6 +1175,19 @@ PYBIND11_MODULE(apex_core, m) {
         .def_property_readonly("size", &apex::PastMaterialIndex::size);
 
     // Pas 24 : corps de l'export G-code, texte identique ligne a ligne.
+    m.def(
+        "gcode_header",
+        [](double pivot_to_tip, double retract_length, double retract_speed, double nozzle_temp) {
+            std::string out;
+            if (!apex::gcode_header(pivot_to_tip, retract_length, retract_speed, nozzle_temp, out)) {
+                return py::object(py::none());
+            }
+            return py::object(py::str(out));
+        },
+        py::arg("pivot_to_tip"), py::arg("retract_length"), py::arg("retract_speed"),
+        py::arg("nozzle_temp"), "En-tete du G-code (None si le format Python diverge).");
+    m.def("gcode_footer", []() { return apex::gcode_footer(); }, "Pied du G-code.");
+
     m.def(
         "export_gcode_body",
         [](const DoubleArray& positions, const DoubleArray& angles, const DoubleArray& extrusion,
