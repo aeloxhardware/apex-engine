@@ -29,15 +29,20 @@ def write_stl(path, V, F):
 # ---- endroits les plus fins : épaisseur le long de la normale entrante
 mesh = trimesh.Trimesh(V0, F0, process=False)
 cent = mesh.triangles_center; nrm = mesh.face_normals
+from scipy.spatial import cKDTree
+tree = cKDTree(cent)                         # un point par face : assez dense pour un test de proximité
 samp = rng.choice(len(F0), size=min(8000, len(F0)), replace=False)
-orig = cent[samp] - nrm[samp] * 1e-3
-loc, ray, _ = mesh.ray.intersects_location(orig, -nrm[samp], multiple_hits=False)
 thick = np.full(len(samp), np.inf)
-thick[ray] = np.linalg.norm(loc - orig[ray], axis=1)
+steps = np.arange(0.4, 12.0, 0.2)
+for k, fi in enumerate(samp):
+    pts = cent[fi] - nrm[fi] * steps[:, None]            # marche le long de la normale entrante
+    d, j = tree.query(pts)
+    hit = np.where((d < 0.35) & (np.einsum("ij,j->i", nrm[j], nrm[fi]) < -0.5))[0]   # face opposée
+    if len(hit): thick[k] = steps[hit[0]]
 order = np.argsort(thick)
 sites = []
 for k in order:
-    if thick[k] < 0.3: continue            # artefact (auto-impact)
+    if thick[k] < 0.8: continue            # < 0,8 mm : artefact de modélisation, pas une paroi
     p = cent[samp[k]]
     if all(np.linalg.norm(p - s["p"]) > 9 for s in sites):
         sites.append(dict(p=p, n=nrm[samp[k]], thickness=float(thick[k])))
@@ -86,12 +91,13 @@ def cracks(V, F, gaps=(0.1, 0.3, 0.6, 1.0)):
     for s, g in zip(sites, gaps):
         # une fente : les faces d'un côté d'un plan passant par le site sont décalées de g
         n = s["n"]; t = np.cross(n, [0, 0, 1.0]); t /= np.linalg.norm(t) + 1e-12
-        cen = V[F].mean(1)
+        Va = np.asarray(Vl)
+        cen = Va[F].mean(1)
         sel = (np.linalg.norm(cen - s["p"], axis=1) < 7) & (((cen - s["p"]) @ t) > 0)
         for fi in np.where(sel)[0]:
             new = []
             for v in F[fi]:
-                Vl.append((np.asarray(V[v]) + t * g).tolist()); new.append(len(Vl) - 1)
+                Vl.append((Va[v] + t * g).tolist()); new.append(len(Vl) - 1)
             F[fi] = new
     return np.asarray(Vl), F
 
