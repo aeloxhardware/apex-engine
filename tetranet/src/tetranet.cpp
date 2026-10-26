@@ -51,6 +51,7 @@ struct Surface {
     std::vector<V3> vn;                      // pseudonormales de sommet
     std::unordered_map<uint64_t, V3> en;     // pseudonormales d'arête
     double volume = 0.0;
+    int64_t holes = 0, open_edges = 0, nonmanifold_edges = 0, flipped_edges = 0, edges = 0, degenerate = 0, duplicates = 0;
 };
 
 uint64_t ekey(int a, int b) { if (a > b) std::swap(a, b); return (uint64_t(a) << 32) | uint32_t(b); }
@@ -72,15 +73,37 @@ bool build_surface(const SurfaceMesh& in, Surface& s) {
     }
     for (size_t f = 0; f < m; ++f) {
         std::array<int, 3> t{map[in.faces[3 * f]], map[in.faces[3 * f + 1]], map[in.faces[3 * f + 2]]};
-        if (t[0] == t[1] || t[1] == t[2] || t[0] == t[2]) continue;
+        if (t[0] == t[1] || t[1] == t[2] || t[0] == t[2]) { ++s.degenerate; continue; }
         V3 nn = cross(s.p[t[1]] - s.p[t[0]], s.p[t[2]] - s.p[t[0]]);
         double a2 = norm(nn);
-        if (!(a2 > 1e-14)) continue;
+        if (!(a2 > 1e-14)) { ++s.degenerate; continue; }
         s.tri.push_back(t);
         s.fn.push_back(nn * (1.0 / a2));
         s.volume += dot(s.p[t[0]], cross(s.p[t[1]], s.p[t[2]])) / 6.0;
     }
     if (s.tri.empty()) return false;
+    {   // topologie des arêtes : (nombre de faces, sens parcourus)
+        struct EI { int count = 0; int fwd = 0; };
+        std::unordered_map<uint64_t, EI> ed;
+        ed.reserve(s.tri.size() * 2);
+        std::unordered_map<uint64_t, int> faces;
+        for (const auto& t : s.tri) {
+            for (int k = 0; k < 3; ++k) { int a = t[k], b = t[(k + 1) % 3]; auto& e = ed[ekey(a, b)]; ++e.count; e.fwd += (a < b) ? 1 : 0; }
+            int a = t[0], b = t[1], c = t[2];
+            if (a > b) std::swap(a, b); if (b > c) std::swap(b, c); if (a > b) std::swap(a, b);
+            if (++faces[(uint64_t(a) * 1000003ull + uint64_t(b)) * 1000033ull + uint64_t(c)] > 1) ++s.duplicates;
+        }
+        s.edges = int64_t(ed.size());
+        std::unordered_map<int, int> uf;   // union-find sur les sommets des arêtes ouvertes
+        auto ufind = [&](int x) { while (true) { auto it = uf.find(x); if (it == uf.end()) { uf[x] = x; return x; } if (it->second == x) return x; int r = it->second; auto j = uf.find(r); if (j != uf.end() && j->second != r) it->second = j->second; x = r; } };
+        for (auto& kv : ed) if (kv.second.count == 1) { int a = int(kv.first >> 32), b = int(kv.first & 0xffffffffu); int ra = ufind(a), rb = ufind(b); if (ra != rb) uf[ra] = rb; }
+        { std::unordered_map<int, int> roots; for (auto& kv : uf) roots[ufind(kv.first)] = 1; s.holes = int64_t(roots.size()); }
+        for (auto& kv : ed) {
+            if (kv.second.count == 1) ++s.open_edges;
+            else if (kv.second.count > 2) ++s.nonmanifold_edges;
+            else if (kv.second.fwd != 1) ++s.flipped_edges;   // 2 faces : un sens aller, un sens retour attendus
+        }
+    }
     s.vn.assign(s.p.size(), V3());
     for (size_t f = 0; f < s.tri.size(); ++f) {
         for (int k = 0; k < 3; ++k) {
@@ -234,6 +257,9 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
     Bvh bvh;
     bvh.build(surf);
     rep.t_bvh = since(t0);
+    rep.surface_faces = int64_t(surf.tri.size()); rep.surface_edges = surf.edges; rep.surface_open_edges = surf.open_edges; rep.surface_holes = surf.holes;
+    rep.surface_nonmanifold_edges = surf.nonmanifold_edges; rep.surface_flipped_edges = surf.flipped_edges;
+    rep.surface_degenerate_faces = surf.degenerate; rep.surface_duplicate_faces = surf.duplicates;
 
     // --- réseau BCC
     const double h = prm.cell_size;
@@ -448,6 +474,9 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
     }
     rep.t_checks = since(t0);
     rep.seconds = since(t_all);
+    rep.conflict_ratio = rep.band_vertices ? double(rep.sign_conflicts) / double(rep.band_vertices) : 0.0;
+    rep.warning = rep.conflict_ratio > prm.warn_conflict_ratio;
+    if (rep.conflict_ratio > prm.refuse_conflict_ratio) { rep.status = Status::InconsistentSurface; rep.reason = "surface incohérente : l'intérieur ne se distingue pas de l'extérieur"; return rep; }
     if (rep.tets == 0) { rep.status = Status::InvalidInput; rep.reason = "aucun tétraèdre produit"; }
     else if (rep.nonmanifold_edges > 0) { rep.status = Status::OutOfTolerance; rep.reason = "bord du maillage non fermé ou non manifold"; }
     else if (rep.skin_max_error > prm.skin_tolerance) { rep.status = Status::OutOfTolerance; rep.reason = "écart de peau supérieur à la tolérance"; }

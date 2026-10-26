@@ -20,9 +20,11 @@ struct Params {
     double platform_z = 0.0;
     double platform_cell_size = 0.0; // 0 = pas de raffinement local (phase 5)
     uint32_t threads = 0;            // 0 = tous les cœurs
+    double warn_conflict_ratio = 0.001;   // conflits de signe / sommets de la bande : avertissement
+    double refuse_conflict_ratio = 0.05;  // au-delà : InconsistentSurface (surface trop cassée)
 };
 
-enum class Status { Ok, OutOfTolerance, InvalidInput, TooLarge };
+enum class Status { Ok, OutOfTolerance, InvalidInput, TooLarge, InconsistentSurface };
 
 struct TetMesh {
     std::vector<double> vertices;    // 3*P
@@ -43,6 +45,16 @@ struct Report {
     double min_dihedral_deg = 0.0;
     double min_volume = 0.0;         // mm3
     int64_t boundary_faces = 0, nonmanifold_edges = 0;
+    // diagnostic de la surface d'entrée (nombres seulement ; le texte est écrit par le moteur / l'interface)
+    int64_t surface_faces = 0, surface_edges = 0;
+    int64_t surface_open_edges = 0;          // arêtes d'une seule face
+    int64_t surface_holes = 0;               // boucles de bord distinctes : nombre de trous
+    int64_t surface_nonmanifold_edges = 0;   // arêtes de plus de deux faces
+    int64_t surface_flipped_edges = 0;       // deux faces qui parcourent l'arête dans le même sens : normales retournées
+    int64_t surface_degenerate_faces = 0;    // aires nulles ou sommets confondus, écartées
+    int64_t surface_duplicate_faces = 0;
+    double conflict_ratio = 0.0;             // sign_conflicts / band_vertices
+    bool warning = false;                    // défauts présents mais sous le seuil de refus
 };
 
 const char* version();
