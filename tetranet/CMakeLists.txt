@@ -24,3 +24,7 @@ enable_testing()
 add_executable(tetranet_smoke tests/smoke.cpp)
 target_link_libraries(tetranet_smoke PRIVATE tetranet)
 add_test(NAME smoke COMMAND tetranet_smoke)
+
+add_executable(tetranet_defects tests/test_defects.cpp)
+target_link_libraries(tetranet_defects PRIVATE tetranet)
+add_test(NAME defects COMMAND tetranet_defects)

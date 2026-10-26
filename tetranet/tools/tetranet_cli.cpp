@@ -39,6 +39,9 @@ int main(int argc, char** argv) {
         if (k == "--cell") p.cell_size = std::atof(argv[i + 1]);
         else if (k == "--alpha") p.snap_alpha = std::atof(argv[i + 1]);
         else if (k == "--tol") p.skin_tolerance = std::atof(argv[i + 1]);
+        else if (k == "--fixori") p.fix_orientation = std::atoi(argv[i + 1]) != 0;
+        else if (k == "--beta") p.winding_beta = std::atof(argv[i + 1]);
+        else if (k == "--winding") p.use_winding = std::atoi(argv[i + 1]) != 0;
         else if (k == "--threads") p.threads = std::atoi(argv[i + 1]);
         else if (k == "--out") out = argv[i + 1];
     }
@@ -50,13 +53,13 @@ int main(int argc, char** argv) {
                 "\"sign_conflicts\":%lld,\"skin_max_error\":%.5f,\"skin_p99_error\":%.5f,\"volume_ratio\":%.5f,\"min_dihedral_deg\":%.3f,"
                 "\"min_volume\":%.3e,\"boundary_faces\":%lld,\"nonmanifold_edges\":%lld,"
                 "\"surface_faces\":%lld,\"surface_edges\":%lld,\"surface_open_edges\":%lld,\"surface_holes\":%lld,\"surface_nonmanifold_edges\":%lld,\"surface_flipped_edges\":%lld,"
-                "\"surface_degenerate_faces\":%lld,\"surface_duplicate_faces\":%lld,\"conflict_ratio\":%.5f,\"warning\":%d}\n",
+                "\"surface_degenerate_faces\":%lld,\"surface_reoriented_faces\":%lld,\"surface_duplicate_faces\":%lld,\"conflict_ratio\":%.5f,\"ambiguous_points\":%lld,\"ambiguous_ratio\":%.5f,\"warning\":%d}\n",
                 int(r.status), r.reason.c_str(), r.seconds, r.t_bvh, r.t_classify, r.t_tets, r.t_checks,
                 (long long)r.lattice_vertices, (long long)r.band_vertices, (long long)r.snapped_vertices, (long long)r.tets,
                 (long long)r.dropped_degenerate, (long long)r.sign_conflicts, r.skin_max_error, r.skin_p99_error, r.volume_ratio,
                 r.min_dihedral_deg, r.min_volume, (long long)r.boundary_faces, (long long)r.nonmanifold_edges,
                 (long long)r.surface_faces, (long long)r.surface_edges, (long long)r.surface_open_edges, (long long)r.surface_holes, (long long)r.surface_nonmanifold_edges,
-                (long long)r.surface_flipped_edges, (long long)r.surface_degenerate_faces, (long long)r.surface_duplicate_faces, r.conflict_ratio, int(r.warning));
+                (long long)r.surface_flipped_edges, (long long)r.surface_degenerate_faces, (long long)r.surface_reoriented_faces, (long long)r.surface_duplicate_faces, r.conflict_ratio, (long long)r.ambiguous_points, r.ambiguous_ratio, int(r.warning));
     if (!out.empty() && !m.tetrahedra.empty()) {
         std::ofstream(out + ".nodes", std::ios::binary).write((const char*)m.vertices.data(), m.vertices.size() * 8);
         std::ofstream(out + ".tets", std::ios::binary).write((const char*)m.tetrahedra.data(), m.tetrahedra.size() * 4);

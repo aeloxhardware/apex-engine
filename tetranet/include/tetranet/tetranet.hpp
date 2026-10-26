@@ -20,7 +20,11 @@ struct Params {
     double platform_z = 0.0;
     double platform_cell_size = 0.0; // 0 = pas de raffinement local (phase 5)
     uint32_t threads = 0;            // 0 = tous les cœurs
-    double warn_conflict_ratio = 0.001;   // conflits de signe / sommets de la bande : avertissement
+    bool fix_orientation = true;     // remet les faces retournées dans le sens de leurs voisines avant le calcul
+    double winding_beta = 2.0;       // rayon relatif au-delà duquel un paquet de triangles est remplacé par un dipôle
+    bool use_winding = true;         // dedans/dehors par nombre d'enroulement (sinon normales pseudo-orientées)
+    double warn_conflict_ratio = 0.01;    // désaccords entre les deux tests de signe / sommets de la bande : avertissement
+    double warn_ambiguous_ratio = 0.002;  // sommets de la bande au nombre d'enroulement ambigu : avertissement
     double refuse_conflict_ratio = 0.05;  // au-delà : InconsistentSurface (surface trop cassée)
 };
 
@@ -51,8 +55,11 @@ struct Report {
     int64_t surface_holes = 0;               // boucles de bord distinctes : nombre de trous
     int64_t surface_nonmanifold_edges = 0;   // arêtes de plus de deux faces
     int64_t surface_flipped_edges = 0;       // deux faces qui parcourent l'arête dans le même sens : normales retournées
+    int64_t surface_reoriented_faces = 0;    // faces remises dans le bon sens par le mailleur
     int64_t surface_degenerate_faces = 0;    // aires nulles ou sommets confondus, écartées
     int64_t surface_duplicate_faces = 0;
+    int64_t ambiguous_points = 0;            // sommets de la bande dont le nombre d'enroulement est entre 0,25 et 0,75
+    double ambiguous_ratio = 0.0;            // ambiguous_points / band_vertices
     double conflict_ratio = 0.0;             // sign_conflicts / band_vertices
     bool warning = false;                    // défauts présents mais sous le seuil de refus
 };

@@ -51,12 +51,12 @@ struct Surface {
     std::vector<V3> vn;                      // pseudonormales de sommet
     std::unordered_map<uint64_t, V3> en;     // pseudonormales d'arête
     double volume = 0.0;
-    int64_t holes = 0, open_edges = 0, nonmanifold_edges = 0, flipped_edges = 0, edges = 0, degenerate = 0, duplicates = 0;
+    int64_t reoriented = 0, holes = 0, open_edges = 0, nonmanifold_edges = 0, flipped_edges = 0, edges = 0, degenerate = 0, duplicates = 0;
 };
 
 uint64_t ekey(int a, int b) { if (a > b) std::swap(a, b); return (uint64_t(a) << 32) | uint32_t(b); }
 
-bool build_surface(const SurfaceMesh& in, Surface& s) {
+bool build_surface(const SurfaceMesh& in, Surface& s, bool fix_orientation) {
     size_t n = in.vertices.size() / 3, m = in.faces.size() / 3;
     if (n == 0 || m == 0) return false;
     struct Key { uint64_t a, b, c; bool operator==(const Key& o) const { return a == o.a && b == o.b && c == o.c; } };
@@ -102,6 +102,55 @@ bool build_surface(const SurfaceMesh& in, Surface& s) {
             if (kv.second.count == 1) ++s.open_edges;
             else if (kv.second.count > 2) ++s.nonmanifold_edges;
             else if (kv.second.fwd != 1) ++s.flipped_edges;   // 2 faces : un sens aller, un sens retour attendus
+        }
+    }
+    if (fix_orientation) {
+        // propagation de l'orientation sur les arêtes à deux faces (BFS), puis volume positif par composante
+        const size_t T = s.tri.size();
+        std::unordered_map<uint64_t, std::array<int, 2>> adj;   // arête -> faces (-1 si absente)
+        std::unordered_map<uint64_t, int> cnt;
+        adj.reserve(T * 2);
+        for (size_t f = 0; f < T; ++f) for (int k = 0; k < 3; ++k) {
+            uint64_t key = ekey(s.tri[f][k], s.tri[f][(k + 1) % 3]);
+            int& c = cnt[key];
+            auto& a = adj.try_emplace(key, std::array<int, 2>{-1, -1}).first->second;
+            if (c < 2) a[c] = int(f);
+            ++c;
+        }
+        auto dir_fwd = [&](size_t f, uint64_t key) {   // la face f parcourt-elle l'arête de petit vers grand indice ?
+            for (int k = 0; k < 3; ++k) { int a = s.tri[f][k], b = s.tri[f][(k + 1) % 3]; if (ekey(a, b) == key) return a < b; }
+            return true;
+        };
+        std::vector<int> comp(T, -1);
+        std::vector<int> stack;
+        int ncomp = 0;
+        for (size_t seed = 0; seed < T; ++seed) {
+            if (comp[seed] >= 0) continue;
+            comp[seed] = ncomp; stack.assign(1, int(seed));
+            std::vector<int> members;
+            while (!stack.empty()) {
+                int f = stack.back(); stack.pop_back(); members.push_back(f);
+                for (int k = 0; k < 3; ++k) {
+                    uint64_t key = ekey(s.tri[f][k], s.tri[f][(k + 1) % 3]);
+                    if (cnt[key] != 2) continue;                 // seules les arêtes manifold propagent
+                    const auto& a = adj[key];
+                    int g = a[0] == f ? a[1] : a[0];
+                    if (g < 0 || comp[g] >= 0) continue;
+                    if (dir_fwd(size_t(g), key) == dir_fwd(size_t(f), key)) { std::swap(s.tri[g][1], s.tri[g][2]); ++s.reoriented; }
+                    comp[g] = ncomp; stack.push_back(g);
+                }
+            }
+            double vol = 0;
+            for (int f : members) { const auto& t = s.tri[f]; vol += dot(s.p[t[0]], cross(s.p[t[1]], s.p[t[2]])) / 6.0; }
+            if (vol < 0) for (int f : members) { std::swap(s.tri[f][1], s.tri[f][2]); }
+            ++ncomp;
+        }
+        s.volume = 0;
+        for (size_t f = 0; f < T; ++f) {
+            const auto& t = s.tri[f];
+            V3 nn = cross(s.p[t[1]] - s.p[t[0]], s.p[t[2]] - s.p[t[0]]);
+            s.fn[f] = nn * (1.0 / norm(nn));
+            s.volume += dot(s.p[t[0]], cross(s.p[t[1]], s.p[t[2]])) / 6.0;
         }
     }
     s.vn.assign(s.p.size(), V3());
@@ -163,6 +212,68 @@ struct Bvh {
         double d = 0, a[3] = {q.x, q.y, q.z};
         for (int k = 0; k < 3; ++k) { double v = std::max({n.lo[k] - a[k], 0.0, a[k] - n.hi[k]}); d += v * v; }
         return d;
+    }
+};
+
+// ---------------------------------------------------------------- nombre d'enroulement généralisé
+// w(p) = (1/4π) Σ angle solide des triangles vus de p : 1 dedans, 0 dehors, entre les deux près des défauts.
+// Les nœuds lointains sont remplacés par un dipôle (Barill et al., 2018) : normale pondérée par l'aire.
+struct WData { V3 c, n; double area = 0, r = 0; };
+
+struct Winding {
+    const Bvh* bvh = nullptr;
+    std::vector<WData> d;
+    double beta = 3.0;
+
+    void build(const Bvh& b) {
+        bvh = &b;
+        const Surface& s = *b.s;
+        d.assign(b.nodes.size(), WData());
+        for (int i = int(b.nodes.size()) - 1; i >= 0; --i) {   // les enfants ont un indice plus grand que leur parent
+            const Node& nd = b.nodes[i];
+            WData& w = d[i];
+            if (nd.left < 0) {
+                V3 csum; double asum = 0; V3 nsum;
+                for (int k = nd.first; k < nd.first + nd.count; ++k) {
+                    int ti = b.order[k]; const auto& t = s.tri[ti];
+                    const V3 &a = s.p[t[0]], &bb = s.p[t[1]], &c = s.p[t[2]];
+                    double ar = 0.5 * norm(cross(bb - a, c - a));
+                    csum = csum + (a + bb + c) * (ar / 3.0); asum += ar; nsum = nsum + s.fn[ti] * ar;
+                }
+                w.area = asum; w.n = nsum; w.c = asum > 0 ? csum * (1.0 / asum) : V3();
+                double r = 0;
+                for (int k = nd.first; k < nd.first + nd.count; ++k) { const auto& t = s.tri[b.order[k]]; for (int v = 0; v < 3; ++v) r = std::max(r, norm(s.p[t[v]] - w.c)); }
+                w.r = r;
+            } else {
+                const WData &l = d[nd.left], &rr = d[nd.right];
+                w.area = l.area + rr.area; w.n = l.n + rr.n;
+                w.c = w.area > 0 ? (l.c * l.area + rr.c * rr.area) * (1.0 / w.area) : V3();
+                w.r = std::max(norm(l.c - w.c) + l.r, norm(rr.c - w.c) + rr.r);
+            }
+        }
+    }
+    static double solid(const V3& a, const V3& b, const V3& c) {   // Van Oosterom - Strakhov
+        double la = norm(a), lb = norm(b), lc = norm(c);
+        double den = la * lb * lc + dot(a, b) * lc + dot(b, c) * la + dot(c, a) * lb;
+        return 2.0 * std::atan2(dot(a, cross(b, c)), den);
+    }
+    double query(const V3& p, double beta_override = 0.0) const {
+        const double beta = beta_override > 0 ? beta_override : this->beta;
+        const Surface& s = *bvh->s;
+        double total = 0;
+        int stack[256], sp = 0; stack[sp++] = 0;
+        while (sp) {
+            int i = stack[--sp]; const Node& nd = bvh->nodes[i]; const WData& w = d[i];
+            V3 cp = w.c - p; double dist = norm(cp);
+            if (dist > beta * w.r && w.area > 0) { total += dot(w.n, cp) / (dist * dist * dist); continue; }
+            if (nd.left < 0) {
+                for (int k = nd.first; k < nd.first + nd.count; ++k) {
+                    const auto& t = s.tri[bvh->order[k]];
+                    total += solid(s.p[t[0]] - p, s.p[t[1]] - p, s.p[t[2]] - p);
+                }
+            } else { stack[sp++] = nd.left; stack[sp++] = nd.right; }
+        }
+        return total / (4.0 * M_PI);
     }
 };
 
@@ -248,7 +359,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
     unsigned threads = prm.threads ? prm.threads : std::max(1u, std::thread::hardware_concurrency());
 
     Surface surf;
-    if (!(prm.cell_size > 0) || !build_surface(in, surf)) {
+    if (!(prm.cell_size > 0) || !build_surface(in, surf, prm.fix_orientation)) {
         rep.status = Status::InvalidInput;
         rep.reason = "surface vide ou taille de maille invalide";
         return rep;
@@ -259,7 +370,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
     rep.t_bvh = since(t0);
     rep.surface_faces = int64_t(surf.tri.size()); rep.surface_edges = surf.edges; rep.surface_open_edges = surf.open_edges; rep.surface_holes = surf.holes;
     rep.surface_nonmanifold_edges = surf.nonmanifold_edges; rep.surface_flipped_edges = surf.flipped_edges;
-    rep.surface_degenerate_faces = surf.degenerate; rep.surface_duplicate_faces = surf.duplicates;
+    rep.surface_degenerate_faces = surf.degenerate; rep.surface_reoriented_faces = surf.reoriented; rep.surface_duplicate_faces = surf.duplicates;
 
     // --- réseau BCC
     const double h = prm.cell_size;
@@ -281,61 +392,70 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
         for (int64_t q = b; q < e; ++q) { int i = q % (nx + 1), j = (q / (nx + 1)) % (ny + 1), k = q / (int64_t(nx + 1) * (ny + 1)); pos[q] = lo + V3(i * h, j * h, k * h); }
     });
 
-    // --- sommets de la bande : signe et point le plus proche
+    // --- sommets de la bande : point le plus proche ; signe par nombre d'enroulement (tous les sommets)
     t0 = Clock::now();
     const double band = 1.05 * h;
     std::vector<int8_t> sgn(N, 0), isband(N, 0);  // sgn : +1 dehors, -1 dedans, 0 sur la peau
     std::vector<V3> qpt(N);
     std::vector<float> dist(N, 0.f);
+    Winding wn;
+    if (prm.use_winding) { wn.build(bvh); wn.beta = prm.winding_beta; }
+    std::vector<int8_t> ps_sign(N, 0);            // signe par pseudonormale, pour mesurer les désaccords
+    std::vector<uint8_t> ambiguous(N, 0);
+    std::vector<float> wval(N, 0.f);               // nombre d'enroulement à la position d'origine du sommet
     parallel_for(N, threads, [&](int64_t b, int64_t e, unsigned) {
         for (int64_t v = b; v < e; ++v) {
             Hit hit = nearest(bvh, pos[v], band);
-            if (!hit.found) continue;
-            isband[v] = 1;
-            sgn[v] = hit.d2 == 0 ? 0 : sign_at(surf, hit, pos[v]);
-            qpt[v] = hit.q;
-            dist[v] = float(std::sqrt(hit.d2));
+            if (hit.found) {
+                isband[v] = 1; qpt[v] = hit.q; dist[v] = float(std::sqrt(hit.d2));
+                ps_sign[v] = hit.d2 == 0 ? 0 : sign_at(surf, hit, pos[v]);
+            }
+            if (prm.use_winding) {
+                double w = wn.query(pos[v], hit.found ? 0.0 : 1.2);   // loin de la peau : dipôle grossier, le signe a de la marge
+                wval[v] = float(w);
+                sgn[v] = w > 0.5 ? -1 : 1;
+                if (hit.found && std::fabs(w - 0.5) < 0.25) ambiguous[v] = 1;
+            } else if (hit.found) sgn[v] = ps_sign[v];
         }
     });
-    // --- composantes des sommets hors bande (union-find sur les arêtes du réseau)
-    std::vector<int64_t> parent(N);
-    std::iota(parent.begin(), parent.end(), 0);
-    auto find = [&](int64_t x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
-    auto unite = [&](int64_t a, int64_t b) { a = find(a); b = find(b); if (a != b) parent[std::max(a, b)] = std::min(a, b); };
-    std::vector<std::pair<int64_t, int64_t>> mixed;  // (hors bande, bande)
-    auto edge = [&](int64_t u, int64_t v) {
-        if (!isband[u] && !isband[v]) unite(u, v);
-        else if (!isband[u]) mixed.emplace_back(u, v);
-        else if (!isband[v]) mixed.emplace_back(v, u);
-    };
-    for (int k = 0; k <= nz; ++k) for (int j = 0; j <= ny; ++j) for (int i = 0; i <= nx; ++i) {
-        int64_t a = idA(i, j, k);
-        if (i < nx) edge(a, idA(i + 1, j, k));
-        if (j < ny) edge(a, idA(i, j + 1, k));
-        if (k < nz) edge(a, idA(i, j, k + 1));
+    if (prm.use_winding) {
+        for (int64_t v = 0; v < N; ++v) if (isband[v]) { if (ps_sign[v] != 0 && ps_sign[v] != sgn[v]) ++rep.sign_conflicts; if (ambiguous[v]) ++rep.ambiguous_points; }
+    } else {
+        // composantes des sommets hors bande (union-find sur les arêtes du réseau)
+        std::vector<int64_t> parent(N);
+        std::iota(parent.begin(), parent.end(), 0);
+        auto find = [&](int64_t x) { while (parent[x] != x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+        auto unite = [&](int64_t a, int64_t b) { a = find(a); b = find(b); if (a != b) parent[std::max(a, b)] = std::min(a, b); };
+        std::vector<std::pair<int64_t, int64_t>> mixed;
+        auto edge = [&](int64_t u, int64_t v) {
+            if (!isband[u] && !isband[v]) unite(u, v);
+            else if (!isband[u]) mixed.emplace_back(u, v);
+            else if (!isband[v]) mixed.emplace_back(v, u);
+        };
+        for (int k = 0; k <= nz; ++k) for (int j = 0; j <= ny; ++j) for (int i = 0; i <= nx; ++i) {
+            int64_t a = idA(i, j, k);
+            if (i < nx) edge(a, idA(i + 1, j, k));
+            if (j < ny) edge(a, idA(i, j + 1, k));
+            if (k < nz) edge(a, idA(i, j, k + 1));
+        }
+        for (int k = 0; k < nz; ++k) for (int j = 0; j < ny; ++j) for (int i = 0; i < nx; ++i) {
+            int64_t bq = idB(i, j, k);
+            for (int dk = 0; dk < 2; ++dk) for (int dj = 0; dj < 2; ++dj) for (int di = 0; di < 2; ++di) edge(bq, idA(i + di, j + dj, k + dk));
+            if (i + 1 < nx) edge(bq, idB(i + 1, j, k));
+            if (j + 1 < ny) edge(bq, idB(i, j + 1, k));
+            if (k + 1 < nz) edge(bq, idB(i, j, k + 1));
+        }
+        std::vector<int8_t> csign(N, 0);
+        for (auto& [u, v] : mixed) {
+            int64_t r = find(u); int8_t sv = sgn[v];
+            if (sv == 0) continue;
+            if (csign[r] == 0) csign[r] = sv; else if (csign[r] != sv) ++rep.sign_conflicts;
+        }
+        int64_t root0 = find(0);
+        if (csign[root0] == 0) csign[root0] = 1;
+        for (int64_t v = 0; v < N; ++v) { if (isband[v]) continue; int8_t s = csign[find(v)]; sgn[v] = s ? s : 1; }
     }
-    for (int k = 0; k < nz; ++k) for (int j = 0; j < ny; ++j) for (int i = 0; i < nx; ++i) {
-        int64_t bq = idB(i, j, k);
-        for (int dk = 0; dk < 2; ++dk) for (int dj = 0; dj < 2; ++dj) for (int di = 0; di < 2; ++di) edge(bq, idA(i + di, j + dj, k + dk));
-        if (i + 1 < nx) edge(bq, idB(i + 1, j, k));
-        if (j + 1 < ny) edge(bq, idB(i, j + 1, k));
-        if (k + 1 < nz) edge(bq, idB(i, j, k + 1));
-    }
-    std::vector<int8_t> csign(N, 0);
-    for (auto& [u, v] : mixed) {
-        int64_t r = find(u);
-        int8_t sv = sgn[v];
-        if (sv == 0) continue;
-        if (csign[r] == 0) csign[r] = sv;
-        else if (csign[r] != sv) ++rep.sign_conflicts;
-    }
-    int64_t root0 = find(0);
-    if (csign[root0] == 0) csign[root0] = 1;  // le coin du réseau est dehors
-    for (int64_t v = 0; v < N; ++v) {
-        if (isband[v]) { ++rep.band_vertices; continue; }
-        int8_t s = csign[find(v)];
-        sgn[v] = s ? s : 1;
-    }
+    for (int64_t v = 0; v < N; ++v) if (isband[v]) ++rep.band_vertices;
     // --- ramener à la peau les sommets proches
     const double snap = prm.snap_alpha * h;
     std::vector<V3> pos0;  // positions d'origine des seuls sommets déplacés
@@ -353,6 +473,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
     std::vector<Local> locals(threads);
     auto centroid_inside = [&](const std::array<int64_t, 4>& t) {
         V3 c = (pos[t[0]] + pos[t[1]] + pos[t[2]] + pos[t[3]]) * 0.25;
+        if (prm.use_winding) { double m = 0; for (int k = 0; k < 4; ++k) m += wval[t[k]]; m *= 0.25; if (m > 0.8) return true; if (m < 0.2) return false; return wn.query(c) > 0.5; }   // enroulement interpolé, requête exacte seulement si indécis
         Hit hit = nearest(bvh, c, 4 * h);
         if (!hit.found) return false;
         return sign_at(surf, hit, c) < 0;
@@ -475,8 +596,10 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out) {
     rep.t_checks = since(t0);
     rep.seconds = since(t_all);
     rep.conflict_ratio = rep.band_vertices ? double(rep.sign_conflicts) / double(rep.band_vertices) : 0.0;
-    rep.warning = rep.conflict_ratio > prm.warn_conflict_ratio;
-    if (rep.conflict_ratio > prm.refuse_conflict_ratio) { rep.status = Status::InconsistentSurface; rep.reason = "surface incohérente : l'intérieur ne se distingue pas de l'extérieur"; return rep; }
+    rep.ambiguous_ratio = rep.band_vertices ? double(rep.ambiguous_points) / double(rep.band_vertices) : 0.0;
+    const double judged = prm.use_winding ? rep.ambiguous_ratio : rep.conflict_ratio;
+    rep.warning = rep.conflict_ratio > prm.warn_conflict_ratio || rep.ambiguous_ratio > prm.warn_ambiguous_ratio || rep.surface_reoriented_faces > 0;
+    if (judged > prm.refuse_conflict_ratio) { rep.status = Status::InconsistentSurface; rep.reason = "surface incohérente : l'intérieur ne se distingue pas de l'extérieur"; return rep; }
     if (rep.tets == 0) { rep.status = Status::InvalidInput; rep.reason = "aucun tétraèdre produit"; }
     else if (rep.nonmanifold_edges > 0) { rep.status = Status::OutOfTolerance; rep.reason = "bord du maillage non fermé ou non manifold"; }
     else if (rep.skin_max_error > prm.skin_tolerance) { rep.status = Status::OutOfTolerance; rep.reason = "écart de peau supérieur à la tolérance"; }
