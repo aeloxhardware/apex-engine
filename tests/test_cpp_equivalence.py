@@ -2630,3 +2630,44 @@ def test_native_tetgen_worker_matches_binding():
         assert len(ref.tetrahedra) > 100  # garde anti-faux-vert
         assert np.array_equal(ref.tet_vertices, got.tet_vertices)
         assert np.array_equal(ref.tetrahedra, got.tetrahedra)
+
+
+def test_native_grid_fallback_matches_python_grid_search(restore_switch, monkeypatch):
+    """
+    Repli par grille PORTE en natif (GridSolver) contre la grille Python, sur beaucoup de points
+    colineaires a l'axe externe (+Z et -Z : la tangence qui met l'analytique en echec).
+    `APEX_NATIVE_GRID=0` (variable de module) rend le repli Python, point par point.
+    """
+    import pipeline.step8_machine_toolpath as step8
+
+    raw_points, axes, reference, origin, params = _ik_fixture(_current_machine_axes(), seed=303, count=300)
+    for index in range(0, 300, 7):
+        raw_points[index].desired_direction = np.array([0.0, 0.0, 1.0 if index % 14 == 0 else -1.0])
+
+    monkeypatch.setattr(step8, "_NATIVE_GRID_FALLBACK", False)
+    _cpp.set_enabled(True)
+    python_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
+    python_count = step8._LAST_NATIVE_FALLBACK_COUNT
+    monkeypatch.setattr(step8, "_NATIVE_GRID_FALLBACK", True)
+    native_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
+    native_count = step8._LAST_NATIVE_FALLBACK_COUNT
+
+    assert python_count >= 40 and native_count == python_count, (python_count, native_count)  # garde anti-faux-vert
+    _assert_ik_equivalent(python_grid, native_grid)
+
+
+def test_native_grid_fallback_with_three_axes(restore_switch, monkeypatch):
+    """Meme controle sur une cinematique a TROIS axes (le repli doit rester generique en N)."""
+    from core.mesh_types import RotationAxisSpec
+    import pipeline.step8_machine_toolpath as step8
+
+    axes = _current_machine_axes() + [RotationAxisSpec(axis=np.array([0.0, 1.0, 0.0]), angle_range_deg=(-30.0, 30.0))]
+    raw_points, _axes, reference, origin, params = _ik_fixture(axes, seed=404, count=200)
+    for index in range(0, 200, 9):
+        raw_points[index].desired_direction = np.array([0.0, 0.0, 1.0])
+    monkeypatch.setattr(step8, "_NATIVE_GRID_FALLBACK", False)
+    _cpp.set_enabled(True)
+    python_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
+    monkeypatch.setattr(step8, "_NATIVE_GRID_FALLBACK", True)
+    native_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
+    _assert_ik_equivalent(python_grid, native_grid)

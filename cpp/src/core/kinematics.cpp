@@ -282,6 +282,110 @@ void detect_singular_axes(const Vec3& position, const Vec3& platform_origin,
     }
 }
 
+
+// ---------------------------------------------------------------------------
+// Repli par grille : transcription de `_resolve_axis_angles_via_grid_search`.
+// np.radians = x * (pi / 180) : l'ordre des operations differe de `deg2rad` ci-dessus d'un ULP,
+// et c'est la grille de numpy qui sert d'oracle.
+// ---------------------------------------------------------------------------
+inline double radians_np(double d) { return d * (kPi / 180.0); }
+
+struct GridSolver {
+    const std::vector<AxisSpec>& axes;
+    Vec3 reference;
+    std::vector<Vec3> axes_unit;          // axes normalises, ordre de la liste
+    std::vector<Vec3> directions;         // grille produit, meshgrid 'ij' aplati
+    std::vector<double> angles;           // directions.size() * axes.size(), degres
+    double step0 = 0.0;
+    int iterations = 0;
+
+    GridSolver(const std::vector<AxisSpec>& a, const Vec3& ref, const GridFallback& g)
+        : axes(a), reference(ref), iterations(g.refine_iterations) {
+        const int samples = g.samples_per_axis > 1 ? g.samples_per_axis : 1;
+        for (const auto& spec : axes) axes_unit.push_back(normalized(spec.axis));
+        const std::size_t n_axes = axes.size();
+        std::vector<std::vector<double>> per_axis(n_axes);
+        for (std::size_t k = 0; k < n_axes; ++k) {
+            const double lo = axes[k].lo, hi = axes[k].hi;
+            const bool full_turn = (hi - lo) >= 360.0;
+            const int n = hi <= lo ? 1 : samples;
+            std::vector<double>& v = per_axis[k];
+            v.resize(static_cast<std::size_t>(n));
+            const bool endpoint = !full_turn;
+            const int div = endpoint ? n - 1 : n;
+            if (n == 1) {
+                v[0] = lo;
+            } else {
+                const double step = (hi - lo) / div;       // numpy.linspace : i * step + start, derniere valeur = stop
+                for (int i = 0; i < n; ++i) v[static_cast<std::size_t>(i)] = i * step + lo;
+                if (endpoint) v[static_cast<std::size_t>(n - 1)] = hi;
+            }
+        }
+        std::size_t total = 1;
+        for (const auto& v : per_axis) total *= v.size();
+        directions.resize(total);
+        angles.resize(total * n_axes);
+        std::vector<std::size_t> idx(n_axes, 0);
+        for (std::size_t p = 0; p < total; ++p) {
+            Vec3 d = reference;
+            for (std::size_t k = n_axes; k-- > 0;) {
+                const double deg = per_axis[k][idx[k]];
+                d = rodrigues_rotate_single(d, axes_unit[k], radians_np(deg));
+            }
+            directions[p] = d;
+            for (std::size_t k = 0; k < n_axes; ++k) angles[p * n_axes + k] = per_axis[k][idx[k]];
+            for (std::size_t k = n_axes; k-- > 0;) {                // 'ij' : le dernier axe varie le plus vite
+                if (++idx[k] < per_axis[k].size()) break;
+                idx[k] = 0;
+            }
+        }
+        step0 = g.refine_multiplier * (360.0 / samples);
+    }
+
+    Vec3 direction_for(const std::vector<double>& a) const {
+        Vec3 d = reference;
+        for (std::size_t k = axes.size(); k-- > 0;) d = rodrigues_rotate_single(d, axes_unit[k], radians_np(a[k]));
+        return d;
+    }
+
+    static double angular_error(const Vec3& d, const Vec3& t) {
+        double c = d.x * t.x + d.y * t.y + d.z * t.z;
+        if (c > 1.0) c = 1.0; else if (c < -1.0) c = -1.0;
+        return std::acos(c);
+    }
+
+    // Renvoie l'erreur residuelle (radians) ; `out` recoit les angles affines.
+    double solve(const Vec3& target, std::vector<double>& out) const {
+        std::size_t best = 0;
+        double best_sim = -2.0;
+        for (std::size_t p = 0; p < directions.size(); ++p) {
+            const double sim = directions[p].x * target.x + directions[p].y * target.y + directions[p].z * target.z;
+            if (sim > best_sim) { best_sim = sim; best = p; }   // premier maximum, comme np.argmax
+        }
+        const std::size_t n_axes = axes.size();
+        out.assign(angles.begin() + best * n_axes, angles.begin() + (best + 1) * n_axes);
+        double best_error = angular_error(direction_for(out), target);
+        double step = step0;
+        std::vector<double> candidate;
+        for (int it = 0; it < std::max(iterations, 0); ++it) {
+            for (std::size_t k = 0; k < n_axes; ++k) {
+                const double lo = axes[k].lo, hi = axes[k].hi;
+                if (hi <= lo) continue;
+                for (const double delta : {step, -step}) {
+                    candidate = out;
+                    double nudged = candidate[k] + delta;
+                    if (nudged > hi) nudged = hi; else if (nudged < lo) nudged = lo;
+                    candidate[k] = nudged;
+                    const double error = angular_error(direction_for(candidate), target);
+                    if (error < best_error) { out = candidate; best_error = error; }
+                }
+            }
+            step *= 0.5;
+        }
+        return best_error;
+    }
+};
+
 }  // namespace
 
 IKBatchResult resolve_axis_angles_batch(const double* desired_directions, const double* positions,
@@ -290,8 +394,10 @@ IKBatchResult resolve_axis_angles_batch(const double* desired_directions, const 
                                         const Vec3& reference_direction,
                                         const Vec3* platform_origin,
                                         double singularity_radius_epsilon,
-                                        const double* initial_previous_angles) {
+                                        const double* initial_previous_angles, const GridFallback* grid) {
     const std::size_t axis_count = axes.size();
+    std::optional<GridSolver> grid_solver;   // construit a la premiere utilisation (rare)
+    std::vector<double> grid_angles;
     IKBatchResult result;
     result.angles.assign(static_cast<std::size_t>(point_count) * axis_count, 0.0);
     result.residuals.assign(static_cast<std::size_t>(point_count), 0.0);
@@ -356,11 +462,18 @@ IKBatchResult resolve_axis_angles_batch(const double* desired_directions, const 
             const auto solved = resolve_axis_pair_analytic(axes[0], axes[1], reference_effective,
                                                            target, previous_for(0), previous_for(1));
             if (!solved.has_value()) {
-                // Repli grille non porte : on rend la main a Python, qui
-                // rejouera TOUTE la boucle (la chaine `previous_angles`
-                // interdit de reprendre au milieu).
-                result.fallback_index = i;
-                return result;
+                if (grid == nullptr || grid->samples_per_axis <= 0) {
+                    // Repli grille non fourni : on rend la main a Python, qui resout CE point
+                    // puis rappelle a partir du suivant (`initial_previous_angles`).
+                    result.fallback_index = i;
+                    return result;
+                }
+                if (!grid_solver) grid_solver.emplace(axes, reference_unit, *grid);
+                const double residual = grid_solver->solve(target, grid_angles);
+                ++result.grid_fallbacks;
+                for (std::size_t k = 0; k < axis_count; ++k) angles[k] = grid_angles[k];
+                result.residuals[static_cast<std::size_t>(i)] = residual;
+                goto after_residual;
             }
 
             angles[0] = solved->first;
@@ -370,8 +483,11 @@ IKBatchResult resolve_axis_angles_batch(const double* desired_directions, const 
             }
         }
 
-        const Vec3 achieved = forward_direction(axes, angles, reference_unit);
-        result.residuals[static_cast<std::size_t>(i)] = deg2rad(angle_between(achieved, target));
+        {
+            const Vec3 achieved = forward_direction(axes, angles, reference_unit);
+            result.residuals[static_cast<std::size_t>(i)] = deg2rad(angle_between(achieved, target));
+        }
+        after_residual:
 
         // Heritage d'angle a la singularite (step8), AVANT de devenir
         // `previous_angles` du point suivant - l'ordre compte.

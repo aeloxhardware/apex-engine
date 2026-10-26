@@ -440,7 +440,8 @@ PYBIND11_MODULE(apex_core, m) {
         [](const DoubleArray& desired_directions, const DoubleArray& positions,
            const py::list& axes_spec, const DoubleArray& reference_direction,
            const py::object& platform_origin, double singularity_radius_epsilon,
-           const py::object& initial_previous_angles) {
+           const py::object& initial_previous_angles, int grid_samples, double refine_multiplier,
+           int refine_iterations) {
             if (desired_directions.ndim() != 2 || desired_directions.shape(1) != 3) {
                 throw std::invalid_argument("desired_directions doit etre de forme (N,3)");
             }
@@ -482,6 +483,10 @@ PYBIND11_MODULE(apex_core, m) {
             const auto count = static_cast<std::int64_t>(desired_directions.shape(0));
             const apex::Vec3 reference_unit =
                 read_vec3(reference_direction, "reference_direction");
+            apex::GridFallback grid;
+            grid.samples_per_axis = grid_samples;
+            grid.refine_multiplier = refine_multiplier;
+            grid.refine_iterations = refine_iterations;
             apex::IKBatchResult res;
             {
                 // La resolution ne touche a aucun objet Python : liberer le GIL
@@ -489,7 +494,7 @@ PYBIND11_MODULE(apex_core, m) {
                 py::gil_scoped_release release;
                 res = apex::resolve_axis_angles_batch(
                     desired_directions.data(), positions.data(), count, axes, reference_unit,
-                    origin_ptr, singularity_radius_epsilon, previous_ptr);
+                    origin_ptr, singularity_radius_epsilon, previous_ptr, &grid);
             }
 
             const auto axis_count = static_cast<py::ssize_t>(axes.size());
@@ -501,11 +506,12 @@ PYBIND11_MODULE(apex_core, m) {
             if (!res.residuals.empty()) {
                 std::copy(res.residuals.begin(), res.residuals.end(), residuals.mutable_data());
             }
-            return py::make_tuple(std::move(angles), std::move(residuals), res.fallback_index);
+            return py::make_tuple(std::move(angles), std::move(residuals), res.fallback_index, res.grid_fallbacks);
         },
         py::arg("desired_directions"), py::arg("positions"), py::arg("axes"),
         py::arg("reference_direction"), py::arg("platform_origin"),
         py::arg("singularity_radius_epsilon"), py::arg("initial_previous_angles") = py::none(),
+        py::arg("grid_samples") = 0, py::arg("refine_multiplier") = 0.0, py::arg("refine_iterations") = 0,
         "Resolution IK N axes, sequentielle et REPRENABLE. Rend (angles (N,A), "
         "residuals (N,) en radians, fallback_index). fallback_index >= 0 signale que "
         "la paire externe n'a pas pu etre resolue analytiquement a CE point : les "

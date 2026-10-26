@@ -56,11 +56,21 @@ struct AxisSpec {
     double hi = 0.0;   // angle_range_deg[1]
 };
 
+// Repli par grille + affinement local (core.geometry_utils.composed_rotation_angles_and_directions
+// + refine_axis_angles_local_search), applique par le natif quand la resolution analytique echoue.
+// `samples_per_axis == 0` : repli non porte, le natif rend la main a Python (fallback_index).
+struct GridFallback {
+    int samples_per_axis = 0;
+    double refine_multiplier = 0.0;   // Step8Params.ik_refine_step_multiplier
+    int refine_iterations = 0;        // Step8Params.ik_refine_iterations
+};
+
 struct IKBatchResult {
     std::vector<double> angles;     // point_count * axes.size(), degres
     std::vector<double> residuals;  // point_count, RADIANS (meme contrat que le Python)
     // Index du premier point exigeant le repli grille, -1 si aucun.
     std::int64_t fallback_index = -1;
+    std::int64_t grid_fallbacks = 0;   // points resolus par le repli grille natif
 };
 
 // Constantes reprises telles quelles de core/geometry_utils.py - toute
@@ -84,6 +94,7 @@ IKBatchResult resolve_axis_angles_batch(const double* desired_directions,
                                         const Vec3& reference_direction,
                                         const Vec3* platform_origin,
                                         double singularity_radius_epsilon,
-                                        const double* initial_previous_angles);
+                                        const double* initial_previous_angles,
+                                        const GridFallback* grid = nullptr);
 
 }  // namespace apex

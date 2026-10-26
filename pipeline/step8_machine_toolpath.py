@@ -32,6 +32,8 @@ Sortie : (ToolpathMachine, list[Step8Diagnostic]).
 
 from __future__ import annotations
 
+import os
+
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -151,6 +153,17 @@ def _layer_normal(local_frame: tuple[np.ndarray, np.ndarray, np.ndarray]) -> np.
     if norm < 1e-12:
         return np.array([0.0, 0.0, 1.0])
     return normal / norm
+
+
+# Repli par grille porte en natif (cpp/src/core/kinematics.cpp, GridSolver) : `APEX_NATIVE_GRID=0`
+# rend le repli Python, point par point (mesure d'equivalence, tests).
+_NATIVE_GRID_FALLBACK = os.environ.get("APEX_NATIVE_GRID", "1") != "0"
+
+
+def _native_grid_args(params: "Step8Params") -> tuple[int, float, int]:
+    if not _NATIVE_GRID_FALLBACK:
+        return (0, 0.0, 0)
+    return (int(params.ik_samples_per_axis), float(params.ik_refine_step_multiplier), int(params.ik_refine_iterations))
 
 
 def _resolve_axis_angles_via_grid_search(
@@ -993,7 +1006,7 @@ def _resolve_all_axis_angles_native(
     fallback_count = 0
 
     while cursor < len(raw_points):
-        angles_matrix, residuals, fallback_index = native.resolve_axis_angles_batch(
+        angles_matrix, residuals, fallback_index, grid_done = native.resolve_axis_angles_batch(
             directions[cursor:],
             positions[cursor:],
             axes_spec,
@@ -1001,7 +1014,9 @@ def _resolve_all_axis_angles_native(
             origin,
             params.singularity_radius_epsilon,
             None if previous_angles is None else np.asarray(previous_angles, dtype=float),
+            *_native_grid_args(params),
         )
+        fallback_count += int(grid_done)
 
         # Sur repli, les lignes AVANT `fallback_index` sont valides ; les
         # suivantes n'ont jamais ete calculees et ne doivent pas etre lues.
@@ -1191,12 +1206,14 @@ def _resolve_all_axis_angles_coupled_native(
     n = len(raw_points)
     width = len(inner_axes)
     while cursor < n:
-        angles_matrix, _res, fallback_index = native.resolve_axis_angles_batch(
+        angles_matrix, _res, fallback_index, grid_done = native.resolve_axis_angles_batch(
             local_targets[cursor:], positions[cursor:], inner_spec,
             np.asarray(reference_direction, dtype=float), None,
             params.singularity_radius_epsilon,
             None if previous is None else np.asarray(previous, dtype=float),
+            *_native_grid_args(params),
         )
+        fallback_count += int(grid_done)
         count = len(angles_matrix) if fallback_index < 0 else int(fallback_index)
         if count:
             block = np.asarray(angles_matrix[:count], dtype=float).reshape(count, width)
