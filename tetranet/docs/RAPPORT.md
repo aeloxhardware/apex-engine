@@ -30,7 +30,7 @@
 - Le raffinement en résolution (1,5 → 1,0) ne rapproche pas death de TetGen : l'écart n'est pas
   un problème de densité.
 - Quel φ est le plus proche de la vérité sur death ? Référence géodésique indépendante
-  (`/tmp/tn/geodesic_check.py`, grille h = 0,8) : **résultat en attente** au moment de l'écriture.
+  (`/tmp/tn/geodesic_check.py`, grille h = 0,8) : l_shape : géodésique de référence 34,9 (TetGen 35,38, TetraNet 35,89 : TetGen plus proche, écart de 0,5 contre 1,0). death : calcul tué faute de mémoire (grille trop grosse), **inconclusif** ; à relancer avec h plus grand (≥ 1,2).
 - Écart de peau aux arêtes vives : boîte 0,5 mm à h = 1,5 ; Benchy p99 0,28 mm — pas 0,05 mm.
 - Non portés : raffinement près du plateau, tolérance automatique (phase 5) ; zones de jonction
   retombent sur TetGen. Lecture STL/GLB toujours via trimesh.
