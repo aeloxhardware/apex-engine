@@ -24,13 +24,22 @@
 
 ## Lecture honnête
 - **Critère « pas de résultat significativement différent » : NON atteint sur death.stl**
-  (φ_max 63,8 contre 54,5 ; collisions ×2,5 ; défauts d'ordre ×2,5), et partiellement sur turkish
+  (collisions ×2,5 ; défauts d'ordre ×2,5 ; φ_max 63,8 contre 54,5, écart dont la référence géodésique
+  ci-dessous suggère qu'il vient de TetGen), et partiellement sur turkish
   (défauts d'ordre 295 contre 37). Les petits modèles : écart de la matière sans appui
   (3,9 → 6,4 %) probablement lié au nombre de tétraèdres (1,6 k contre 8,6 k), pas à un défaut.
 - Le raffinement en résolution (1,5 → 1,0) ne rapproche pas death de TetGen : l'écart n'est pas
   un problème de densité.
 - Quel φ est le plus proche de la vérité sur death ? Référence géodésique indépendante
-  (`/tmp/tn/geodesic_check.py`, grille h = 0,8) : l_shape : géodésique de référence 34,9 (TetGen 35,38, TetraNet 35,89 : TetGen plus proche, écart de 0,5 contre 1,0). death : calcul tué faute de mémoire (grille trop grosse), **inconclusif** ; à relancer avec h plus grand (≥ 1,2).
+  (`/tmp/tn/geodesic_check.py` : Dijkstra sur grille de voxels intérieurs, 26 voisins, depuis le plateau).
+  **death : 66,4 (h = 1,5) et 66,5 (h = 1,2)**, stable ; la grille surestime un peu la vraie géodésique
+  (de l'ordre de quelques %), donc la vérité est probablement vers 62–66. TetraNet (φ_max 63,8) est
+  **plus proche de cette référence que TetGen (54,5)** : l'écart de φ_max ne prouve PAS que TetraNet se
+  trompe, TetGen sous-estime plutôt. À h = 0,8 le calcul est tué faute de mémoire. **l_shape** : la
+  référence varie de 33,4 à 35,1 selon h (bruit de voxelisation de ±1,5), du même ordre que l'écart
+  TetGen 35,38 / TetraNet 35,89 : rien à conclure. Réserve : φ du pipeline vient de la méthode de la
+  chaleur, pas d'un Dijkstra ; et ce résultat n'explique PAS les collisions et défauts d'ordre plus
+  nombreux de TetraNet sur death (14 098 contre 5 603 ; 10 133 contre 4 014), qui restent à comprendre.
 - Écart de peau aux arêtes vives : boîte 0,5 mm à h = 1,5 ; Benchy p99 0,28 mm — pas 0,05 mm.
 - Non portés : raffinement près du plateau, tolérance automatique (phase 5) ; zones de jonction
   retombent sur TetGen. Lecture STL/GLB toujours via trimesh.
