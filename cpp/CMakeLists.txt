@@ -35,6 +35,7 @@ pybind11_add_module(apex_core
   src/core/past_material.cpp
   src/core/gcode_export.cpp
   src/core/toolpath2d.cpp
+  src/core/step6_layer.cpp
   src/core/overhang.cpp
   src/core/segmentation.cpp
   src/core/scheduling.cpp

@@ -2520,3 +2520,49 @@ def test_step8_raw_points_native_identical_to_python(columns, restore_switch):
     # La normale est normalisee par np.linalg.norm (ddot de BLAS) : quelques ULP d'ecart possibles.
     assert np.allclose(ref.desired_direction, nat.desired_direction, rtol=0, atol=1e-15)
     assert ref.color_id == nat.color_id
+
+
+def test_step6_native_layers_match_per_layer_path(restore_switch):
+    """Couches entieres en natif contre le chemin couche par couche. Sans pont : memes polylignes
+    (a l'ULP de la projection BLAS pres). Avec ponts : le chemin couche par couche passe par shapely
+    pour eux, le natif par Clipper2 -> meme longueur par couche, decoupage different."""
+    from dataclasses import replace
+    from pipeline import step6_toolpath2d as s6
+    from pipeline.step4_field_solver import FieldSolverParams, run as field_run
+    from pipeline.step5_layers import LayerParams, run as layers_run
+
+    mesh_data, tet_mesh, overhang, regions = _step4_inputs(resolution=2.0)
+    field = field_run(tet_mesh, mesh_data, overhang, regions, None, FieldSolverParams())
+    layers = layers_run(tet_mesh, mesh_data, field, regions, LayerParams(layer_height_base=1.0))
+    base = s6.Step6Params(out_of_plane_interpolation_power=2.0, split_rings_into_runs=True,
+                          continuous_rings=True, run_split_min_amplitude=0.05)
+
+    _cpp.set_enabled(True)
+    assert s6._fill_layers_native(layers, mesh_data, overhang, base, {}) is not None
+
+    def both(params):
+        flag = s6._NATIVE_LAYER
+        try:
+            s6._NATIVE_LAYER = False
+            ref = s6.run(layers, mesh_data, overhang, params)
+            s6._NATIVE_LAYER = True
+            return ref, s6.run(layers, mesh_data, overhang, params)
+        finally:
+            s6._NATIVE_LAYER = flag
+
+    def length(polys):
+        return sum(float(np.linalg.norm(np.diff(p[:, :2], axis=0), axis=1).sum()) for p in polys)
+
+    ref, nat = both(replace(base, bridge_contour_ratio_threshold=2.0))        # ponts desactives
+    assert len(layers) > 5 and sum(len(l.toolpath_2d) for l in ref) > 50      # garde anti-faux-vert
+    for a, b in zip(ref, nat):
+        assert len(a.toolpath_2d) == len(b.toolpath_2d)
+        for pa, pb in zip(a.toolpath_2d, b.toolpath_2d):
+            assert pa.shape == pb.shape and np.allclose(pa, pb, atol=1e-9, rtol=0)
+
+    ref, nat = both(base)                                                      # ponts actifs
+    differing = 0
+    for a, b in zip(ref, nat):
+        assert length(a.toolpath_2d) == pytest.approx(length(b.toolpath_2d), rel=2e-3)
+        differing += len(a.toolpath_2d) != len(b.toolpath_2d)
+    assert differing > 0        # garde : la fixture contient bien des couches en pont

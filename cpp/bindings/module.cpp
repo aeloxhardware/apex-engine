@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "apex/bvh.hpp"
@@ -33,6 +34,7 @@
 #include "apex/params.hpp"
 #include "apex/past_material.hpp"
 #include "apex/segmentation.hpp"
+#include "apex/step6_layer.hpp"
 #include "apex/step8_assembly.hpp"
 #include "apex/step8_filters.hpp"
 #include "apex/printed_index.hpp"
@@ -42,6 +44,7 @@
 #include "apex/tet_topology.hpp"
 #include "apex/toolpath2d.hpp"
 #include "apex/types.hpp"
+#include "apex/internal/parallel_pool.hpp"
 
 namespace py = pybind11;
 
@@ -226,6 +229,8 @@ public:
         py::gil_scoped_release release;
         tree_ = std::make_unique<apex::KDTree>(points.data(), count);
     }
+
+    const apex::KDTree& tree() const { return *tree_; }
 
     // Equivalent de `cKDTree.query(x)` avec k=1 : rend (distances (M,),
     // indices (M,)). L'appelant Python gere le cas x de forme (3,).
@@ -834,6 +839,79 @@ PYBIND11_MODULE(apex_core, m) {
             return out;
         },
         "Volume absolu de chaque tetraedre (step5 `_tet_volumes`).");
+
+    m.def(
+        "fill_layers",
+        [](const DoubleArray& frames, const IntArray& loop_begin, const IntArray& point_begin,
+           const DoubleArray& points, const DoubleArray& sweep_angles, const py::dict& cfg,
+           const py::object& kdtree, const py::object& is_bridge_obj, const py::object& span_obj,
+           int threads) {
+            const auto layer_count = static_cast<std::int64_t>(sweep_angles.size());
+            apex::Step6Config config;
+            config.nozzle_width = cfg["nozzle_width"].cast<double>();
+            config.wall_count = cfg["wall_count"].cast<int>();
+            config.degenerate_area_ratio = cfg["degenerate_area_ratio"].cast<double>();
+            config.infill_density = cfg["infill_density"].cast<double>();
+            config.pattern = static_cast<apex::InfillKind>(cfg["pattern"].cast<int>());
+            config.bridge_contour_ratio_threshold = cfg["bridge_contour_ratio_threshold"].cast<double>();
+            config.bridge_anchor_extra_walls = cfg["bridge_anchor_extra_walls"].cast<int>();
+            config.has_power = !cfg["power"].is_none();
+            if (config.has_power) config.power = cfg["power"].cast<double>();
+            config.continuous_rings = cfg["continuous_rings"].cast<bool>();
+            config.split_rings_into_runs = cfg["split_rings_into_runs"].cast<bool>();
+            config.split_open_polylines = cfg["split_open_polylines"].cast<bool>();
+            config.run_split_min_amplitude = cfg["run_split_min_amplitude"].cast<double>();
+
+            apex::BridgeInfo bridge;
+            py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast> is_bridge;
+            DoubleArray span;
+            if (!kdtree.is_none()) {
+                is_bridge = is_bridge_obj.cast<py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>>();
+                span = span_obj.cast<DoubleArray>();
+                bridge.tree = &kdtree.cast<const PyKDTree&>().tree();
+                bridge.is_bridge = is_bridge.data();
+                bridge.span = span.data();
+            }
+
+            std::vector<apex::LayerContours> layers(static_cast<std::size_t>(layer_count));
+            for (std::int64_t l = 0; l < layer_count; ++l) {
+                auto& layer = layers[static_cast<std::size_t>(l)];
+                layer.frame = frames.data() + 9 * l;
+                layer.sweep_angle = sweep_angles.data()[l];
+                for (std::int64_t c = loop_begin.data()[l]; c < loop_begin.data()[l + 1]; ++c) {
+                    layer.loops.push_back(points.data() + 3 * point_begin.data()[c]);
+                    layer.loop_sizes.push_back(point_begin.data()[c + 1] - point_begin.data()[c]);
+                }
+            }
+            std::vector<std::vector<std::vector<double>>> results(static_cast<std::size_t>(layer_count));
+            {
+                py::gil_scoped_release release;
+                static apex::internal::ParallelPool* pool = new apex::internal::ParallelPool(
+                    std::max(1u, std::thread::hardware_concurrency()));
+                auto work = [&](std::int64_t b, std::int64_t e) {
+                    for (std::int64_t l = b; l < e; ++l) {
+                        results[static_cast<std::size_t>(l)] = apex::fill_layer(layers[static_cast<std::size_t>(l)], config, bridge);
+                    }
+                };
+                if (threads == 1) work(0, layer_count);
+                else pool->run(layer_count, work, 2);
+            }
+            py::list out;
+            for (const auto& polys : results) {
+                py::list one;
+                for (const auto& p : polys) {
+                    py::array_t<double> a({static_cast<py::ssize_t>(p.size() / 3), static_cast<py::ssize_t>(3)});
+                    std::copy(p.begin(), p.end(), a.mutable_data());
+                    one.append(a);
+                }
+                out.append(one);
+            }
+            return out;
+        },
+        py::arg("frames"), py::arg("loop_begin"), py::arg("point_begin"), py::arg("points"),
+        py::arg("sweep_angles"), py::arg("config"), py::arg("kdtree") = py::none(),
+        py::arg("is_bridge") = py::none(), py::arg("span") = py::none(), py::arg("threads") = 0,
+        "Remplissage 2D de couches entieres (step6 `_fill_layer`), en parallele : liste (par couche) de polylignes (K,3).");
 
     m.def(
         "build_raw_points",
