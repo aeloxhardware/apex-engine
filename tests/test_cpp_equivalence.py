@@ -2429,3 +2429,47 @@ def test_step5_default_layers_native_match_python(restore_switch):
             assert np.array_equal(ca, cb)
         for fa, fb in zip(a.local_frame, b.local_frame):
             assert np.allclose(fa, fb, atol=1e-12, rtol=0)
+
+
+def test_step8_median_filter_and_per_point_normals_match_python(restore_switch):
+    from types import SimpleNamespace
+    from core.mesh_types import MachineProfile, RotationAxisSpec
+    from pipeline import step8_machine_toolpath as s8
+
+    rng = np.random.default_rng(11)
+    n = 400
+    axes = [RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+            RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))]
+    machine = MachineProfile(rotation_axes=axes, platform_origin=np.zeros(3), nozzle_model=None,
+                             nozzle_diameter=0.4, position_coupled_axes=[0])
+    desired = rng.normal(size=(n, 3))
+    desired /= np.linalg.norm(desired, axis=1)[:, None]
+    layer_id = np.repeat(np.arange(8), 50).astype(np.int64)
+    segment = (np.arange(n) // 17).astype(np.int64)
+    travel = np.zeros(n, bool)
+    travel[[0, 60, 61, 200, 399]] = True
+    angles = np.column_stack([rng.uniform(0, 360, n), rng.uniform(0, 185, n)])
+
+    def raw():
+        return s8._RawPoints(position=rng.normal(size=(n, 3)) * 0 + np.arange(n)[:, None],
+                             desired_direction=desired.copy(), layer_id=layer_id, segment_index=segment,
+                             color_id=[None] * n, feedrate=np.ones(n), extrusion=np.ones(n), is_travel=travel)
+
+    _cpp.set_enabled(False)
+    py_angles, py_res = s8._median_filter_free_axes(angles.tolist(), raw(), axes, machine, np.array([0.0, 0.0, 1.0]), 9)
+    _cpp.set_enabled(True)
+    nat_angles, nat_res = s8._median_filter_free_axes(angles.tolist(), raw(), axes, machine, np.array([0.0, 0.0, 1.0]), 9)
+    assert np.array_equal(np.array(py_angles), np.array(nat_angles))        # une mediane est exacte
+    assert np.allclose(py_res, nat_res, atol=1e-12)
+    assert not np.array_equal(np.array(py_angles)[:, 1], angles[:, 1])      # le filtre a bien agi
+
+    layers = {i: SimpleNamespace(deposition_reversed=bool(i % 3 == 0)) for i in range(8)}
+    field = lambda pos: np.where(np.arange(len(pos))[:, None] % 7 == 0, np.nan, np.roll(desired, 3, axis=0))
+    results = []
+    for enabled in (False, True):
+        _cpp.set_enabled(enabled)
+        rp = raw()
+        s8._apply_per_point_normals(rp, layers, field)
+        results.append(rp.desired_direction.copy())
+    assert np.array_equal(results[0], results[1])
+    assert not np.array_equal(results[0], desired)                           # des normales ont ete remplacees

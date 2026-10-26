@@ -33,6 +33,7 @@
 #include "apex/params.hpp"
 #include "apex/past_material.hpp"
 #include "apex/segmentation.hpp"
+#include "apex/step8_filters.hpp"
 #include "apex/printed_index.hpp"
 #include "apex/reorientation.hpp"
 #include "apex/scheduling.hpp"
@@ -832,6 +833,32 @@ PYBIND11_MODULE(apex_core, m) {
             return out;
         },
         "Volume absolu de chaque tetraedre (step5 `_tet_volumes`).");
+
+    m.def(
+        "apply_per_point_normals",
+        [](const DoubleArray& local, const DoubleArray& current,
+           const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& reversed,
+           py::array_t<double, py::array::c_style> desired) {
+            const auto n = static_cast<std::int64_t>(local.shape(0));
+            std::int64_t changed = 0;
+            apex::apply_per_point_normals(local.data(), current.data(), reversed.data(), n,
+                                          desired.mutable_data(), &changed);
+            return changed;
+        },
+        "Normale par point (step8) : ecrit `desired` en place, rend le nombre de points remplaces.");
+    m.def(
+        "median_filter_free_axes",
+        [](py::array_t<double, py::array::c_style> angles, const IntArray& free_axes,
+           const IntArray& layer_ids, const IntArray& segments,
+           const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& travels,
+           std::int64_t window) {
+            if (window < 1 || window % 2 == 0) throw std::invalid_argument("fenetre impaire requise");
+            apex::median_filter_free_axes(angles.mutable_data(), static_cast<std::int64_t>(angles.shape(0)),
+                                          static_cast<std::int64_t>(angles.shape(1)), free_axes.data(),
+                                          static_cast<std::int64_t>(free_axes.size()), layer_ids.data(),
+                                          segments.data(), travels.data(), window);
+        },
+        "Filtre median des axes libres par polyligne (angles modifies en place).");
 
     m.def(
         "stable_topological_order",

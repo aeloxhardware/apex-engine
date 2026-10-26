@@ -24,6 +24,7 @@ pybind11_add_module(apex_core
   src/core/heat_method.cpp
   src/core/reorientation.cpp
   src/core/layer_order.cpp
+  src/core/step8_filters.cpp
   src/core/mesh_repair.cpp
   src/core/mesh_intersect.cpp
   src/core/interpolate.cpp
