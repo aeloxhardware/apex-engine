@@ -1288,15 +1288,18 @@ def _median_filter_free_axes(resolved_angles, raw_points, axes, machine_profile,
     angles = np.array(resolved_angles, dtype=float)
     coupled = set(getattr(machine_profile, "position_coupled_axes", None) or [])
     free = [i for i in range(len(axes)) if i not in coupled]
-    if isinstance(raw_points, _RawPoints):
+    native_median = (isinstance(raw_points, _RawPoints) and _cpp.enabled() and window % 2 == 1
+                     and hasattr(_cpp.module(), "median_filter_free_axes"))
+    if native_median:
+        layer_ids = segments = travels = None
+    elif isinstance(raw_points, _RawPoints):
         layer_ids, segments, travels = (raw_points.layer_id.tolist(), raw_points.segment_index.tolist(),
                                         raw_points.is_travel.tolist())
     else:
         layer_ids = [p.layer_id for p in raw_points]
         segments = [p.segment_index for p in raw_points]
         travels = [p.is_travel for p in raw_points]
-    if (isinstance(raw_points, _RawPoints) and _cpp.enabled() and window % 2 == 1
-            and hasattr(_cpp.module(), "median_filter_free_axes")):
+    if native_median:
         _cpp.module().median_filter_free_axes(
             angles, np.asarray(free, dtype=np.int64), np.ascontiguousarray(raw_points.layer_id, dtype=np.int64),
             np.ascontiguousarray(raw_points.segment_index, dtype=np.int64),
