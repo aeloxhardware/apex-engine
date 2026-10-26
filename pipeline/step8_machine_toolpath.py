@@ -531,6 +531,73 @@ def _point_arrays(raw_points) -> tuple[np.ndarray, np.ndarray]:
             np.array([p.desired_direction for p in raw_points], dtype=float))
 
 
+def _iter_schedule_points_native(schedule, layers_by_id, params):
+    """Assemblage natif des points bruts (cpp/src/core/step8_assembly.cpp), au bit
+    identique. None = noyau natif inactif ou entree inhabituelle : le chemin Python
+    ci-dessous s'applique (il leve aussi les erreurs de planning invalide)."""
+    if not (_cpp.enabled() and hasattr(_cpp.module(), "build_raw_points")):
+        return None
+    table_index: dict[int, int] = {}
+    layers_used: list[Layer] = []
+    seg_layer: list[int] = []
+    seg_index: list[int] = []
+    seg_pass: list[int] = []
+    pass_colors: list = []
+    for pass_number, pass_ in enumerate(schedule.passes):
+        pass_colors.append(pass_.color_id)
+        for layer_id, segment_index in pass_.segments:
+            slot = table_index.get(layer_id)
+            if slot is None:
+                layer = layers_by_id.get(layer_id)
+                if layer is None or layer.toolpath_2d is None:
+                    return None
+                slot = table_index[layer_id] = len(layers_used)
+                layers_used.append(layer)
+            if segment_index >= len(layers_used[slot].toolpath_2d):
+                return None
+            seg_layer.append(slot)
+            seg_index.append(segment_index)
+            seg_pass.append(pass_number)
+    if not seg_layer:
+        return None
+    columns = {np.asarray(p).shape[1] for layer in layers_used for p in layer.toolpath_2d
+               if np.asarray(p).ndim == 2 and len(p)}
+    if len(columns) != 1 or any(np.asarray(p).ndim != 2 for layer in layers_used for p in layer.toolpath_2d):
+        return None
+    ncol = columns.pop()
+    if ncol not in (2, 3):
+        return None
+    frames = np.array([np.concatenate([np.asarray(f, dtype=float) for f in layer.local_frame])
+                       for layer in layers_used], dtype=float)
+    reversed_flags = np.array([bool(getattr(layer, "deposition_reversed", False)) for layer in layers_used],
+                              dtype=np.uint8)
+    ids = np.array([layer.id for layer in layers_used], dtype=np.int64)
+    poly_begin = np.zeros(len(layers_used) + 1, dtype=np.int64)
+    point_counts: list[int] = []
+    chunks: list[np.ndarray] = []
+    for slot, layer in enumerate(layers_used):
+        poly_begin[slot + 1] = poly_begin[slot] + len(layer.toolpath_2d)
+        for p in layer.toolpath_2d:
+            arr = np.asarray(p, dtype=float).reshape(-1, ncol) if len(p) else np.zeros((0, ncol))
+            point_counts.append(len(arr))
+            chunks.append(arr)
+    point_begin = np.zeros(len(point_counts) + 1, dtype=np.int64)
+    np.cumsum(point_counts, out=point_begin[1:])
+    points = np.ascontiguousarray(np.concatenate(chunks, axis=0) if chunks else np.zeros((0, ncol)))
+    position, direction, layer_id, segment, pass_idx, travel = _cpp.module().build_raw_points(
+        frames, reversed_flags, ids, poly_begin, point_begin, points,
+        np.asarray(seg_layer, dtype=np.int64), np.asarray(seg_index, dtype=np.int64),
+        np.asarray(seg_pass, dtype=np.int64))
+    travel = travel.astype(bool)
+    travel_feedrate = params.travel_feedrate if params.travel_feedrate > 0 else params.default_feedrate
+    colors = [pass_colors[i] for i in pass_idx.tolist()]
+    return _RawPoints(
+        position=position, desired_direction=direction, layer_id=layer_id, segment_index=segment,
+        color_id=colors, feedrate=np.where(travel, float(travel_feedrate), float(params.default_feedrate)),
+        extrusion=np.where(travel, 0.0, 1.0), is_travel=travel,
+    )
+
+
 def _iter_schedule_points(
     schedule: PrintSchedule, layers_by_id: dict[int, Layer], params: Step8Params
 ) -> _RawPoints:
@@ -547,6 +614,10 @@ def _iter_schedule_points(
     Rend des TABLEAUX (`_RawPoints`), assembles par blocs (un par
     polyligne) : memes valeurs que la liste d'objets d'origine (2026-10-01).
     """
+    native_result = _iter_schedule_points_native(schedule, layers_by_id, params)
+    if native_result is not None:
+        return native_result
+
     previous_key: Optional[tuple[int, int]] = None
     normal_cache: dict[int, np.ndarray] = {}
     travel_feedrate = params.travel_feedrate if params.travel_feedrate > 0 else params.default_feedrate

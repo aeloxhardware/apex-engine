@@ -33,6 +33,7 @@
 #include "apex/params.hpp"
 #include "apex/past_material.hpp"
 #include "apex/segmentation.hpp"
+#include "apex/step8_assembly.hpp"
 #include "apex/step8_filters.hpp"
 #include "apex/printed_index.hpp"
 #include "apex/reorientation.hpp"
@@ -833,6 +834,39 @@ PYBIND11_MODULE(apex_core, m) {
             return out;
         },
         "Volume absolu de chaque tetraedre (step5 `_tet_volumes`).");
+
+    m.def(
+        "build_raw_points",
+        [](const DoubleArray& frames, const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& reversed,
+           const IntArray& layer_ids, const IntArray& poly_begin, const IntArray& point_begin,
+           const DoubleArray& points, const IntArray& seg_layer, const IntArray& seg_index,
+           const IntArray& seg_pass) {
+            const auto layers = static_cast<std::int64_t>(layer_ids.size());
+            const std::int64_t columns = points.ndim() == 2 ? static_cast<std::int64_t>(points.shape(1)) : 2;
+            apex::RawPointsOutput r;
+            {
+                py::gil_scoped_release release;
+                r = apex::build_raw_points(layers, frames.data(), reversed.data(), layer_ids.data(),
+                                           poly_begin.data(), point_begin.data(), points.data(), columns,
+                                           static_cast<std::int64_t>(seg_layer.size()), seg_layer.data(),
+                                           seg_index.data(), seg_pass.data());
+            }
+            const auto n = static_cast<py::ssize_t>(r.layer_id.size());
+            auto mat = [&](const std::vector<double>& v) {
+                py::array_t<double> a({n, static_cast<py::ssize_t>(3)});
+                std::copy(v.begin(), v.end(), a.mutable_data());
+                return a;
+            };
+            auto vec = [&](const auto& v, auto tag) {
+                py::array_t<decltype(tag)> a(n);
+                std::copy(v.begin(), v.end(), a.mutable_data());
+                return a;
+            };
+            return py::make_tuple(mat(r.position), mat(r.desired_direction), vec(r.layer_id, std::int64_t{}),
+                                  vec(r.segment_index, std::int64_t{}), vec(r.pass_index, std::int64_t{}),
+                                  vec(r.is_travel, std::uint8_t{}));
+        },
+        "Points bruts de la trajectoire (step8 `_iter_schedule_points`) : position, direction, couche, segment, passe, trajet.");
 
     m.def(
         "apply_per_point_normals",
