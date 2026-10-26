@@ -1328,9 +1328,10 @@ _STEP6_THREADS = None
 # Pas 15 (limite #56) : parois et remplissage d'une zone par le noyau natif
 # (Clipper2 au lieu de shapely/GEOS). PAS au bit pres - meme offset en
 # onglet, autre arithmetique et autre point de depart d'anneau -, d'ou
-# l'option : APEX_NATIVE_FILL=1 (et APEX_USE_CPP=1), ou cette variable.
+# l'option. ACTIVE PAR DEFAUT quand le noyau natif est actif (2026-10-26) :
+# APEX_NATIVE_FILL=0 rend shapely. Mesure sur les 4 modeles (limite #82).
 # Les ponts restent en Python.
-_NATIVE_FILL = os.environ.get("APEX_NATIVE_FILL", "0") == "1"
+_NATIVE_FILL = os.environ.get("APEX_NATIVE_FILL", "1") == "1"
 _NATIVE_PATTERN_CODES = {InfillPattern.LINES: 0, InfillPattern.GRID: 1, InfillPattern.CROSSED_ZIGZAG: 2}
 
 
