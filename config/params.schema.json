@@ -1665,5 +1665,6 @@
   }
  },
  "title": "Apex engine parameters",
- "type": "object"
+ "type": "object",
+ "x-apex-contract": 1
 }

@@ -31,6 +31,13 @@ import numpy as np
 
 SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 
+# Numero du contrat entre le moteur et l'interface (apex/integration/RULES.md, §4.1).
+# A incrementer a tout changement INCOMPATIBLE (champ retire ou renomme, unite ou sens
+# change, defaut qui change le G-code produit, format de fichier modifie) et a consigner
+# dans CONTRACT_CHANGES.md. Ecrit dans le schema (`x-apex-contract`) et exige par la
+# requete de tranchage (`slice_cli`).
+APEX_CONTRACT_VERSION = 1
+
 
 def _is_optional(t) -> tuple[bool, Any]:
     origin = typing.get_origin(t)

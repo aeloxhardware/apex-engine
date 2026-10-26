@@ -32,7 +32,7 @@ HPP_PATH = os.path.join(ROOT, "cpp", "include", "apex", "params.hpp")
 def build_schema() -> str:
     doc = {"$schema": schema.SCHEMA_DIALECT, "title": "Apex engine parameters",
            "description": "Genere par scripts/gen_params.py depuis les dataclasses Python. NE PAS EDITER.",
-           "$defs": {}}
+           "x-apex-contract": schema.APEX_CONTRACT_VERSION, "$defs": {}}
     roots = {}
     for name, cls in sorted(ROOTS.items()):
         s = schema.json_schema(cls)

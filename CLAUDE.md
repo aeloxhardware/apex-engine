@@ -3412,6 +3412,39 @@ pour affichage/validation avant export G-code.
     `test_branch_indicator_is_flat_on_a_straight_bar_and_rises_on_a_branch` (dépend de la version de
     tetgen, code FEM voué au retrait).
 
+83. **Protocole d'appel du tranchage (R-003, contrats C2 et C3) et numéro de contrat (R-002),
+    2026-10-26.** `python main.py steps` et `python main.py slice --request <requete.json>`
+    (`slice_cli.py`, 19 tests dans `tests/test_slice_cli.py`) ; `main.py` garde son usage historique
+    (`mesh_path` en argument) pour tout autre appel.
+    - **Requête** : `contract`, `mesh`, `output_dir` obligatoires ; `output_name`, `params`
+      (`PipelineParams` partiel, valeurs par défaut conservées), `gcode_params` (`GcodeParams` partiel,
+      `strict=True` et L courant par défaut). Un champ inconnu à n'importe quel niveau ou un numéro de
+      contrat différent de `config.schema.APEX_CONTRACT_VERSION` (1) : code 2.
+    - **Sorties** : stderr = lignes JSON `step` (`fraction` 0 au début et 1 à la fin de chaque étape de
+      `main.PIPELINE_STEPS`, plus `export`) et `log`, le journal libre de `run_pipeline` y étant
+      redirigé ; stdout = UNE ligne, l'objet résultat. Codes : 0, 2, 3 (`MeshIngestError` dont R-016 et
+      `ModelTooLargeError`, et refus de l'export `strict`), 1 plantage. G-code écrit en `.part` puis
+      renommé. `run_pipeline(..., progress=)` émet ces événements ; `PipelineResult.ingest_report`
+      porte `placement_offset_z`.
+    - **Limite assumée** : aucune fraction INTERMÉDIAIRE dans une étape (aucune ne rend la main avant
+      d'avoir fini) : la barre avance par étape, sans estimation de durée (décision de l'utilisateur,
+      RULES §5.3). La commande reste `python main.py` tant que l'exécutable natif sans Python n'existe
+      pas (R-014).
+    - **Contrat** : `x-apex-contract` écrit dans `config/params.schema.json` par `scripts/gen_params.py` ;
+      `CONTRACT_CHANGES.md` à la racine.
+    - **Message de refus d'export** (`export_refusal_message`) construit avec les chiffres du rapport,
+      accord en nombre vérifié par test. Constaté en passant : le Benchy cassé tranché avec TetraNet
+      refuse l'export (4 mouvements dont la pointe passe jusqu'à 0,17 mm sous le plateau) ; cause non
+      examinée.
+    - **Test corrigé** : `test_native_grid_fallback_matches_python_grid_search` supposait que +Z ET -Z
+      font échouer l'analytique. Mesuré : +Z se replie 43 fois sur 43, -Z 0 sur 43 (B = 180° est dans
+      [0°, 185°]). Garde remplacée par l'égalité exacte « replis = points +Z ».
+    - **Ports abandonnés après mesure** (profil complet de death @ 1,5, 15 s au total dont ~6 s
+      d'attente de TetGen) : aucun poste Python propre au-dessus de ~0,7 s. L'échantillonnage de la
+      tête de l'étape 9 (`__init__` 0,63 s), la boucle de l'étape 10 (0,2 s), l'enveloppe de l'étape 7 et
+      la construction du contrôle des dégagements (0,5 s sur le Benchy) ne justifient aucun port pour la
+      vitesse. Ils ne se justifient plus que par l'orchestrateur natif (bascule finale, R-014).
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.

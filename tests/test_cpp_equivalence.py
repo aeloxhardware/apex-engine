@@ -2635,14 +2635,18 @@ def test_native_tetgen_worker_matches_binding():
 def test_native_grid_fallback_matches_python_grid_search(restore_switch, monkeypatch):
     """
     Repli par grille PORTE en natif (GridSolver) contre la grille Python, sur beaucoup de points
-    colineaires a l'axe externe (+Z et -Z : la tangence qui met l'analytique en echec).
-    `APEX_NATIVE_GRID=0` (variable de module) rend le repli Python, point par point.
+    colineaires a l'axe externe. Seul +Z est une tangence qui met l'analytique en echec (B = 0) ;
+    -Z (B = 180, dans la plage [0, 185]) se resout analytiquement : mesure sur la machine reelle,
+    43 repli sur 43 pour +Z, 0 sur 43 pour -Z. Les points -Z servent donc de controle : ils ne doivent
+    PAS se replier. `APEX_NATIVE_GRID=0` (variable de module) rend le repli Python, point par point.
     """
     import pipeline.step8_machine_toolpath as step8
 
     raw_points, axes, reference, origin, params = _ik_fixture(_current_machine_axes(), seed=303, count=300)
+    plus_z = 0
     for index in range(0, 300, 7):
         raw_points[index].desired_direction = np.array([0.0, 0.0, 1.0 if index % 14 == 0 else -1.0])
+        plus_z += index % 14 == 0
 
     monkeypatch.setattr(step8, "_NATIVE_GRID_FALLBACK", False)
     _cpp.set_enabled(True)
@@ -2652,7 +2656,8 @@ def test_native_grid_fallback_matches_python_grid_search(restore_switch, monkeyp
     native_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
     native_count = step8._LAST_NATIVE_FALLBACK_COUNT
 
-    assert python_count >= 40 and native_count == python_count, (python_count, native_count)  # garde anti-faux-vert
+    # garde anti-faux-vert : exactement les points +Z se replient (et le repli est bien exerce)
+    assert plus_z >= 20 and python_count == plus_z and native_count == python_count, (plus_z, python_count, native_count)
     _assert_ik_equivalent(python_grid, native_grid)
 
 

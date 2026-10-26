@@ -28,7 +28,7 @@ from __future__ import annotations
 import argparse
 import sys
 from dataclasses import dataclass, field, replace
-from typing import Optional
+from typing import Callable, Optional
 
 import numpy as np
 
@@ -405,13 +405,16 @@ class PipelineResult:
     collision_report: CollisionReport
     adjusted_toolpath: ToolpathMachine
     adjustment_report: AdjustmentReport
+    ingest_report: Optional[object] = None    # IngestReport de step1 (placement_offset_z, platform_z_used...)
 
 
 def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_path: str,
-                         pivot_to_tip: Optional[float] = None, check_travel: bool = True):
+                         pivot_to_tip: Optional[float] = None, check_travel: bool = True,
+                         gcode_params=None):
     """Export G-code controle (comme scripts/export_model_gcode.py) : pointe jamais
     sous le plateau (`strict`), hauteur mini de la VRAIE tete selon B pour les
     degagements, L = derniere valeur de config/pivot_to_tip.json sinon 46 mm.
+    `gcode_params` : `GcodeParams` complets (requete de tranchage) ; sinon les defauts d'Apex.
     `check_travel` : degagements controles contre la matiere deja deposee
     (`material_travel_check`, comme la chaine de recherche), en natif si actif."""
     from file_io.gcode_export import (GcodeParams, export_gcode, head_zlow_from_table, material_travel_check,
@@ -430,13 +433,31 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
         zlow = np.array([s9._positioned_toolhead_vertices(head, np.zeros(3), [0.0, float(b)], machine.rotation_axes)
                          [:, 2].min() for b in grid_b])
         head_zlow = head_zlow_from_table(grid_b, zlow)
-    gp = GcodeParams(pivot_to_tip=pivot_to_tip, strict=True)
+    gp = gcode_params if gcode_params is not None else GcodeParams(pivot_to_tip=pivot_to_tip, strict=True)
     arrays = toolpath_arrays(toolpath)
     travel_check = material_travel_check(arrays, machine, gp) if check_travel else None
     return export_gcode(arrays, machine, gp, out_path, head_zlow=head_zlow, travel_check=travel_check)
 
 
-def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
+# Etapes du chemin par defaut, telles que l'interface les affiche (apex/integration/RULES.md,
+# §5.3, contrat C3) : (slug, libelle). La liste vient d'ici, l'interface ne l'invente pas.
+# `export` n'est pas une etape de `run_pipeline` : c'est `slice_cli` qui l'ajoute.
+PIPELINE_STEPS: tuple[tuple[str, str], ...] = (
+    ("ingest", "Lecture et maillage volumique du modele"),
+    ("overhang", "Detection des surplombs"),
+    ("segmentation", "Segmentation en regions"),
+    ("field", "Calcul du champ de couches"),
+    ("layers", "Extraction des couches courbes"),
+    ("toolpath2d", "Parois et remplissage"),
+    ("scheduling", "Ordonnancement"),
+    ("machine_toolpath", "Trajectoire machine"),
+    ("collision", "Simulation de collision"),
+    ("adjustment", "Ajustement des collisions"),
+)
+
+
+def run_pipeline(mesh_path: str, params: PipelineParams,
+                 progress: Optional[Callable[[str, float], None]] = None) -> PipelineResult:
     """
     Enchaine step1 a step10 dans l'ordre exact du pipeline. Trois
     dependances multi-etapes a respecter (deja verifiees, pas a
@@ -448,11 +469,27 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
       - step9 et step10 partagent la MEME instance de `machine_profile` et
         de `CollisionSimParams` (`params.collision`).
 
+    `progress(slug, fraction)` : appele au debut (0.0) et a la fin (1.0) de chaque etape de
+    `PIPELINE_STEPS`, jamais sur une estimation de duree. Pas de fraction intermediaire pour
+    l'instant : les etapes ne rendent pas la main avant d'avoir fini.
+
     Ne catch aucune exception metier : MeshIngestError, SegmentationError,
     LayerExtractionError, FieldSolverError, SchedulingError,
     ToolpathResolutionError remontent telles quelles a l'appelant.
     """
     check_model_fits_machine(mesh_path, params.machine_profile)
+    _current: list = [None]
+
+    def _stage(slug: Optional[str]) -> None:
+        """Termine l'etape en cours (1.0) puis ouvre `slug` (0.0) ; `None` termine seulement."""
+        if progress is None:
+            return
+        if _current[0] is not None:
+            progress(_current[0], 1.0)
+        _current[0] = slug
+        if slug is not None:
+            progress(slug, 0.0)
+
     junction_zones = None
     if params.junction_refinement_resolution is not None:
         # Passe LEGERE, jetable : mesh + step2 (overhang) + step3
@@ -489,6 +526,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
         )
         print(f"[main]   {len(junction_zones)} zone(s) de jonction detectee(s)")
 
+    _stage("ingest")
     print(f"[main] Etape 1/10 - ingestion : {mesh_path}")
     mesh_data, tet_mesh, ingest_report = ingest_run(
         mesh_path,
@@ -508,10 +546,12 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
         f"{ingest_report.tetrahedra_generated} tetraedres"
     )
 
+    _stage("overhang")
     print("[main] Etape 2/10 - detection des surplombs")
     overhang_map = overhang_run(mesh_data, params.overhang)
     print(f"[main]   {int(np.sum(overhang_map.is_overhang))} faces en surplomb sur {mesh_data.face_count}")
 
+    _stage("segmentation")
     print("[main] Etape 3/10 - segmentation en regions")
     # step1 a deja resolu platform_z (fourni ou detecte automatiquement,
     # IngestReport.platform_z_used) - propage cette MEME valeur a step3
@@ -526,6 +566,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
     region_dependency_graph = segmentation_run(mesh_data, overhang_map, segmentation_params, tet_mesh)
     print(f"[main]   {len(region_dependency_graph.regions)} region(s)")
 
+    _stage("field")
     print("[main] Etape 4/10 - resolution du champ scalaire")
     _fs_params = _effective_field_solver_params(params)
     if _fs_params.planar_parts:
@@ -537,6 +578,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
             tet_mesh, mesh_data, overhang_map, region_dependency_graph, params.constraints, _fs_params
         )
 
+    _stage("layers")
     print("[main] Etape 5/10 - extraction des couches courbes")
     layers = layers_run(tet_mesh, mesh_data, scalar_field, region_dependency_graph, params.layers)
     if params.collision_order is not None:
@@ -545,15 +587,18 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
               f"{order_report.moved_layers} couche(s) deplacee(s), {order_report.cycle_breaks} violee(s)")
     print(f"[main]   {len(layers)} couche(s)")
 
+    _stage("toolpath2d")
     print("[main] Etape 6/10 - remplissage 2D par couche")
     layers = toolpath2d_run(layers, mesh_data, overhang_map, _effective_toolpath2d_params(params))
 
+    _stage("scheduling")
     print("[main] Etape 7/10 - couleur + ordonnancement")
     colored_layers, schedule = scheduling_run(
         layers, mesh_data, tet_mesh, params.color_map, region_dependency_graph, scalar_field, params.scheduling
     )
     print(f"[main]   {len(schedule.passes)} passe(s) d'impression")
 
+    _stage("machine_toolpath")
     print("[main] Etape 8/10 - trajectoire machine (resolution IK)")
     toolpath, step8_diagnostics = machine_toolpath_run(
         colored_layers, schedule, params.machine_profile, params.machine_toolpath,
@@ -604,6 +649,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
         toolpath, clamped, _deviations = clamp_head_height(toolpath, params.machine_profile, params.collision)
         print(f"[main]   borne de l'angle de tete selon la hauteur : {clamped} point(s) ramene(s)")
 
+    _stage("collision")
     print("[main] Etape 9/10 - simulation de collision")
     collision_report = collision_run(toolpath, params.machine_profile, params.collision)
     print(
@@ -626,6 +672,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
             if not any(found is not None for _i, found, _t in reorient_log):
                 break   # aucun point resolu : trajectoire inchangee, le tour suivant serait identique
 
+    _stage("adjustment")
     print("[main] Etape 10/10 - ajustement")
     adjusted_toolpath, adjustment_report = adjustment_run(
         toolpath,
@@ -642,6 +689,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
         f"{len(adjustment_report.unresolved_collisions)} collision(s) non resolue(s)"
     )
 
+    _stage(None)
     return PipelineResult(
         mesh_data=mesh_data,
         tet_mesh=tet_mesh,
@@ -658,10 +706,16 @@ def run_pipeline(mesh_path: str, params: PipelineParams) -> PipelineResult:
         collision_report=collision_report,
         adjusted_toolpath=adjusted_toolpath,
         adjustment_report=adjustment_report,
+        ingest_report=ingest_report,
     )
 
 
 def main(argv: Optional[list[str]] = None) -> int:
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] in ("slice", "steps"):
+        # Protocole d'appel du tranchage (apex/integration/RULES.md, §5 ; contrats C2 et C3).
+        import slice_cli
+        return slice_cli.slice_main(argv[1:]) if argv[0] == "slice" else slice_cli.steps_main(argv[1:])
     parser = argparse.ArgumentParser(
         description="Orchestrateur du pipeline de slicing 4 axes (step1 -> step10)."
     )
