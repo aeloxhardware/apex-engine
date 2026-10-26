@@ -2196,8 +2196,18 @@ def test_schedule_native_matches_python(restore_switch, case):
     from tests.test_step7_scheduling import (
         _lateral_color_map, _pipeline_through_step6, _two_tone_color_map,
     )
+    from pipeline import step6_toolpath2d as s6
     mesh = trimesh.creation.box(extents=[10, 10, 10]).subdivide().subdivide()
-    mesh_data, tet_mesh, regions, field, layers = _pipeline_through_step6(mesh, platform_z=-5.0)
+    # Couches de reference par shapely : avec le remplissage natif (Clipper2, arrondi a 1e-6),
+    # le milieu d'une arete de la boite symetrique tombe a 7e-8 de la ligne x=0 de la grille de
+    # faces, a egale distance de deux triangles de couleurs differentes -- une egalite que les deux
+    # implementations departagent a leur facon (tolerance de frontiere declaree, apex/scheduling.hpp).
+    native_fill = s6._NATIVE_FILL
+    s6._NATIVE_FILL = False
+    try:
+        mesh_data, tet_mesh, regions, field, layers = _pipeline_through_step6(mesh, platform_z=-5.0)
+    finally:
+        s6._NATIVE_FILL = native_fill
     params = s7.Step7Params()
     color_map = None
     if case == "two_tone":
