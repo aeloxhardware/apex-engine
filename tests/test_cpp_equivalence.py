@@ -2197,6 +2197,7 @@ def test_schedule_native_matches_python(restore_switch, case):
         _lateral_color_map, _pipeline_through_step6, _two_tone_color_map,
     )
     from pipeline import step6_toolpath2d as s6
+    _cpp.set_enabled(True)       # fixtures (kd-tree natif, etc.) construites noyau actif, quel que soit l'environnement
     mesh = trimesh.creation.box(extents=[10, 10, 10]).subdivide().subdivide()
     # Couches de reference par shapely : avec le remplissage natif (Clipper2, arrondi a 1e-6),
     # le milieu d'une arete de la boite symetrique tombe a 7e-8 de la ligne x=0 de la grille de
@@ -2531,6 +2532,7 @@ def test_step6_native_layers_match_per_layer_path(restore_switch):
     from pipeline.step4_field_solver import FieldSolverParams, run as field_run
     from pipeline.step5_layers import LayerParams, run as layers_run
 
+    _cpp.set_enabled(True)       # le kd-tree de mesh_data doit etre natif pour le chemin par couches entieres
     mesh_data, tet_mesh, overhang, regions = _step4_inputs(resolution=2.0)
     field = field_run(tet_mesh, mesh_data, overhang, regions, None, FieldSolverParams())
     layers = layers_run(tet_mesh, mesh_data, field, regions, LayerParams(layer_height_base=1.0))

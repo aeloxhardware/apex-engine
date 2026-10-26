@@ -3340,6 +3340,64 @@ pour affichage/validation avant export G-code.
       porté (repli Python). Aucun gain mécanique mesuré : motif disponible, non
       recommandé par défaut. Tests : 8 (`tests/test_step6_toolpath2d.py`).
 
+82. **Portage natif, session autonome du 2026-10-26 (poste Linux, g++ 13, Python 3.13) :
+    méthode de la chaleur, remplissage, étapes 5/5b/8/9/10 et en-tête G-code. `config.g` modifié
+    par l'utilisateur (rappel arrêté) ; salon passé avec une récompense spéciale pour
+    l'originalité du projet ; le Benchy n'a toujours pas été imprimé.**
+
+    Demande : « porter en C++ ce qui reste en Python, en commençant par le plus facile ». Chaque
+    pièce a son test d'équivalence (`tests/test_cpp_equivalence.py`), avec une garde anti-faux-vert,
+    et un repli Python à grain fin (jamais tout ou rien).
+
+    | pièce | où | équivalence | mesure |
+    |---|---|---|---|
+    | **méthode de la chaleur** (`heat_method_distance`) | `heat_method.cpp` | tolérance 7,7e-5 relatif sur death (tolérance du CG, pas un écart de calcul) | scipy 6,5 s → **2,6 s** sur death (4 cœurs) |
+    | **CG de Jacobi parallèle et reproductible** (remplace le CG d'Eigen, mono-fil) | `linear_solver.cpp` | produits scalaires par blocs fixes de 4096 : indépendant du nombre de fils | sert aussi tout step4 itératif |
+    | réorientation par paliers (`reorient_coupled_tiers`) | `reorientation.cpp` | mêmes angles et mêmes paliers que Python | — |
+    | réorientation locale couplée (`_try_local_reorientation`) et borne de hauteur (`clamp_head_height`) | idem | mêmes entrées de journal et mêmes angles | `run` de step10 identique |
+    | **contrôle rapide de collision par lots** (`fast_penetrations_batch`) | idem | mêmes événements, profondeurs à 1e-9 | death : step9 + re-vérification step10 **~12 s → ~3 s** |
+    | tri topologique stable de step5b | `layer_order.cpp` | identique (entiers) | — |
+    | couches par défaut de step5 en un appel (`extract_layer`) + volumes de tétraèdres | `isosurface.cpp` | contours **identiques au bit**, repère local à 1e-12 | — |
+    | **remplissage de couches ENTIÈRES** (`fill_layers` : classification, ponts, parois, hors-plan, troncons monotones), en parallèle | `step6_layer.cpp` | sans pont : polylignes identiques à 1e-9 ; avec ponts : même longueur par couche (2e-3), découpage différent | step6 death 2,6 s → 1,4 s |
+    | assemblage des points bruts, normale par point, filtre médian (step8) | `step8_assembly.cpp`, `step8_filters.cpp` | positions et indices au bit ; normales à 1e-15 (ddot de BLAS) ; médiane exacte | — |
+    | en-tête et pied du G-code | `gcode_export.cpp` | texte identique ; `None` hors de [1e-4, 1e16) (le repr de Python diverge) → repli Python | — |
+
+    **Remplissage natif ACTIF PAR DÉFAUT avec le noyau natif** (`APEX_NATIVE_FILL=0` rend shapely ;
+    `APEX_NATIVE_LAYER=0` rend le chemin couche par couche). Mesuré sur les QUATRE modèles
+    (`measure_matrix.py ref` contre `native_fill`, step9b) : l_shape 3,80 → 4,13 % (701 dépôts sans
+    appui dans les deux cas, 7 % de points en moins), l-triple 5,10 → 5,28 %, death 3,31 → 3,43 %,
+    turkish 0,162 → 0,152 %. Longueur extrudée : death −0,06 %, turkish −0,20 %, jamais plus de 2,7 %
+    sur une couche. Mixte, dans le bruit des mesures de #64/#65 ; réversible. Les ponts passent
+    désormais par Clipper2 (shapely auparavant).
+
+    **Pipeline complet de death.stl @ 0,8, `APEX_USE_CPP=1`** (profil de `run_pipeline`, mêmes réglages) :
+    42,4 s → 33,4 s ; dont **TetGen ~14 s, incompressible** (sous-processus, par choix de licence).
+    Hors TetGen : 28 s → 18 s. Python pur : 288 s.
+
+    **Ce qui reste en Python, honnêtement :**
+    - **l'enchaînement des étapes** (`main.py`, dataclasses `Layer`/`ToolpathPoint`) : aucun
+      orchestrateur natif. Les entrées/sorties inter-étapes sont des objets Python (360 000
+      `ToolpathPoint` sur death : ~2 s de construction + conversions en tableaux). Un orchestrateur
+      natif suppose de remplacer ce contrat par des tableaux, donc de toucher aux étapes 8, 8b, 9, 9b,
+      10 et à l'export : chantier de la bascule finale, pas fait ici ;
+    - **step1** : chargement/réparation par trimesh, pymeshfix, manifold ; TetGen en sous-processus
+      (`pipeline/_tetrahedralize_worker.py`). Porter le chargement seul (STL, fusion de sommets,
+      normales) gagnerait quelques centaines de ms et risquerait de changer l'ordre des faces ; non fait ;
+    - **step8** : repli par grille du point que la résolution analytique ne traite pas (0,14 %),
+      construction des `ToolpathPoint` ; **step9** : échantillonnage de la surface de la tête (trimesh),
+      densification de la matière ; **step10** : boucle `run` et journal ; **step7** : enveloppe Python
+      autour de `schedule_layers` ; `OSCILLATING_SPIRAL` (step6) ; `export_gcode` : construction du
+      contrôle des dégagements ;
+    - FEM directionnel, multibranche, parties planes (step4/4b/4c) : inchangés, voués au retrait (DT.md).
+
+    **Tests** : les échecs hérités d'un poste Linux sont résolus par des tolérances (ULP de libm sur
+    `fw_y_range`, 90 tétraèdres minimum au lieu de >100 selon la version de tetgen) ; le test de
+    planification step7 utilise des couches shapely (avec Clipper2, le milieu d'une arête tombe à 7e-8
+    de la grille des faces et deux triangles de couleurs différentes sont à égale distance : frontière
+    déclarée de `apex/scheduling.hpp`). Reste en échec, hors périmètre :
+    `test_branch_indicator_is_flat_on_a_straight_bar_and_rises_on_a_branch` (dépend de la version de
+    tetgen, code FEM voué au retrait).
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.

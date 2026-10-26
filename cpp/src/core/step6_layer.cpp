@@ -179,9 +179,11 @@ std::vector<std::vector<double>> fill_layer(const LayerContours& layer, const St
     std::vector<std::vector<std::size_t>> containers(loops);
     for (std::size_t rank = 0; rank < loops; ++rank) {
         const std::size_t i = order[rank];
+        if (open_loops[i].empty()) continue;      // boucle vide : jamais un conteneur ni un contenu
         const double* probe = open_loops[i].data();
         for (std::size_t r2 = 0; r2 < rank; ++r2) {
             const std::size_t j = order[r2];
+            if (open_loops[j].empty()) continue;
             if (point_in_polygon_2d(probe[0], probe[1], open_loops[j].data(),
                                     static_cast<std::int64_t>(open_loops[j].size() / 2))) {
                 containers[i].push_back(j);
@@ -203,7 +205,7 @@ std::vector<std::vector<double>> fill_layer(const LayerContours& layer, const St
 
     std::vector<Flat3> toolpath;
     for (std::size_t outer_idx = 0; outer_idx < loops; ++outer_idx) {
-        if (is_hole[outer_idx]) continue;
+        if (is_hole[outer_idx] || open_loops[outer_idx].size() < 6) continue;   // < 3 points : pas de zone
         const auto& hole_idxs = groups[outer_idx];
         std::vector<char> member(loops, 0);
         member[outer_idx] = 1;
