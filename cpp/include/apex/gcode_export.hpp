@@ -81,4 +81,13 @@ std::string export_gcode_body(const double* positions, const double* angles, con
 void feed_plan_caps(const double* d, std::int64_t count, double max_velocity_deg, double max_accel_deg,
                     double* cap);
 
+// En-tete et pied du fichier (lignes separees par '\n', sans '\n' final), texte
+// identique a celui de `export_gcode` cote Python. `pivot_to_tip`,
+// `retract_length` et `retract_speed` sont ecrits comme `repr(float)` de
+// Python ; hors de [1e-4, 1e16) le format diverge (notation scientifique) :
+// `gcode_header` rend alors `false` et l'appelant garde le chemin Python.
+bool gcode_header(double pivot_to_tip, double retract_length, double retract_speed,
+                  double nozzle_temp, std::string& out);
+std::string gcode_footer();
+
 }  // namespace apex

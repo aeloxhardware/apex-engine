@@ -1328,9 +1328,10 @@ _STEP6_THREADS = None
 # Pas 15 (limite #56) : parois et remplissage d'une zone par le noyau natif
 # (Clipper2 au lieu de shapely/GEOS). PAS au bit pres - meme offset en
 # onglet, autre arithmetique et autre point de depart d'anneau -, d'ou
-# l'option : APEX_NATIVE_FILL=1 (et APEX_USE_CPP=1), ou cette variable.
+# l'option. ACTIVE PAR DEFAUT quand le noyau natif est actif (2026-10-26) :
+# APEX_NATIVE_FILL=0 rend shapely. Mesure sur les 4 modeles (limite #82).
 # Les ponts restent en Python.
-_NATIVE_FILL = os.environ.get("APEX_NATIVE_FILL", "0") == "1"
+_NATIVE_FILL = os.environ.get("APEX_NATIVE_FILL", "1") == "1"
 _NATIVE_PATTERN_CODES = {InfillPattern.LINES: 0, InfillPattern.GRID: 1, InfillPattern.CROSSED_ZIGZAG: 2}
 
 
@@ -1385,6 +1386,10 @@ def run(
         for rank, value in enumerate(sorted({l.isovalue for l in layers if l.isovalue is not None}))
     }
 
+    native_layers = _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank)
+    if native_layers is not None:
+        return native_layers
+
     def one_layer(layer: Layer) -> Layer:
         return _fill_layer(layer, mesh_data, overhang_map, params, isovalue_rank)
 
@@ -1397,6 +1402,58 @@ def run(
         with ThreadPoolExecutor(max_workers=workers) as pool:
             return list(pool.map(one_layer, layers))
     return [one_layer(layer) for layer in layers]
+
+
+# Remplissage de couches ENTIERES en natif (cpp/src/core/step6_layer.cpp) : classification,
+# pont, parois/remplissage Clipper2, offset hors-plan, decoupage en troncons, en parallele.
+# APEX_NATIVE_LAYER=0 rend le chemin couche par couche de Python.
+_NATIVE_LAYER = os.environ.get("APEX_NATIVE_LAYER", "1") == "1"
+
+
+def _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank):
+    """Liste de Layer avec `toolpath_2d` rempli, ou None si le chemin natif ne s'applique pas
+    (noyau inactif, motif non natif, kd-tree sans version native)."""
+    module = _native_fill_module()
+    if (not _NATIVE_LAYER or module is None or not hasattr(module, "fill_layers")
+            or params.infill_pattern not in _NATIVE_PATTERN_CODES or not layers):
+        return None
+    kdtree = getattr(mesh_data.kdtree, "_native", None)
+    if kdtree is None:
+        return None
+    frames = np.array([np.concatenate([np.asarray(f, dtype=float) for f in layer.local_frame])
+                       for layer in layers], dtype=float)
+    loop_begin = np.zeros(len(layers) + 1, dtype=np.int64)
+    sizes: list[int] = []
+    chunks: list[np.ndarray] = []
+    for k, layer in enumerate(layers):
+        loop_begin[k + 1] = loop_begin[k] + len(layer.contour_3d)
+        for c in layer.contour_3d:
+            arr = np.asarray(c, dtype=float).reshape(-1, 3)
+            sizes.append(len(arr))
+            chunks.append(arr)
+    point_begin = np.zeros(len(sizes) + 1, dtype=np.int64)
+    np.cumsum(sizes, out=point_begin[1:])
+    points = np.ascontiguousarray(np.concatenate(chunks, axis=0)) if chunks else np.zeros((0, 3))
+    sweep = np.array([
+        _infill_angle_for_layer(layer, isovalue_rank) if params.infill_pattern is InfillPattern.CROSSED_ZIGZAG else 0.0
+        for layer in layers], dtype=float)
+    config = {
+        "nozzle_width": params.nozzle_width, "wall_count": params.wall_count,
+        "degenerate_area_ratio": params.degenerate_area_ratio, "infill_density": params.infill_density,
+        "pattern": _NATIVE_PATTERN_CODES[params.infill_pattern],
+        "bridge_contour_ratio_threshold": params.bridge_contour_ratio_threshold,
+        "bridge_anchor_extra_walls": params.bridge_anchor_extra_walls,
+        "power": params.out_of_plane_interpolation_power, "continuous_rings": params.continuous_rings,
+        "split_rings_into_runs": params.split_rings_into_runs,
+        "split_open_polylines": params.split_open_polylines,
+        "run_split_min_amplitude": params.run_split_min_amplitude,
+    }
+    threads = _STEP6_THREADS if _STEP6_THREADS is not None else 0
+    result = module.fill_layers(
+        frames, loop_begin, point_begin, points, sweep, config, kdtree,
+        np.ascontiguousarray(overhang_map.is_bridge, dtype=np.uint8),
+        np.ascontiguousarray(overhang_map.bridge_span_direction, dtype=float), int(threads))
+    return [replace(layer, toolpath_2d=list(polys)) for layer, polys in zip(layers, result)]
 
 
 def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, params: Step6Params,

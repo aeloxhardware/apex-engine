@@ -31,8 +31,7 @@ Le moteur et l'interface se développent séparément, une session par dépôt :
 **À la fin de CHAQUE réponse, rappeler en une ligne le point ci-dessous, tant que
 `DT.md` (section « RAPPELS PERMANENTS ») ne le marque pas fait `[x]`.** Ne cesser un rappel
 que lorsque l'utilisateur dit l'avoir fait et que la case est cochée dans `DT.md`.
-1. **Modifier les paramètres du firmware** (`config.g` : `M203 Z8000`, `M201 Z1500`) — bloquant
-   pour les temps d'impression du salon.
+1. ~~Modifier les paramètres du firmware~~ : **fait** (confirmé par l'utilisateur, 2026-10-26, `DT.md` coché). Rappel arrêté. Salon MFR 2026 passé avec une récompense spéciale pour l'originalité du projet ; **le Benchy n'a toujours pas été imprimé**.
 2. ~~Essayer le champ scalaire multibranche~~ : **fait le 2026-10-19** (limite #78, résultat mitigé,
    opt-in). Rappel arrêté.
 
@@ -3355,6 +3354,64 @@ pour affichage/validation avant export G-code.
       porté (repli Python). Aucun gain mécanique mesuré : motif disponible, non
       recommandé par défaut. Tests : 8 (`tests/test_step6_toolpath2d.py`).
 
+82. **Portage natif, session autonome du 2026-10-26 (poste Linux, g++ 13, Python 3.13) :
+    méthode de la chaleur, remplissage, étapes 5/5b/8/9/10 et en-tête G-code. `config.g` modifié
+    par l'utilisateur (rappel arrêté) ; salon passé avec une récompense spéciale pour
+    l'originalité du projet ; le Benchy n'a toujours pas été imprimé.**
+
+    Demande : « porter en C++ ce qui reste en Python, en commençant par le plus facile ». Chaque
+    pièce a son test d'équivalence (`tests/test_cpp_equivalence.py`), avec une garde anti-faux-vert,
+    et un repli Python à grain fin (jamais tout ou rien).
+
+    | pièce | où | équivalence | mesure |
+    |---|---|---|---|
+    | **méthode de la chaleur** (`heat_method_distance`) | `heat_method.cpp` | tolérance 7,7e-5 relatif sur death (tolérance du CG, pas un écart de calcul) | scipy 6,5 s → **2,6 s** sur death (4 cœurs) |
+    | **CG de Jacobi parallèle et reproductible** (remplace le CG d'Eigen, mono-fil) | `linear_solver.cpp` | produits scalaires par blocs fixes de 4096 : indépendant du nombre de fils | sert aussi tout step4 itératif |
+    | réorientation par paliers (`reorient_coupled_tiers`) | `reorientation.cpp` | mêmes angles et mêmes paliers que Python | — |
+    | réorientation locale couplée (`_try_local_reorientation`) et borne de hauteur (`clamp_head_height`) | idem | mêmes entrées de journal et mêmes angles | `run` de step10 identique |
+    | **contrôle rapide de collision par lots** (`fast_penetrations_batch`) | idem | mêmes événements, profondeurs à 1e-9 | death : step9 + re-vérification step10 **~12 s → ~3 s** |
+    | tri topologique stable de step5b | `layer_order.cpp` | identique (entiers) | — |
+    | couches par défaut de step5 en un appel (`extract_layer`) + volumes de tétraèdres | `isosurface.cpp` | contours **identiques au bit**, repère local à 1e-12 | — |
+    | **remplissage de couches ENTIÈRES** (`fill_layers` : classification, ponts, parois, hors-plan, troncons monotones), en parallèle | `step6_layer.cpp` | sans pont : polylignes identiques à 1e-9 ; avec ponts : même longueur par couche (2e-3), découpage différent | step6 death 2,6 s → 1,4 s |
+    | assemblage des points bruts, normale par point, filtre médian (step8) | `step8_assembly.cpp`, `step8_filters.cpp` | positions et indices au bit ; normales à 1e-15 (ddot de BLAS) ; médiane exacte | — |
+    | en-tête et pied du G-code | `gcode_export.cpp` | texte identique ; `None` hors de [1e-4, 1e16) (le repr de Python diverge) → repli Python | — |
+
+    **Remplissage natif ACTIF PAR DÉFAUT avec le noyau natif** (`APEX_NATIVE_FILL=0` rend shapely ;
+    `APEX_NATIVE_LAYER=0` rend le chemin couche par couche). Mesuré sur les QUATRE modèles
+    (`measure_matrix.py ref` contre `native_fill`, step9b) : l_shape 3,80 → 4,13 % (701 dépôts sans
+    appui dans les deux cas, 7 % de points en moins), l-triple 5,10 → 5,28 %, death 3,31 → 3,43 %,
+    turkish 0,162 → 0,152 %. Longueur extrudée : death −0,06 %, turkish −0,20 %, jamais plus de 2,7 %
+    sur une couche. Mixte, dans le bruit des mesures de #64/#65 ; réversible. Les ponts passent
+    désormais par Clipper2 (shapely auparavant).
+
+    **Pipeline complet de death.stl @ 0,8, `APEX_USE_CPP=1`** (profil de `run_pipeline`, mêmes réglages) :
+    42,4 s → 33,4 s ; dont **TetGen ~14 s, incompressible** (sous-processus, par choix de licence).
+    Hors TetGen : 28 s → 18 s. Python pur : 288 s.
+
+    **Ce qui reste en Python, honnêtement :**
+    - **l'enchaînement des étapes** (`main.py`, dataclasses `Layer`/`ToolpathPoint`) : aucun
+      orchestrateur natif. Les entrées/sorties inter-étapes sont des objets Python (360 000
+      `ToolpathPoint` sur death : ~2 s de construction + conversions en tableaux). Un orchestrateur
+      natif suppose de remplacer ce contrat par des tableaux, donc de toucher aux étapes 8, 8b, 9, 9b,
+      10 et à l'export : chantier de la bascule finale, pas fait ici ;
+    - **step1** : chargement/réparation par trimesh, pymeshfix, manifold ; TetGen en sous-processus
+      (`pipeline/_tetrahedralize_worker.py`). Porter le chargement seul (STL, fusion de sommets,
+      normales) gagnerait quelques centaines de ms et risquerait de changer l'ordre des faces ; non fait ;
+    - **step8** : repli par grille du point que la résolution analytique ne traite pas (0,14 %),
+      construction des `ToolpathPoint` ; **step9** : échantillonnage de la surface de la tête (trimesh),
+      densification de la matière ; **step10** : boucle `run` et journal ; **step7** : enveloppe Python
+      autour de `schedule_layers` ; `OSCILLATING_SPIRAL` (step6) ; `export_gcode` : construction du
+      contrôle des dégagements ;
+    - FEM directionnel, multibranche, parties planes (step4/4b/4c) : inchangés, voués au retrait (DT.md).
+
+    **Tests** : les échecs hérités d'un poste Linux sont résolus par des tolérances (ULP de libm sur
+    `fw_y_range`, 90 tétraèdres minimum au lieu de >100 selon la version de tetgen) ; le test de
+    planification step7 utilise des couches shapely (avec Clipper2, le milieu d'une arête tombe à 7e-8
+    de la grille des faces et deux triangles de couleurs différentes sont à égale distance : frontière
+    déclarée de `apex/scheduling.hpp`). Reste en échec, hors périmètre :
+    `test_branch_indicator_is_flat_on_a_straight_bar_and_rises_on_a_branch` (dépend de la version de
+    tetgen, code FEM voué au retrait).
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.
@@ -5371,15 +5428,13 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
       distribué traîne alors la clause réseau de l'AGPL, **inerte pour un
       logiciel de bureau** (elle ne se déclenche que sur une interaction à
       travers un réseau).
-    - **Séparation à distance de bras, déjà en place par accident heureux** :
-      `pipeline/_tetrahedralize_worker.py` est un exécutable SÉPARÉ recevant
-      deux chemins de fichiers sur `sys.argv`. Selon les critères de la FSF,
-      communiquer par arguments de ligne de commande et fichiers indique
-      normalement des programmes distincts — au contraire du partage d'un
-      espace d'adressage. Cette architecture existe pour isoler les segfaults
-      de TetGen (limite #35) et se trouve avoir cette conséquence juridique
-      par effet de bord. Terrain juridiquement CONTESTÉ : ne pas concevoir
-      autour de cet argument sans avis professionnel.
+    - **Licence : lier TetGen est permis (précisé le 2026-10-26, sur remarque de
+      l'utilisateur).** Le logiciel étant sous GPL-3.0 et TetGen sous AGPL-3.0, la
+      combinaison est autorisée (article 13 de chaque licence) ; l'ensemble distribué
+      porte la clause réseau de l'AGPL, inerte pour un logiciel de bureau. L'argument
+      « programmes distincts » (`pipeline/_tetrahedralize_worker.py` reçoit deux chemins
+      de fichiers) est une précaution SUPPLÉMENTAIRE, terrain juridiquement contesté, et
+      n'est PAS la raison de garder TetGen séparé. Pas un avis juridique.
 
     **Conséquences directes sur le plan de portage, toutes des simplifications :**
 
@@ -5391,12 +5446,42 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
     - la géométrie reste **identique au bit près** ;
     - il n'existe donc **aucun endroit du portage qui déplace la métrique**.
 
-    **RÈGLE D'ARCHITECTURE QUI EN DÉCOULE, à respecter au portage de step1 :
-    TetGen ne doit JAMAIS être lié dans `apex_core`.** Il doit rester dans un
-    exécutable dédié (`apex_tetgen_worker`), invoqué en sous-processus avec des
-    chemins de fichiers. Le lier détruirait d'un coup les DEUX protections :
-    l'isolation contre ses segfaults reproductibles, et la séparation
-    « programmes distincts » qui laisse le choix de licence ouvert.
+    **RÈGLE D'ARCHITECTURE (reformulée le 2026-10-26) : TetGen reste dans un
+    exécutable séparé (`apex_tetgen_worker`, sous-processus, chemins de fichiers) pour
+    des raisons de ROBUSTESSE, pas de licence.**
+    - TetGen plante nativement (segfault) de façon reproductible sur certaines entrées
+      (limite #35). En sous-processus, le plantage est une erreur récupérable
+      (`_TetgenCrashError`, replis de step1) ; lié dans `apex_core`, il tuerait le
+      moteur et l'interface TypeScript avec lui.
+    - Le sous-processus permet de lancer deux tétraédrisations en parallèle (step1 de
+      death : 15,6 s → 8 s) et garde le mailleur remplaçable.
+    - Il ne coûte rien en vitesse : les ~14 s de death sont du calcul TetGen.
+    - Lier TetGen reste PERMIS par la licence. Ce serait un choix de robustesse à
+      assumer (perte de l'isolation et du parallélisme), à décider explicitement.
+    - Un worker 100 % C++ (sans Python) est possible : il remplacerait
+      `_tetrahedralize_worker.py`, toujours en exécutable séparé. Il exige la SOURCE de
+      TetGen (v1.6.0, `tetgen.cxx` 36 537 lignes + `tetgen.h` + `predicates.cxx`, AGPL-3.0). Le wheel
+      n'embarque que le binaire, mais le TARBALL source du paquet PyPI `tetgen` 0.8.4 les contient
+      (`src/tetgen.cxx`, `src/tetgen.h`, `src/predicates.cxx`, `src/tetgen-license`) : vérifié le
+      2026-10-26. **FAIT le 2026-10-26** : vendoré dans `cpp/third_party/tetgen/` (+ `LICENSE.txt`,
+      `VERSION.txt`), exécutable séparé `apex_tetgen_worker` (`cpp/tools/tetgen_worker.cpp`, cible CMake
+      jamais liée à `apex_core`, sortie dans `cpp/lib/`). Format binaire en entrée/sortie ; cette variante
+      de TetGen lève des `std::runtime_error` dont le texte est relayé tel quel (la cascade de step1 y
+      cherche « self-intersection », « recoversubfaces », « split_segment »). `step1_ingest` :
+      `_NativeTetgen` (même interface que `tetgen.TetGen`) injecté dans `_tetrahedralize_once`
+      (`_tetgen_factory`), utilisé par `_tetrahedralize_once_isolated` quand l'exécutable existe ;
+      `APEX_TETGEN_WORKER=0` rend le worker Python. Crash natif → `_TetgenCrashError`, erreur →
+      `_TetgenNamedConflictError`, comme avant. **Maillage IDENTIQUE au binding** (nœuds et tétraèdres
+      `array_equal`) sur l_shape (sans/avec raffinement plateau), death (318 691 tét.) et turkish
+      (328 531 tét., cascade de réparation comprise) ; step1 death 13,3 → 11,3-12,0 s, turkish 20,3 →
+      17,6-18,3 s. Test : `test_native_tetgen_worker_matches_binding`.
+    - **Temps par phase (death, `pq1.2a3.375`, `APEX_TETGEN_LOG=<fichier>` les journalise)** :
+      Delaunay 0,005 s, surface 0,003, récupération du bord 0,04, **raffinement 4,5-4,6 s,
+      lissage du maillage 5,3-5,7 s**, amélioration 0,12, sortie 0,03 ; total ~10,2-10,5 s. Turkish
+      identique à 10,6 s (bord 0,25 s). **Plus de 95 % du temps est dans le raffinement et le lissage** ;
+      Delaunay initial et récupération du bord sont négligeables, donc paralléliser ces deux-là ne
+      rapporterait rien. Pistes restantes (non mesurées sur step9b) : lissage de sommets par couleurs
+      indépendantes (parallélisable), réglage de `-s`/`-O`, maillage intérieur plus grossier.
 
     ### Ce que le portage avait rendu visible (conservé pour mémoire)
 

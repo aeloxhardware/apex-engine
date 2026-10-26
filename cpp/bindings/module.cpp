@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "apex/bvh.hpp"
@@ -20,8 +21,10 @@
 #include "apex/gcode_export.hpp"
 #include "apex/gpu/vk_context.hpp"
 #include "apex/geometry2d.hpp"
+#include "apex/heat_method.hpp"
 #include "apex/kdtree.hpp"
 #include "apex/kinematics.hpp"
+#include "apex/layer_order.hpp"
 #include "apex/interpolate.hpp"
 #include "apex/isosurface.hpp"
 #include "apex/mesh_distance.hpp"
@@ -31,12 +34,17 @@
 #include "apex/params.hpp"
 #include "apex/past_material.hpp"
 #include "apex/segmentation.hpp"
+#include "apex/step6_layer.hpp"
+#include "apex/step8_assembly.hpp"
+#include "apex/step8_filters.hpp"
 #include "apex/printed_index.hpp"
+#include "apex/reorientation.hpp"
 #include "apex/scheduling.hpp"
 #include "apex/support.hpp"
 #include "apex/tet_topology.hpp"
 #include "apex/toolpath2d.hpp"
 #include "apex/types.hpp"
+#include "apex/internal/parallel_pool.hpp"
 
 namespace py = pybind11;
 
@@ -221,6 +229,8 @@ public:
         py::gil_scoped_release release;
         tree_ = std::make_unique<apex::KDTree>(points.data(), count);
     }
+
+    const apex::KDTree& tree() const { return *tree_; }
 
     // Equivalent de `cKDTree.query(x)` avec k=1 : rend (distances (M,),
     // indices (M,)). L'appelant Python gere le cas x de forme (3,).
@@ -730,6 +740,338 @@ PYBIND11_MODULE(apex_core, m) {
         "l'appelant doit retomber sur le solveur Python.");
 
     m.def(
+        "reorient_coupled_tiers",
+        [](const DoubleArray& positions, const DoubleArray& extrusion, const DoubleArray& angles,
+           const DoubleArray& axes, std::int64_t free_axis, const DoubleArray& grid,
+           const DoubleArray& tiers, const DoubleArray& samples,
+           const apex::PastMaterialIndex& material, double reach, const py::object& plate_origin,
+           double plate_radius, double plate_half_height, double plate_center_offset,
+           double safety_margin, double lo, double hi, double full_mm, double taper_mm,
+           const IntArray& contacts) {
+            apex::ReorientationInput in;
+            in.n = static_cast<std::int64_t>(positions.shape(0));
+            in.axis_count = static_cast<std::int64_t>(axes.shape(0));
+            in.positions = positions.data();
+            in.extrusion = extrusion.data();
+            in.angles = angles.data();
+            in.axes = axes.data();
+            in.free_axis = free_axis;
+            in.grid = grid.data();
+            in.grid_count = static_cast<std::int64_t>(grid.size());
+            in.tiers = tiers.data();
+            in.tier_count = static_cast<std::int64_t>(tiers.size());
+            in.samples = samples.data();
+            in.sample_count = static_cast<std::int64_t>(samples.shape(0));
+            in.reach = reach;
+            if (!plate_origin.is_none()) {
+                DoubleArray o = plate_origin.cast<DoubleArray>();
+                in.has_plate = true;
+                for (int i = 0; i < 3; ++i) in.plate_origin[i] = o.data()[i];
+            }
+            in.plate_radius = plate_radius;
+            in.plate_half_height = plate_half_height;
+            in.plate_center_offset = plate_center_offset;
+            in.safety_margin = safety_margin;
+            in.lo = lo; in.hi = hi; in.full_mm = full_mm; in.taper_mm = taper_mm;
+            py::array_t<double> out({in.n, in.axis_count});
+            std::vector<apex::ReorientationEntry> log;
+            {
+                py::gil_scoped_release release;
+                log = apex::reorient_coupled_tiers(in, material, contacts.data(),
+                                                   static_cast<std::int64_t>(contacts.size()),
+                                                   out.mutable_data());
+            }
+            py::list entries;
+            for (const auto& e : log) {
+                entries.append(py::make_tuple(e.index, e.found, e.angle, e.tier));
+            }
+            return py::make_tuple(std::move(out), std::move(entries));
+        },
+        "Reorientation par paliers (etape 10) : (angles (n,A), [(indice, trouve, angle, palier)]).");
+
+    m.def(
+        "try_local_reorientation_coupled",
+        [](const DoubleArray& positions, const DoubleArray& feedrates, const DoubleArray& angles,
+           const DoubleArray& axes, std::int64_t point_index, const DoubleArray& inner_lo,
+           const DoubleArray& inner_hi, std::int64_t samples_per_axis, double max_deviation,
+           double max_velocity_deg_s, std::int64_t neighbor_margin, const DoubleArray& samples,
+           const apex::PastMaterialIndex& material, double reach, const py::object& plate_origin,
+           double plate_radius, double plate_half_height, double plate_center_offset,
+           double safety_margin) {
+            apex::LocalReorientationInput in;
+            in.n = static_cast<std::int64_t>(positions.shape(0));
+            in.axis_count = static_cast<std::int64_t>(axes.shape(0));
+            in.point_index = point_index;
+            in.positions = positions.data(); in.feedrates = feedrates.data();
+            in.angles = angles.data(); in.axes = axes.data();
+            in.inner_lo = inner_lo.data(); in.inner_hi = inner_hi.data();
+            in.samples_per_axis = samples_per_axis;
+            in.max_direction_deviation_deg = max_deviation;
+            in.max_velocity_deg_s = max_velocity_deg_s;
+            in.neighbor_margin = neighbor_margin;
+            in.samples = samples.data();
+            in.sample_count = static_cast<std::int64_t>(samples.shape(0));
+            in.reach = reach;
+            if (!plate_origin.is_none()) {
+                DoubleArray o = plate_origin.cast<DoubleArray>();
+                in.has_plate = true;
+                for (int i = 0; i < 3; ++i) in.plate_origin[i] = o.data()[i];
+            }
+            in.plate_radius = plate_radius; in.plate_half_height = plate_half_height;
+            in.plate_center_offset = plate_center_offset; in.safety_margin = safety_margin;
+            py::array_t<double> out(in.axis_count);
+            bool ok;
+            {
+                py::gil_scoped_release release;
+                ok = apex::try_local_reorientation_coupled(in, material, out.mutable_data());
+            }
+            if (!ok) return py::object(py::none());
+            return py::object(std::move(out));
+        },
+        "Reorientation locale (machine a premier axe couple) : angles retenus ou None.");
+
+    m.def(
+        "tet_volumes",
+        [](const DoubleArray& vertices, const IntArray& tetrahedra) {
+            const auto t = static_cast<py::ssize_t>(tetrahedra.shape(0));
+            py::array_t<double> out(t);
+            apex::tet_volumes(vertices.data(), tetrahedra.data(), t, out.mutable_data());
+            return out;
+        },
+        "Volume absolu de chaque tetraedre (step5 `_tet_volumes`).");
+
+    m.def(
+        "fill_layers",
+        [](const DoubleArray& frames, const IntArray& loop_begin, const IntArray& point_begin,
+           const DoubleArray& points, const DoubleArray& sweep_angles, const py::dict& cfg,
+           const py::object& kdtree, const py::object& is_bridge_obj, const py::object& span_obj,
+           int threads) {
+            const auto layer_count = static_cast<std::int64_t>(sweep_angles.size());
+            apex::Step6Config config;
+            config.nozzle_width = cfg["nozzle_width"].cast<double>();
+            config.wall_count = cfg["wall_count"].cast<int>();
+            config.degenerate_area_ratio = cfg["degenerate_area_ratio"].cast<double>();
+            config.infill_density = cfg["infill_density"].cast<double>();
+            config.pattern = static_cast<apex::InfillKind>(cfg["pattern"].cast<int>());
+            config.bridge_contour_ratio_threshold = cfg["bridge_contour_ratio_threshold"].cast<double>();
+            config.bridge_anchor_extra_walls = cfg["bridge_anchor_extra_walls"].cast<int>();
+            config.has_power = !cfg["power"].is_none();
+            if (config.has_power) config.power = cfg["power"].cast<double>();
+            config.continuous_rings = cfg["continuous_rings"].cast<bool>();
+            config.split_rings_into_runs = cfg["split_rings_into_runs"].cast<bool>();
+            config.split_open_polylines = cfg["split_open_polylines"].cast<bool>();
+            config.run_split_min_amplitude = cfg["run_split_min_amplitude"].cast<double>();
+
+            apex::BridgeInfo bridge;
+            py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast> is_bridge;
+            DoubleArray span;
+            if (!kdtree.is_none()) {
+                is_bridge = is_bridge_obj.cast<py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>>();
+                span = span_obj.cast<DoubleArray>();
+                bridge.tree = &kdtree.cast<const PyKDTree&>().tree();
+                bridge.is_bridge = is_bridge.data();
+                bridge.span = span.data();
+            }
+
+            std::vector<apex::LayerContours> layers(static_cast<std::size_t>(layer_count));
+            for (std::int64_t l = 0; l < layer_count; ++l) {
+                auto& layer = layers[static_cast<std::size_t>(l)];
+                layer.frame = frames.data() + 9 * l;
+                layer.sweep_angle = sweep_angles.data()[l];
+                for (std::int64_t c = loop_begin.data()[l]; c < loop_begin.data()[l + 1]; ++c) {
+                    layer.loops.push_back(points.data() + 3 * point_begin.data()[c]);
+                    layer.loop_sizes.push_back(point_begin.data()[c + 1] - point_begin.data()[c]);
+                }
+            }
+            std::vector<std::vector<std::vector<double>>> results(static_cast<std::size_t>(layer_count));
+            {
+                py::gil_scoped_release release;
+                static apex::internal::ParallelPool* pool = new apex::internal::ParallelPool(
+                    std::max(1u, std::thread::hardware_concurrency()));
+                auto work = [&](std::int64_t b, std::int64_t e) {
+                    for (std::int64_t l = b; l < e; ++l) {
+                        results[static_cast<std::size_t>(l)] = apex::fill_layer(layers[static_cast<std::size_t>(l)], config, bridge);
+                    }
+                };
+                if (threads == 1) work(0, layer_count);
+                else pool->run(layer_count, work, 2);
+            }
+            py::list out;
+            for (const auto& polys : results) {
+                py::list one;
+                for (const auto& p : polys) {
+                    py::array_t<double> a({static_cast<py::ssize_t>(p.size() / 3), static_cast<py::ssize_t>(3)});
+                    std::copy(p.begin(), p.end(), a.mutable_data());
+                    one.append(a);
+                }
+                out.append(one);
+            }
+            return out;
+        },
+        py::arg("frames"), py::arg("loop_begin"), py::arg("point_begin"), py::arg("points"),
+        py::arg("sweep_angles"), py::arg("config"), py::arg("kdtree") = py::none(),
+        py::arg("is_bridge") = py::none(), py::arg("span") = py::none(), py::arg("threads") = 0,
+        "Remplissage 2D de couches entieres (step6 `_fill_layer`), en parallele : liste (par couche) de polylignes (K,3).");
+
+    m.def(
+        "build_raw_points",
+        [](const DoubleArray& frames, const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& reversed,
+           const IntArray& layer_ids, const IntArray& poly_begin, const IntArray& point_begin,
+           const DoubleArray& points, const IntArray& seg_layer, const IntArray& seg_index,
+           const IntArray& seg_pass) {
+            const auto layers = static_cast<std::int64_t>(layer_ids.size());
+            const std::int64_t columns = points.ndim() == 2 ? static_cast<std::int64_t>(points.shape(1)) : 2;
+            apex::RawPointsOutput r;
+            {
+                py::gil_scoped_release release;
+                r = apex::build_raw_points(layers, frames.data(), reversed.data(), layer_ids.data(),
+                                           poly_begin.data(), point_begin.data(), points.data(), columns,
+                                           static_cast<std::int64_t>(seg_layer.size()), seg_layer.data(),
+                                           seg_index.data(), seg_pass.data());
+            }
+            const auto n = static_cast<py::ssize_t>(r.layer_id.size());
+            auto mat = [&](const std::vector<double>& v) {
+                py::array_t<double> a({n, static_cast<py::ssize_t>(3)});
+                std::copy(v.begin(), v.end(), a.mutable_data());
+                return a;
+            };
+            auto vec = [&](const auto& v, auto tag) {
+                py::array_t<decltype(tag)> a(n);
+                std::copy(v.begin(), v.end(), a.mutable_data());
+                return a;
+            };
+            return py::make_tuple(mat(r.position), mat(r.desired_direction), vec(r.layer_id, std::int64_t{}),
+                                  vec(r.segment_index, std::int64_t{}), vec(r.pass_index, std::int64_t{}),
+                                  vec(r.is_travel, std::uint8_t{}));
+        },
+        "Points bruts de la trajectoire (step8 `_iter_schedule_points`) : position, direction, couche, segment, passe, trajet.");
+
+    m.def(
+        "apply_per_point_normals",
+        [](const DoubleArray& local, const DoubleArray& current,
+           const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& reversed,
+           py::array_t<double, py::array::c_style> desired) {
+            const auto n = static_cast<std::int64_t>(local.shape(0));
+            std::int64_t changed = 0;
+            apex::apply_per_point_normals(local.data(), current.data(), reversed.data(), n,
+                                          desired.mutable_data(), &changed);
+            return changed;
+        },
+        "Normale par point (step8) : ecrit `desired` en place, rend le nombre de points remplaces.");
+    m.def(
+        "median_filter_free_axes",
+        [](py::array_t<double, py::array::c_style> angles, const IntArray& free_axes,
+           const IntArray& layer_ids, const IntArray& segments,
+           const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& travels,
+           std::int64_t window) {
+            if (window < 1 || window % 2 == 0) throw std::invalid_argument("fenetre impaire requise");
+            apex::median_filter_free_axes(angles.mutable_data(), static_cast<std::int64_t>(angles.shape(0)),
+                                          static_cast<std::int64_t>(angles.shape(1)), free_axes.data(),
+                                          static_cast<std::int64_t>(free_axes.size()), layer_ids.data(),
+                                          segments.data(), travels.data(), window);
+        },
+        "Filtre median des axes libres par polyligne (angles modifies en place).");
+
+    m.def(
+        "stable_topological_order",
+        [](std::int64_t n, const IntArray& edges) {
+            if (edges.ndim() != 2 || edges.shape(1) != 2) {
+                throw std::invalid_argument("edges doit etre (E, 2)");
+            }
+            const auto e = static_cast<std::int64_t>(edges.shape(0));
+            std::vector<std::int64_t> a(static_cast<std::size_t>(e)), b(static_cast<std::size_t>(e));
+            for (std::int64_t i = 0; i < e; ++i) { a[static_cast<std::size_t>(i)] = edges.data()[2 * i]; b[static_cast<std::size_t>(i)] = edges.data()[2 * i + 1]; }
+            apex::TopologicalOrder r = apex::stable_topological_order(n, a.data(), b.data(), e);
+            return py::make_tuple(py::cast(r.order), r.broken);
+        },
+        "Tri topologique stable (step5b) : (ordre, contraintes violees).");
+
+    m.def(
+        "fast_penetrations_batch",
+        [](const apex::PastMaterialIndex& material, const DoubleArray& samples, const DoubleArray& axes,
+           const DoubleArray& positions, const DoubleArray& angles, const IntArray& limits, double reach,
+           const py::object& plate_origin, double plate_radius, double plate_half_height,
+           double plate_center_offset, double safety_margin) {
+            apex::FastBatchInput in;
+            in.axis_count = static_cast<std::int64_t>(axes.shape(0));
+            in.axes = axes.data();
+            in.samples = samples.data();
+            in.sample_count = static_cast<std::int64_t>(samples.shape(0));
+            in.reach = reach;
+            if (!plate_origin.is_none()) {
+                DoubleArray o = plate_origin.cast<DoubleArray>();
+                in.has_plate = true;
+                for (int i = 0; i < 3; ++i) in.plate_origin[i] = o.data()[i];
+            }
+            in.plate_radius = plate_radius; in.plate_half_height = plate_half_height;
+            in.plate_center_offset = plate_center_offset; in.safety_margin = safety_margin;
+            const auto n = static_cast<py::ssize_t>(positions.shape(0));
+            py::array_t<double> plate(n), part(n);
+            {
+                py::gil_scoped_release release;
+                apex::fast_penetrations_batch(in, material, positions.data(), angles.data(), limits.data(), n,
+                                              plate.mutable_data(), part.mutable_data());
+            }
+            return py::make_tuple(std::move(plate), std::move(part));
+        },
+        "Penetrations plateau / piece (NaN = aucune) pour un lot de poses, en parallele.");
+
+    m.def(
+        "clamp_head_height_apply",
+        [](const DoubleArray& z, const DoubleArray& current, const DoubleArray& grid,
+           const DoubleArray& zlow, double plate_z, double safety_margin) {
+            const auto n = static_cast<py::ssize_t>(z.size());
+            py::array_t<double> out(n);
+            py::array_t<std::uint8_t> moved(n);
+            apex::clamp_head_height_apply(z.data(), current.data(), n, grid.data(), zlow.data(),
+                                          static_cast<std::int64_t>(grid.size()), plate_z,
+                                          safety_margin, out.mutable_data(), moved.mutable_data());
+            return py::make_tuple(std::move(out), std::move(moved));
+        },
+        "Borne de B selon la hauteur de la pointe : (angles, masque des points ramenes).");
+
+    m.def(
+        "heat_method_distance",
+        [](const DoubleArray& tet_vertices, const IntArray& tetrahedra,
+           const DoubleArray& shape_gradients, const DoubleArray& volumes,
+           const IntArray& source_nodes, double time_factor, double anchor_weight,
+           double tolerance, int max_iterations, std::int64_t direct_threshold,
+           const py::object& origin, const DoubleArray& up) {
+            const auto tet_count = static_cast<std::int64_t>(tetrahedra.shape(0));
+            const auto node_count = static_cast<std::int64_t>(tet_vertices.shape(0));
+            apex::HeatParams p;
+            p.time_factor = time_factor;
+            p.anchor_weight = anchor_weight;
+            p.tolerance = tolerance;
+            p.max_iterations = max_iterations;
+            p.direct_threshold = direct_threshold;
+            if (!origin.is_none()) {
+                DoubleArray o = origin.cast<DoubleArray>();
+                p.project_reachable = true;
+                for (int i = 0; i < 3; ++i) p.origin[i] = o.data()[i];
+                for (int i = 0; i < 3; ++i) p.up[i] = up.data()[i];
+            }
+            apex::HeatResult res;
+            {
+                py::gil_scoped_release release;
+                res = apex::heat_method_distance(
+                    tet_vertices.data(), tetrahedra.data(), tet_count, node_count,
+                    shape_gradients.data(), volumes.data(), source_nodes.data(),
+                    static_cast<std::int64_t>(source_nodes.size()), p);
+            }
+            if (!res.converged) return py::object(py::none());
+            py::array_t<double> phi(static_cast<py::ssize_t>(res.phi.size()));
+            std::copy(res.phi.begin(), res.phi.end(), phi.mutable_data());
+            return py::object(std::move(phi));
+        },
+        py::arg("tet_vertices"), py::arg("tetrahedra"), py::arg("shape_gradients"),
+        py::arg("volumes"), py::arg("source_nodes"), py::arg("time_factor"),
+        py::arg("anchor_weight"), py::arg("tolerance"), py::arg("max_iterations"),
+        py::arg("direct_threshold"), py::arg("origin"), py::arg("up"),
+        "Methode de la chaleur : distance au plateau par noeud, ou None si un solveur "
+        "n'a pas converge (l'appelant retombe sur le Python).");
+
+    m.def(
         "assemble_gradient_rhs",
         [](const IntArray& tetrahedra, const DoubleArray& shape_gradients,
            const DoubleArray& scale, const DoubleArray& directions, const Int32Array& active,
@@ -992,6 +1334,33 @@ PYBIND11_MODULE(apex_core, m) {
              py::arg("isovalue"), py::arg("weld_tolerance"),
              "(vertices soudes (V,3), faces (F,3), tetraedre source (F,)) - "
              "_extract_isosurface_triangles puis _weld_vertices de step5.")
+        .def("extract_layer",
+             [](const apex::IsosurfaceExtractor& self, double isovalue, double weld_tolerance,
+                const DoubleArray& gradients, const DoubleArray& volumes, const IntArray& tet_regions) -> py::object {
+                 apex::LayerExtraction r;
+                 {
+                     py::gil_scoped_release release;
+                     r = apex::extract_layer(self, isovalue, weld_tolerance, gradients.data(),
+                                             volumes.data(), tet_regions.data());
+                 }
+                 if (r.status != 1) return py::int_(r.status);
+                 py::list contours;
+                 for (const auto& c : r.contours) {
+                     py::array_t<double> a({static_cast<py::ssize_t>(c.size() / 3), static_cast<py::ssize_t>(3)});
+                     std::copy(c.begin(), c.end(), a.mutable_data());
+                     contours.append(a);
+                 }
+                 auto vec3 = [](const double* v) {
+                     py::array_t<double> a(3);
+                     std::copy(v, v + 3, a.mutable_data());
+                     return a;
+                 };
+                 return py::make_tuple(contours, py::cast(r.region_ids),
+                                       py::make_tuple(vec3(r.origin), vec3(r.axis_u), vec3(r.axis_v)));
+             },
+             py::arg("isovalue"), py::arg("weld_tolerance"), py::arg("gradients"), py::arg("volumes"),
+             py::arg("tet_regions"),
+             "Couche par defaut : (contours, region_ids, repere local), ou 0 (aucune couche) / 2 (repli trimesh).")
         .def_property_readonly("tet_count", &apex::IsosurfaceExtractor::tet_count);
 
     // Pas 14 : trace de bord (outline) natif, None = repli trimesh.
@@ -1082,6 +1451,19 @@ PYBIND11_MODULE(apex_core, m) {
         .def_property_readonly("size", &apex::PastMaterialIndex::size);
 
     // Pas 24 : corps de l'export G-code, texte identique ligne a ligne.
+    m.def(
+        "gcode_header",
+        [](double pivot_to_tip, double retract_length, double retract_speed, double nozzle_temp) {
+            std::string out;
+            if (!apex::gcode_header(pivot_to_tip, retract_length, retract_speed, nozzle_temp, out)) {
+                return py::object(py::none());
+            }
+            return py::object(py::str(out));
+        },
+        py::arg("pivot_to_tip"), py::arg("retract_length"), py::arg("retract_speed"),
+        py::arg("nozzle_temp"), "En-tete du G-code (None si le format Python diverge).");
+    m.def("gcode_footer", []() { return apex::gcode_footer(); }, "Pied du G-code.");
+
     m.def(
         "export_gcode_body",
         [](const DoubleArray& positions, const DoubleArray& angles, const DoubleArray& extrusion,

@@ -137,6 +137,12 @@ def _rotation_matrices(axes, angles: np.ndarray) -> np.ndarray:
 def _stable_topological_order(n: int, edges: set[tuple[int, int]]) -> tuple[list[int], int]:
     """Kahn avec priorite = indice d'origine ; cycle rompu par la couche au
     plus petit degre entrant restant. Rend (ordre, contraintes violees)."""
+    from core import _cpp
+    if _cpp.enabled() and hasattr(_cpp.module(), "stable_topological_order"):
+        edge_array = np.array(sorted(edges), dtype=np.int64).reshape(-1, 2)
+        order, broken = _cpp.module().stable_topological_order(int(n), edge_array)
+        return list(order), int(broken)
+
     import heapq
 
     succ: list[list[int]] = [[] for _ in range(n)]

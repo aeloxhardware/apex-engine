@@ -346,4 +346,40 @@ void feed_plan_caps(const double* d, std::int64_t count, double vmax, double ama
     }
 }
 
+
+namespace {
+// repr(float) de Python pour les valeurs courantes : plus court aller-retour,
+// avec ".0" ajoute aux entiers. Hors [1e-4, 1e16) : refus (notation differente).
+bool python_float_repr(double v, std::string& out) {
+    if (!std::isfinite(v)) return false;
+    const double a = std::fabs(v);
+    if (a != 0.0 && (a < 1e-4 || a >= 1e16)) return false;
+    char buf[64];
+    auto r = std::to_chars(buf, buf + sizeof buf, v, std::chars_format::fixed);
+    if (r.ec != std::errc()) return false;
+    out.assign(buf, r.ptr);
+    if (out.find('.') == std::string::npos) out += ".0";
+    return true;
+}
+}  // namespace
+
+bool gcode_header(double pivot_to_tip, double retract_length, double retract_speed,
+                  double nozzle_temp, std::string& out) {
+    std::string l, rl, rs;
+    if (!python_float_repr(pivot_to_tip, l) || !python_float_repr(retract_length, rl) ||
+        !python_float_repr(retract_speed, rs)) {
+        return false;
+    }
+    char temp[64];
+    std::snprintf(temp, sizeof temp, "%g", nozzle_temp);   // f"{x:g}"
+    out = "; Apex -- G-code machine R C Z B (file_io/gcode_export.py)\n";
+    out += "; pivot->pointe " + l + " mm compense ; retraction " + rl + " mm a " + rs + " mm/s\n";
+    out += "G21\nG90\nM82\nG92 E0\nM109 S";
+    out += temp;
+    out += "\n; apex_sliced = 1";
+    return true;
+}
+
+std::string gcode_footer() { return "M104 S0\nM84"; }
+
 }  // namespace apex

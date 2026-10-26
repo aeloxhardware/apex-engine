@@ -31,6 +31,7 @@ from typing import Callable, Optional
 import numpy as np
 import trimesh
 
+from core import _cpp
 from core.geometry_utils import _rodrigues_rotate_single, composed_rotation_angles_and_directions
 from core.mesh_types import (
     AdjustmentLogEntry,
@@ -143,6 +144,22 @@ def clamp_head_height(
         zlow[g] = _positioned_toolhead_vertices(samples, np.zeros(3), angles, axes)[:, 2].min()
     plate_z = float(machine_profile.platform_origin[2]) if machine_profile.platform_origin is not None else 0.0
 
+    if _cpp.enabled() and hasattr(_cpp.module(), "clamp_head_height_apply") and len(toolpath.points):
+        zs = np.array([p.position[2] for p in toolpath.points], dtype=float)
+        cur = np.array([p.axis_angles[axis_index] for p in toolpath.points], dtype=float)
+        new_ax, mask = _cpp.module().clamp_head_height_apply(
+            zs, cur, np.ascontiguousarray(grid, dtype=float), np.ascontiguousarray(zlow, dtype=float),
+            plate_z, float(sim_params.safety_margin))
+        points, deviations = [], []
+        for i, p in enumerate(toolpath.points):
+            if mask[i]:
+                angles = list(p.axis_angles)
+                angles[axis_index] = float(new_ax[i])
+                deviations.append(abs(float(new_ax[i]) - float(cur[i])))
+                p = replace(p, axis_angles=angles)
+            points.append(p)
+        return ToolpathMachine(points=points), int(mask.sum()), deviations
+
     points, moved, deviations = [], 0, []
     for p in toolpath.points:
         ok = p.position[2] - plate_z + zlow >= sim_params.safety_margin
@@ -219,6 +236,30 @@ def reorient_coupled_tiers(
     ext = np.array([p.extrusion for p in points], dtype=float)
     new_angles = np.array([p.axis_angles for p in points], dtype=float)
     log = []
+    if checker.native is not None and hasattr(_cpp.module(), "reorient_coupled_tiers"):
+        # Coeur de la boucle en natif (memes candidats, memes paliers, meme
+        # propagation) ; seule la reconstruction des points reste ici.
+        from pipeline.step9_collision_sim import (
+            PLATFORM_CENTER_OFFSET, PLATFORM_HALF_HEIGHT, PLATFORM_RADIUS,
+        )
+        axis_units = np.array([np.asarray(a.axis, dtype=float) / np.linalg.norm(a.axis) for a in axes])
+        radius = getattr(machine_profile, "platform_radius", None)
+        origin = machine_profile.platform_origin
+        new_angles, native_log = _cpp.module().reorient_coupled_tiers(
+            np.ascontiguousarray(pos), np.ascontiguousarray(ext), np.ascontiguousarray(new_angles),
+            np.ascontiguousarray(axis_units), int(ax), np.ascontiguousarray(grid, dtype=float),
+            np.asarray(tiers_deg, dtype=float), np.ascontiguousarray(samples, dtype=float),
+            checker.native, float(checker.reach),
+            None if origin is None else np.asarray(origin, dtype=float),
+            float(PLATFORM_RADIUS if radius is None else radius), float(PLATFORM_HALF_HEIGHT),
+            float(PLATFORM_CENTER_OFFSET), float(sim_params.safety_margin), float(lo), float(hi),
+            float(full_mm), float(taper_mm),
+            np.asarray(sorted(set(contact_indices)), dtype=np.int64),
+        )
+        log = [(int(i), float(a) if f else None, int(t) if f else None) for i, f, a, t in native_log]
+        out = [replace(p, axis_angles=[float(v) for v in new_angles[i]])
+               if not np.array_equal(new_angles[i], p.axis_angles) else p for i, p in enumerate(points)]
+        return ToolpathMachine(points=out), log
     for idx in sorted(set(contact_indices)):
         a0 = list(points[idx].axis_angles)
         d0 = head_dir(a0)
@@ -325,8 +366,12 @@ def _collisions_at_points(
     # l'etape 10 plutot qu'elimine.
     if sim_params.fast_kdtree:
         checker = _fast_checker(toolpath, machine_profile, sim_params)
-        return [e for i in sorted(set(point_indices)) if i < len(toolpath.points)
-                for e in _fast_events(checker, i, toolpath.points[i])]
+        indices = [i for i in sorted(set(point_indices)) if i < len(toolpath.points)]
+        from pipeline.step9_collision_sim import fast_batch_events
+        batch = fast_batch_events(checker, toolpath, indices)
+        if batch is not None:
+            return batch
+        return [e for i in indices for e in _fast_events(checker, i, toolpath.points[i])]
 
     # Zone de contact de la buse retiree, EXACTEMENT comme step9 : sans ce
     # filtre (oublie ici jusqu'au 2026-10-01), la pointe touche toujours le
@@ -441,6 +486,11 @@ class _ReorientationContext:
     # par capsules (incoherence corrigee le 2026-10-01 : step10 restait sur
     # l'exact, des heures sur death.stl et ses 24 789 collisions).
     fast_checker: Optional[object] = None
+    # Tableaux (positions, avances, angles COURANTS) du chemin natif de la
+    # reorientation locale ; les angles suivent les reorientations reussies.
+    positions: Optional[np.ndarray] = None
+    feedrates: Optional[np.ndarray] = None
+    angles: Optional[np.ndarray] = None
 
     def grow_to(self, points: list[ToolpathPoint], point_idx: int) -> None:
         if self.printed_index is None:
@@ -475,8 +525,14 @@ def _build_reorientation_context(
         machine_profile.nozzle_diameter, sim_params.grid_cell_size_multiplier
     )
     fast_checker = _fast_checker(toolpath, machine_profile, sim_params) if sim_params.fast_kdtree else None
-    return _ReorientationContext(toolhead_samples=toolhead_samples, printed_index=printed_index,
-                                 fast_checker=fast_checker)
+    context = _ReorientationContext(toolhead_samples=toolhead_samples, printed_index=printed_index,
+                                    fast_checker=fast_checker)
+    if (fast_checker is not None and getattr(fast_checker, "native", None) is not None
+            and _cpp.enabled() and hasattr(_cpp.module(), "try_local_reorientation_coupled")):
+        context.positions = np.array([p.position for p in toolpath.points], dtype=float)
+        context.feedrates = np.array([p.feedrate for p in toolpath.points], dtype=float)
+        context.angles = np.array([p.axis_angles for p in toolpath.points], dtype=float)
+    return context
 
 
 def _fast_checker(toolpath, machine_profile, sim_params):
@@ -554,7 +610,31 @@ def _try_local_reorientation(
     reference_direction = np.array([0.0, 0.0, 1.0])
     original_direction = _direction_for_angles(axes, point.axis_angles, reference_direction)
 
-    if list(getattr(machine_profile, "position_coupled_axes", None) or []) == [0] and len(axes) >= 2:
+    coupled_case = list(getattr(machine_profile, "position_coupled_axes", None) or []) == [0] and len(axes) >= 2
+    if coupled_case and context.angles is not None and context.fast_checker is not None:
+        # Chemin natif (memes candidats par ecart croissant ; tri stable, la ou
+        # np.argsort ne garantit pas l'ordre des ex aequo).
+        from pipeline.step9_collision_sim import PLATFORM_CENTER_OFFSET, PLATFORM_HALF_HEIGHT, PLATFORM_RADIUS
+        axis_units = np.array([np.asarray(a.axis, dtype=float) / np.linalg.norm(a.axis) for a in axes])
+        radius = getattr(machine_profile, "platform_radius", None)
+        origin = machine_profile.platform_origin
+        v_deg = float(np.degrees(machine_profile.max_angular_velocity)) if machine_profile.max_angular_velocity > 0 else 0.0
+        found = _cpp.module().try_local_reorientation_coupled(
+            context.positions, context.feedrates, context.angles, np.ascontiguousarray(axis_units),
+            int(point_idx),
+            np.array([a.angle_range_deg[0] for a in axes[1:]], dtype=float),
+            np.array([a.angle_range_deg[1] for a in axes[1:]], dtype=float),
+            int(max(params.reorientation_samples_per_axis, 2) * 4),
+            float(params.max_direction_deviation_deg), v_deg, int(params.rate_limit_neighbor_margin),
+            np.ascontiguousarray(context.toolhead_samples, dtype=float), context.fast_checker.native,
+            float(context.fast_checker.reach),
+            None if origin is None else np.asarray(origin, dtype=float),
+            float(PLATFORM_RADIUS if radius is None else radius), float(PLATFORM_HALF_HEIGHT),
+            float(PLATFORM_CENTER_OFFSET), float(sim_params.safety_margin),
+        )
+        return None if found is None else [float(v) for v in found]
+
+    if coupled_case:
         # Machine ACTUELLE (limite #59) : C est impose par la position du
         # point, seul B (et les axes internes suivants) peut varier. La grille
         # produit complete proposait des C inexecutables (corrige le
@@ -733,6 +813,8 @@ def run(
                 )
                 if new_angles is not None:
                     current = _with_angles(current, point_index, new_angles)
+                    if reorientation_context.angles is not None:
+                        reorientation_context.angles[point_index] = new_angles
                     entries.append(
                         AdjustmentLogEntry(
                             point_index=point_index,

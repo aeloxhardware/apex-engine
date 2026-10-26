@@ -859,6 +859,40 @@ def fast_checker_for(toolpath: ToolpathMachine, machine_profile: MachineProfile,
     return checker
 
 
+def fast_batch_events(checker: "FastCollisionChecker", toolpath: ToolpathMachine,
+                      indices: list[int]) -> Optional[list[CollisionEvent]]:
+    """Evenements du controle rapide pour une liste de points, en UN appel natif parallele
+    (pose de la tete, plateau, matiere passee). None si le noyau natif ne s'applique pas
+    (l'appelant retombe sur la boucle Python). Meme ordre que la boucle : par point,
+    piece puis plateau."""
+    if checker.native is None or not _cpp.enabled() or not hasattr(_cpp.module(), "fast_penetrations_batch"):
+        return None
+    axes = checker.machine.rotation_axes or []
+    if not axes or not indices:
+        return None
+    pts = toolpath.points
+    positions = np.array([pts[i].position for i in indices], dtype=float)
+    angles = np.array([pts[i].axis_angles for i in indices], dtype=float).reshape(len(indices), len(axes))
+    units = np.array([np.asarray(a.axis, dtype=float) / np.linalg.norm(a.axis) for a in axes])
+    origin = checker.machine.platform_origin
+    radius = getattr(checker.machine, "platform_radius", None)
+    plate, part = _cpp.module().fast_penetrations_batch(
+        checker.native, np.ascontiguousarray(checker.samples, dtype=float), np.ascontiguousarray(units),
+        np.ascontiguousarray(positions), np.ascontiguousarray(angles), np.asarray(indices, dtype=np.int64),
+        float(checker.reach), None if origin is None else np.asarray(origin, dtype=float),
+        float(PLATFORM_RADIUS if radius is None else radius), float(PLATFORM_HALF_HEIGHT),
+        float(PLATFORM_CENTER_OFFSET), float(checker.params.safety_margin))
+    events: list[CollisionEvent] = []
+    for k, point_idx in enumerate(indices):
+        if not np.isnan(part[k]):
+            events.append(CollisionEvent(point_index=point_idx, obstacle_type="printed_part",
+                                         penetration_depth=float(part[k])))
+        if not np.isnan(plate[k]):
+            events.append(CollisionEvent(point_index=point_idx, obstacle_type="platform",
+                                         penetration_depth=float(plate[k])))
+    return events
+
+
 def _run_fast_kdtree(
     toolpath: ToolpathMachine,
     machine_profile: MachineProfile,
@@ -868,6 +902,9 @@ def _run_fast_kdtree(
 ) -> list[CollisionEvent]:
     """Variante rapide de la boucle de `run` (voir FastCollisionChecker)."""
     checker = fast_checker_for(toolpath, machine_profile, params, toolhead_base_samples)
+    native_events = fast_batch_events(checker, toolpath, list(sample_indices))
+    if native_events is not None:
+        return native_events
     events: list[CollisionEvent] = []
     axes = machine_profile.rotation_axes or []
     chunk = 1000

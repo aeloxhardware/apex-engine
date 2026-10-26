@@ -1918,6 +1918,101 @@ class _TetgenNamedConflictError(RuntimeError):
         self.tetgen_output = tetgen_output
 
 
+def _native_tetgen_worker_path() -> Optional[str]:
+    """
+    Executable C++ `apex_tetgen_worker` (cpp/third_party/tetgen, AGPL-3.0),
+    quand il est construit. `APEX_TETGEN_WORKER=0` le desactive (retour au
+    worker Python, identique). Absence = jamais une erreur.
+    """
+    if os.environ.get("APEX_TETGEN_WORKER", "1") == "0":
+        return None
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dirs = [os.environ.get("APEX_CPP_LIB_DIR", ""), os.path.join(root, "cpp", "lib")]
+    for d in dirs:
+        for name in ("apex_tetgen_worker", "apex_tetgen_worker.exe"):
+            path = os.path.join(d, name) if d else ""
+            if path and os.path.isfile(path):
+                return path
+    return None
+
+
+class _NativeTetgen:
+    """
+    Memes methodes que `tetgen.TetGen` (add_hole, add_region, tetrahedralize,
+    node, elem) mais execute le PLC dans l'executable C++ separe, sous
+    sous-processus : crash natif -> `_TetgenCrashError`, erreur TetGen ->
+    `_TetgenNamedConflictError` avec le texte complet (stdout + stderr).
+    """
+
+    def __init__(self, vertices, faces):
+        self._vertices = np.ascontiguousarray(vertices, dtype=np.float64)
+        self._faces = np.ascontiguousarray(faces, dtype=np.int32)
+        self._holes: list[list[float]] = []
+        self._regions: list[list[float]] = []
+        self.node = None
+        self.elem = None
+
+    def add_hole(self, point) -> None:
+        self._holes.append([float(v) for v in point])
+
+    def add_region(self, id: int, point, max_vol: float = 0.0) -> None:
+        self._regions.append([float(v) for v in point] + [float(id), float(max_vol)])
+
+    def tetrahedralize(self, switches: str) -> None:
+        exe = _native_tetgen_worker_path()
+        sw = switches.encode("ascii")
+        with tempfile.TemporaryDirectory(prefix="apex_tetgen_") as tmp_dir:
+            input_path = os.path.join(tmp_dir, "input.bin")
+            output_path = os.path.join(tmp_dir, "output.bin")
+            stdout_path = os.path.join(tmp_dir, "stdout.txt")
+            stderr_path = os.path.join(tmp_dir, "stderr.txt")
+            holes = np.asarray(self._holes, dtype=np.float64).reshape(-1, 3)
+            regions = np.asarray(self._regions, dtype=np.float64).reshape(-1, 5)
+            with open(input_path, "wb") as f:
+                np.array(
+                    [len(self._vertices), len(self._faces), len(holes), len(regions), len(sw)],
+                    dtype=np.int32,
+                ).tofile(f)
+                f.write(sw)
+                self._vertices.tofile(f)
+                self._faces.tofile(f)
+                holes.tofile(f)
+                regions.tofile(f)
+            # Vrais fichiers (pas des pipes) : meme raison que pour le worker
+            # Python (bufferisation de la libc de TetGen).
+            with open(stdout_path, "wb") as out_f, open(stderr_path, "wb") as err_f:
+                completed = subprocess.run(
+                    [exe, input_path, output_path], stdout=out_f, stderr=err_f
+                )
+            log_path = os.environ.get("APEX_TETGEN_LOG")
+            if log_path:  # temps par phase de TetGen, pour la mesure
+                with open(log_path, "ab") as log_f, open(stdout_path, "rb") as o, open(
+                    stderr_path, "rb"
+                ) as e:
+                    log_f.write(f"=== {switches}\n".encode() + o.read() + e.read())
+            if completed.returncode != 0 or not os.path.isfile(output_path):
+                with open(stderr_path, "rb") as f:
+                    tail = f.read().decode("utf-8", errors="replace")[-500:]
+                raise _TetgenCrashError(
+                    f"Le sous-processus TetGen s'est termine anormalement "
+                    f"(code de sortie {completed.returncode}, probablement un "
+                    f"crash natif) - stderr : {tail}"
+                )
+            with open(output_path, "rb") as f:
+                status = int(np.fromfile(f, dtype=np.int32, count=1)[0])
+                if status != 0:
+                    n = int(np.fromfile(f, dtype=np.int32, count=1)[0])
+                    message = f.read(n).decode("utf-8", errors="replace")
+                    with open(stdout_path, "rb") as g:
+                        output = g.read().decode("utf-8", errors="replace")
+                    with open(stderr_path, "rb") as g:
+                        output += g.read().decode("utf-8", errors="replace")
+                    raise _TetgenNamedConflictError(message, output)
+                nn, nt = (int(v) for v in np.fromfile(f, dtype=np.int32, count=2))
+                self.node = np.fromfile(f, dtype=np.float64, count=nn * 3).reshape(nn, 3)
+                self.elem = np.fromfile(f, dtype=np.int32, count=nt * 4).reshape(nt, 4)
+
+
 def _tetrahedralize_once_isolated(
     mesh: trimesh.Trimesh,
     resolution: float,
@@ -1969,6 +2064,18 @@ def _tetrahedralize_once_isolated(
             exception (entree structurellement invalide, pas un defaut de
             maillage a reparer).
     """
+    if _native_tetgen_worker_path() is not None:
+        return _tetrahedralize_once(
+            mesh,
+            resolution,
+            near_platform_resolution,
+            near_platform_margin,
+            platform_z,
+            junction_zones,
+            junction_refinement_resolution,
+            _tetgen_factory=_NativeTetgen,
+        )
+
     with tempfile.TemporaryDirectory(prefix="apex_tetgen_") as tmp_dir:
         input_path = os.path.join(tmp_dir, "input.pkl")
         output_path = os.path.join(tmp_dir, "output.pkl")
@@ -2053,6 +2160,7 @@ def _tetrahedralize_once(
     platform_z: float,
     junction_zones: Optional[list[JunctionZone]] = None,
     junction_refinement_resolution: Optional[float] = None,
+    _tetgen_factory=None,
 ) -> TetMesh:
     """
     Une passe de tetraedrisation, sans aucune tentative de reparation :
@@ -2069,7 +2177,10 @@ def _tetrahedralize_once(
     de jonction est juste un point interne supplementaire, jamais une
     decoupe de surface.
     """
-    import tetgen
+    if _tetgen_factory is None:
+        import tetgen
+
+        _tetgen_factory = tetgen.TetGen
 
     max_tet_volume = resolution ** 3
     hole_points = _find_internal_cavities(mesh)
@@ -2102,7 +2213,7 @@ def _tetrahedralize_once(
                             "sur ce modele, non supporte (near_platform_margin ou les "
                             "zones detectees devraient etre ajustes)."
                         )
-        tet = tetgen.TetGen(combined_vertices, combined_faces)
+        tet = _tetgen_factory(combined_vertices, combined_faces)
         for hole_point in hole_points:
             tet.add_hole(hole_point)
         if merged_junction_seed is not None:
@@ -2142,7 +2253,7 @@ def _tetrahedralize_once(
         # a l'interieur du mesh) - voir docstring de
         # _find_rest_seed_outside_junction_zones pour le bug mesure sinon.
         rest_seed = _find_rest_seed_outside_junction_zones(mesh, junction_zones)
-        tet = tetgen.TetGen(mesh.vertices, mesh.faces)
+        tet = _tetgen_factory(mesh.vertices, mesh.faces)
         for hole_point in hole_points:
             tet.add_hole(hole_point)
         # ORDRE CRITIQUE, mesure pas suppose (scripts/measure_add_region_*.py) :
@@ -2157,7 +2268,7 @@ def _tetrahedralize_once(
         tet.add_region(2, merged_junction_seed, junction_refinement_resolution ** 3)
         tet.tetrahedralize(switches="pq1.2Aa")
     else:
-        tet = tetgen.TetGen(mesh.vertices, mesh.faces)
+        tet = _tetgen_factory(mesh.vertices, mesh.faces)
         for hole_point in hole_points:
             tet.add_hole(hole_point)
         tet.tetrahedralize(switches=f"pq1.2a{max_tet_volume:.10f}")

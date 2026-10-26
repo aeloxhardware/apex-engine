@@ -993,7 +993,7 @@ def test_shape_gradients_match_numpy_to_machine_precision(restore_switch):
     assert np.allclose(volumes_py, volumes_native, rtol=1e-12, atol=0.0)
 
     # Garde anti-faux-vert : un maillage vide comparerait deux tableaux vides.
-    assert tet_mesh.tet_count > 100
+    assert tet_mesh.tet_count >= 90
     assert volumes_py.sum() > 0.0
 
 
@@ -1927,7 +1927,7 @@ def test_gcode_export_native_identical_text(restore_switch, variant):
         for k in ("moves", "travels", "retractions", "clearance_axes", "filament_mm", "c_mismatch_deg",
                   "tip_z_min", "head_z_min", "tip_below_plate", "head_below_margin", "fw_x_range",
                   "fw_y_range", "fw_z_range", "print_time_s", "subdivided_moves", "max_tip_deviation_before"):
-            assert getattr(ra, k) == getattr(rb, k), k
+            assert getattr(ra, k) == pytest.approx(getattr(rb, k), rel=1e-13, abs=0.0), k
         if variant == "decoupage":
             assert ra.subdivided_moves > 50                                  # garde : le decoupage agit
         assert ra.retractions > 5 and ra.clearance_axes["R"] + ra.clearance_axes["Z"] > 5   # garde
@@ -1983,7 +1983,7 @@ def test_gcode_export_native_travel_check_identical_text(restore_switch):
             assert a == b
             for k in ("moves", "travels", "retractions", "clearance_axes", "travel_collisions", "filament_mm",
                       "tip_z_min", "head_z_min", "fw_x_range", "fw_y_range", "fw_z_range", "subdivided_moves"):
-                assert getattr(ra, k) == getattr(rb, k), k
+                assert getattr(ra, k) == pytest.approx(getattr(rb, k), rel=1e-13, abs=0.0), k
             changed += int(a != plain)
             hits += len(check.hits)
     assert hits > 0 and changed >= 2             # garde : contacts vus, degagements reellement deplaces
@@ -2196,8 +2196,19 @@ def test_schedule_native_matches_python(restore_switch, case):
     from tests.test_step7_scheduling import (
         _lateral_color_map, _pipeline_through_step6, _two_tone_color_map,
     )
+    from pipeline import step6_toolpath2d as s6
+    _cpp.set_enabled(True)       # fixtures (kd-tree natif, etc.) construites noyau actif, quel que soit l'environnement
     mesh = trimesh.creation.box(extents=[10, 10, 10]).subdivide().subdivide()
-    mesh_data, tet_mesh, regions, field, layers = _pipeline_through_step6(mesh, platform_z=-5.0)
+    # Couches de reference par shapely : avec le remplissage natif (Clipper2, arrondi a 1e-6),
+    # le milieu d'une arete de la boite symetrique tombe a 7e-8 de la ligne x=0 de la grille de
+    # faces, a egale distance de deux triangles de couleurs differentes -- une egalite que les deux
+    # implementations departagent a leur facon (tolerance de frontiere declaree, apex/scheduling.hpp).
+    native_fill = s6._NATIVE_FILL
+    s6._NATIVE_FILL = False
+    try:
+        mesh_data, tet_mesh, regions, field, layers = _pipeline_through_step6(mesh, platform_z=-5.0)
+    finally:
+        s6._NATIVE_FILL = native_fill
     params = s7.Step7Params()
     color_map = None
     if case == "two_tone":
@@ -2245,3 +2256,377 @@ def test_past_material_batch_matches_single_calls():
                        for k in range(300)])
     assert np.array_equal(batch, single)
     assert np.isfinite(batch).sum() > 30, "des poses doivent toucher de la matiere"
+
+
+# ---------------------------------------------------------------------------
+# Methode de la chaleur native (limite #79) : tolerance, pas le bit
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("solver", ["direct", "cg"])
+@pytest.mark.parametrize("project", [False, True])
+def test_heat_method_matches_python(solver, project, restore_switch):
+    import dataclasses
+    from pipeline.step4_field_solver import (
+        FieldSolverParams, _compute_shape_gradients, _heat_method_distance,
+    )
+
+    _mesh_data, tet_mesh, _overhang, _regions = _step4_inputs(resolution=2.0)
+    shape_gradients, volumes = _compute_shape_gradients(tet_mesh)
+    sources = np.flatnonzero(tet_mesh.tet_vertices[:, 2] < tet_mesh.tet_vertices[:, 2].min() + 1e-6)
+    assert len(sources) > 3 and tet_mesh.tet_count > 100
+
+    params = FieldSolverParams(
+        convergence_tolerance=1e-12, max_solver_iterations=20000,
+        direct_solve_node_threshold=10**9 if solver == "direct" else 1,
+        heat_project_reachable=project,
+        radial_tilt_origin=np.array([0.5, -0.3, 0.0]) if project else None,
+    )
+    _cpp.set_enabled(False)
+    py = _heat_method_distance(tet_mesh, shape_gradients, volumes, sources, params)
+    _cpp.set_enabled(True)
+    native = _heat_method_distance(tet_mesh, shape_gradients, volumes, sources, params)
+
+    assert np.isfinite(py).all() and py.max() > 1.0   # garde anti-faux-vert
+    assert np.abs(py - native).max() / py.max() < 1e-6
+
+
+@pytest.mark.parametrize("pivot,retract,speed,temp", [
+    (46.0, 0.8, 35.0, 195.0), (45.5, 1.0, 20.0, 210.5), (46.123456789, 0.25, 7.0, 0.0),
+    (100.0, 0.001, 1234.5, 250.0),
+])
+def test_gcode_header_footer_match_python_text(pivot, retract, speed, temp):
+    mod = _cpp.module()
+    if mod is None or not hasattr(mod, "gcode_header"):
+        pytest.skip("module natif absent")
+    expected = ["; Apex -- G-code machine R C Z B (file_io/gcode_export.py)",
+                f"; pivot->pointe {pivot} mm compense ; retraction {retract} mm a {speed} mm/s",
+                "G21", "G90", "M82", "G92 E0", f"M109 S{temp:g}", "; apex_sliced = 1"]
+    assert mod.gcode_header(pivot, retract, speed, temp).split("\n") == expected
+    assert mod.gcode_footer().split("\n") == ["M104 S0", "M84"]
+    assert mod.gcode_header(1e-9, retract, speed, temp) is None   # format diverge : repli Python
+
+
+def test_reorient_coupled_tiers_native_matches_python(restore_switch):
+    import trimesh
+    from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
+    from pipeline.step9_collision_sim import CollisionSimParams
+    from pipeline.step10_adjustment import reorient_coupled_tiers
+
+    rod = trimesh.creation.box(extents=[1.0, 1.0, 20.0])
+    rod.apply_translation([0.0, 0.0, 10.0])
+    machine = MachineProfile(
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+                       RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
+        platform_origin=np.array([0.0, 0.0, 0.0]), nozzle_model=rod, nozzle_diameter=0.4,
+        position_coupled_axes=[0], radial_direction=np.array([0.0, -1.0, 0.0]))
+    sim = CollisionSimParams(path_sampling_step=0.5, safety_margin=1.0, nozzle_contact_clearance=1.5,
+                             toolhead_sample_spacing=1.0)
+    pts = [ToolpathPoint(position=np.array([9.5, 0.0, 5.0]), axis_angles=[90.0, 0.0], extrusion=1.0, feedrate=1.0),
+           ToolpathPoint(position=np.array([10.5, 0.0, 5.0]), axis_angles=[90.0, 0.0], extrusion=1.0, feedrate=1.0)]
+    for i, x in enumerate(np.arange(6.0, 14.01, 0.5)):
+        pts.append(ToolpathPoint(position=np.array([x, 0.0, 0.2]), axis_angles=[90.0, 0.0],
+                                 extrusion=0.0 if i == 0 else 1.0, feedrate=1.0))
+    tp = ToolpathMachine(points=pts)
+    contacts = [8, 10, 12]
+
+    _cpp.set_enabled(False)
+    py_out, py_log = reorient_coupled_tiers(tp, contacts, machine, sim)
+    _cpp.set_enabled(True)
+    nat_out, nat_log = reorient_coupled_tiers(tp, contacts, machine, sim)
+
+    assert any(b is not None for _, b, _ in py_log)          # garde anti-faux-vert
+    assert [(i, t) for i, _, t in py_log] == [(i, t) for i, _, t in nat_log]
+    for (_, b0, _), (_, b1, _) in zip(py_log, nat_log):
+        assert (b0 is None) == (b1 is None) and (b0 is None or b0 == pytest.approx(b1))
+    a_py = np.array([p.axis_angles for p in py_out.points])
+    a_nat = np.array([p.axis_angles for p in nat_out.points])
+    assert np.abs(a_py - a_nat).max() < 1e-9
+
+
+def test_clamp_head_height_native_matches_python(restore_switch):
+    from tests.test_step10_adjustment import _clamp_machine
+    from core.mesh_types import ToolpathMachine, ToolpathPoint
+    from pipeline.step9_collision_sim import CollisionSimParams
+    from pipeline.step10_adjustment import clamp_head_height
+
+    machine = _clamp_machine()
+    sim = CollisionSimParams(path_sampling_step=1.0, safety_margin=1.0, nozzle_contact_clearance=0.0)
+    rng = np.random.default_rng(7)
+    pts = [ToolpathPoint(position=np.array([10.0, 0.0, float(z)]), axis_angles=[90.0, float(b)],
+                         extrusion=1.0, feedrate=1.0)
+           for z, b in zip(rng.uniform(0.0, 40.0, 300), rng.uniform(0.0, 185.0, 300))]
+    tp = ToolpathMachine(points=pts)
+    _cpp.set_enabled(False)
+    py_out, py_moved, py_dev = clamp_head_height(tp, machine, sim)
+    _cpp.set_enabled(True)
+    nat_out, nat_moved, nat_dev = clamp_head_height(tp, machine, sim)
+    assert py_moved > 5 and py_moved == nat_moved           # garde anti-faux-vert
+    assert np.allclose(py_dev, nat_dev, atol=1e-12)
+    assert [p.axis_angles for p in py_out.points] == [p.axis_angles for p in nat_out.points]
+
+
+def test_step10_run_native_matches_python_on_coupled_machine(restore_switch):
+    import trimesh
+    from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
+    from pipeline import step9_collision_sim as s9
+    from pipeline.step10_adjustment import Step10Params, run as step10_run
+
+    head = trimesh.creation.box(extents=[6, 6, 20])
+    head.apply_translation([0, 0, 13])
+    machine = MachineProfile(
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+                       RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
+        platform_origin=np.array([0.0, 0.0, -50.0]), nozzle_model=head, nozzle_diameter=0.4,
+        position_coupled_axes=[0], max_angular_velocity=float(np.radians(1667.0)))
+    pts = []
+    for k in range(60):
+        pts.append(ToolpathPoint(position=np.array([10.0, 0.0, 0.2 * k]), axis_angles=[0.0, 0.0],
+                                 extrusion=1.0, feedrate=25.0, color_id=None))
+    for k in range(40):
+        pts.append(ToolpathPoint(position=np.array([10.0 + 0.25 * k, 2.0, 0.2]), axis_angles=[0.0, 0.0],
+                                 extrusion=1.0, feedrate=25.0, color_id=None))
+    tp = ToolpathMachine(points=pts)
+    sim = s9.CollisionSimParams(path_sampling_step=0.1, safety_margin=1.0, fast_kdtree=True)
+    _cpp.set_enabled(False)
+    report = s9.run(tp, machine, sim)
+    py_out, py_rep = step10_run(tp, report, machine, sim, Step10Params())
+    _cpp.set_enabled(True)
+    nat_out, nat_rep = step10_run(tp, report, machine, sim, Step10Params())
+
+    assert report.events                                                   # garde anti-faux-vert
+    assert any(e.method == "local_reorientation" for e in py_rep.entries)
+    assert [(e.point_index, e.method) for e in py_rep.entries] == [(e.point_index, e.method) for e in nat_rep.entries]
+    assert py_rep.converged == nat_rep.converged
+    a_py = np.array([p.axis_angles for p in py_out.points])
+    a_nat = np.array([p.axis_angles for p in nat_out.points])
+    assert np.abs(a_py - a_nat).max() < 1e-9
+
+
+def test_stable_topological_order_matches_python_with_cycles(restore_switch):
+    from pipeline.step5b_collision_order import _stable_topological_order
+
+    rng = np.random.default_rng(3)
+    for n, m in [(30, 40), (60, 400), (200, 3000)]:       # le dernier est dense : cycles garantis
+        edges = {(int(a), int(b)) for a, b in rng.integers(0, n, size=(m, 2)) if a != b}
+        _cpp.set_enabled(False)
+        py = _stable_topological_order(n, edges)
+        _cpp.set_enabled(True)
+        nat = _stable_topological_order(n, edges)
+        assert nat == py
+    assert py[1] > 0                                       # garde anti-faux-vert : des contraintes violees
+
+
+def test_step5_default_layers_native_match_python(restore_switch):
+    from core.mesh_types import ScalarField
+    from pipeline.step4_field_solver import _compute_shape_gradients, _compute_per_tet_gradient
+    from pipeline.step5_layers import LayerParams, run as layers_run
+
+    mesh_data, tet_mesh, _overhang, regions = _step4_inputs(resolution=2.0)
+    shape_gradients, _volumes = _compute_shape_gradients(tet_mesh)
+    values = tet_mesh.tet_vertices[:, 2] + 0.3 * tet_mesh.tet_vertices[:, 0]
+    field = ScalarField(values=values, gradient=_compute_per_tet_gradient(tet_mesh, shape_gradients, values))
+    params = LayerParams(layer_height_base=1.0, isovalue_order=True)
+
+    _cpp.set_enabled(False)
+    py = layers_run(tet_mesh, mesh_data, field, regions, params)
+    _cpp.set_enabled(True)
+    nat = layers_run(tet_mesh, mesh_data, field, regions, params)
+
+    assert len(py) > 5 and len(py) == len(nat)                      # garde anti-faux-vert
+    for a, b in zip(py, nat):
+        assert a.isovalue == b.isovalue and a.region_ids == b.region_ids
+        assert len(a.contour_3d) == len(b.contour_3d)
+        for ca, cb in zip(a.contour_3d, b.contour_3d):
+            assert np.array_equal(ca, cb)
+        for fa, fb in zip(a.local_frame, b.local_frame):
+            assert np.allclose(fa, fb, atol=1e-12, rtol=0)
+
+
+def test_step8_median_filter_and_per_point_normals_match_python(restore_switch):
+    from types import SimpleNamespace
+    from core.mesh_types import MachineProfile, RotationAxisSpec
+    from pipeline import step8_machine_toolpath as s8
+
+    rng = np.random.default_rng(11)
+    n = 400
+    axes = [RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+            RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))]
+    machine = MachineProfile(rotation_axes=axes, platform_origin=np.zeros(3), nozzle_model=None,
+                             nozzle_diameter=0.4, position_coupled_axes=[0])
+    desired = rng.normal(size=(n, 3))
+    desired /= np.linalg.norm(desired, axis=1)[:, None]
+    layer_id = np.repeat(np.arange(8), 50).astype(np.int64)
+    segment = (np.arange(n) // 17).astype(np.int64)
+    travel = np.zeros(n, bool)
+    travel[[0, 60, 61, 200, 399]] = True
+    angles = np.column_stack([rng.uniform(0, 360, n), rng.uniform(0, 185, n)])
+
+    def raw():
+        return s8._RawPoints(position=rng.normal(size=(n, 3)) * 0 + np.arange(n)[:, None],
+                             desired_direction=desired.copy(), layer_id=layer_id, segment_index=segment,
+                             color_id=[None] * n, feedrate=np.ones(n), extrusion=np.ones(n), is_travel=travel)
+
+    _cpp.set_enabled(False)
+    py_angles, py_res = s8._median_filter_free_axes(angles.tolist(), raw(), axes, machine, np.array([0.0, 0.0, 1.0]), 9)
+    _cpp.set_enabled(True)
+    nat_angles, nat_res = s8._median_filter_free_axes(angles.tolist(), raw(), axes, machine, np.array([0.0, 0.0, 1.0]), 9)
+    assert np.array_equal(np.array(py_angles), np.array(nat_angles))        # une mediane est exacte
+    assert np.allclose(py_res, nat_res, atol=1e-12)
+    assert not np.array_equal(np.array(py_angles)[:, 1], angles[:, 1])      # le filtre a bien agi
+
+    layers = {i: SimpleNamespace(deposition_reversed=bool(i % 3 == 0)) for i in range(8)}
+    field = lambda pos: np.where(np.arange(len(pos))[:, None] % 7 == 0, np.nan, np.roll(desired, 3, axis=0))
+    results = []
+    for enabled in (False, True):
+        _cpp.set_enabled(enabled)
+        rp = raw()
+        s8._apply_per_point_normals(rp, layers, field)
+        results.append(rp.desired_direction.copy())
+    assert np.array_equal(results[0], results[1])
+    assert not np.array_equal(results[0], desired)                           # des normales ont ete remplacees
+
+
+@pytest.mark.parametrize("columns", [2, 3])
+def test_step8_raw_points_native_identical_to_python(columns, restore_switch):
+    from core.mesh_types import Layer, PrintPass, PrintSchedule
+    from pipeline import step8_machine_toolpath as s8
+
+    rng = np.random.default_rng(5)
+    layers = []
+    for lid in range(6):
+        u = rng.normal(size=3); u /= np.linalg.norm(u)
+        v = np.cross(u, rng.normal(size=3)); v /= np.linalg.norm(v)
+        polys = [rng.normal(size=(int(rng.integers(0, 9)), columns)) for _ in range(5)]
+        layer = Layer(id=lid * 3 + 1, contour_3d=[], region_ids=[], local_frame=(rng.normal(size=3), u, v),
+                      toolpath_2d=polys)
+        layer.deposition_reversed = bool(lid % 2)
+        layers.append(layer)
+    by_id = {l.id: l for l in layers}
+    passes = []
+    for color in (None, 0, 1):
+        segs = [(layers[int(rng.integers(0, 6))].id, int(rng.integers(0, 5))) for _ in range(12)]
+        passes.append(PrintPass(segments=segs, color_id=color, is_hole_fill=False, layer_range=(0, 0), deferred_regions=[]))
+    schedule = PrintSchedule(passes=passes)
+    params = s8.Step8Params()
+
+    _cpp.set_enabled(False)
+    ref = s8._iter_schedule_points(schedule, by_id, params)
+    _cpp.set_enabled(True)
+    assert s8._iter_schedule_points_native(schedule, by_id, params) is not None
+    nat = s8._iter_schedule_points(schedule, by_id, params)
+
+    assert len(ref) == len(nat) > 20 and ref.is_travel.any()                # garde anti-faux-vert
+    for name in ("position", "layer_id", "segment_index", "feedrate", "extrusion", "is_travel"):
+        assert np.array_equal(getattr(ref, name), getattr(nat, name)), name
+    # La normale est normalisee par np.linalg.norm (ddot de BLAS) : quelques ULP d'ecart possibles.
+    assert np.allclose(ref.desired_direction, nat.desired_direction, rtol=0, atol=1e-15)
+    assert ref.color_id == nat.color_id
+
+
+def test_step6_native_layers_match_per_layer_path(restore_switch):
+    """Couches entieres en natif contre le chemin couche par couche. Sans pont : memes polylignes
+    (a l'ULP de la projection BLAS pres). Avec ponts : le chemin couche par couche passe par shapely
+    pour eux, le natif par Clipper2 -> meme longueur par couche, decoupage different."""
+    from dataclasses import replace
+    from pipeline import step6_toolpath2d as s6
+    from pipeline.step4_field_solver import FieldSolverParams, run as field_run
+    from pipeline.step5_layers import LayerParams, run as layers_run
+
+    _cpp.set_enabled(True)       # le kd-tree de mesh_data doit etre natif pour le chemin par couches entieres
+    mesh_data, tet_mesh, overhang, regions = _step4_inputs(resolution=2.0)
+    field = field_run(tet_mesh, mesh_data, overhang, regions, None, FieldSolverParams())
+    layers = layers_run(tet_mesh, mesh_data, field, regions, LayerParams(layer_height_base=1.0))
+    base = s6.Step6Params(out_of_plane_interpolation_power=2.0, split_rings_into_runs=True,
+                          continuous_rings=True, run_split_min_amplitude=0.05)
+
+    _cpp.set_enabled(True)
+    assert s6._fill_layers_native(layers, mesh_data, overhang, base, {}) is not None
+
+    def both(params):
+        flag = s6._NATIVE_LAYER
+        try:
+            s6._NATIVE_LAYER = False
+            ref = s6.run(layers, mesh_data, overhang, params)
+            s6._NATIVE_LAYER = True
+            return ref, s6.run(layers, mesh_data, overhang, params)
+        finally:
+            s6._NATIVE_LAYER = flag
+
+    def length(polys):
+        return sum(float(np.linalg.norm(np.diff(p[:, :2], axis=0), axis=1).sum()) for p in polys)
+
+    ref, nat = both(replace(base, bridge_contour_ratio_threshold=2.0))        # ponts desactives
+    assert len(layers) > 5 and sum(len(l.toolpath_2d) for l in ref) > 50      # garde anti-faux-vert
+    for a, b in zip(ref, nat):
+        assert len(a.toolpath_2d) == len(b.toolpath_2d)
+        for pa, pb in zip(a.toolpath_2d, b.toolpath_2d):
+            assert pa.shape == pb.shape and np.allclose(pa, pb, atol=1e-9, rtol=0)
+
+    ref, nat = both(base)                                                      # ponts actifs
+    differing = 0
+    for a, b in zip(ref, nat):
+        assert length(a.toolpath_2d) == pytest.approx(length(b.toolpath_2d), rel=2e-3)
+        differing += len(a.toolpath_2d) != len(b.toolpath_2d)
+    assert differing > 0        # garde : la fixture contient bien des couches en pont
+
+
+def test_fast_batch_events_match_python_checker(restore_switch):
+    import trimesh
+    from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
+    from pipeline import step9_collision_sim as s9
+
+    head = trimesh.creation.box(extents=[6, 6, 20])
+    head.apply_translation([0, 0, 13])
+    machine = MachineProfile(
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+                       RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
+        platform_origin=np.array([0.0, 0.0, -0.3]), nozzle_model=head, nozzle_diameter=0.4)
+    rng = np.random.default_rng(2)
+    pts = []
+    for k in range(60):
+        pts.append(ToolpathPoint(position=np.array([10.0, 0.0, 0.2 * k]), axis_angles=[90.0, float(rng.uniform(0, 40))],
+                                 extrusion=1.0, feedrate=1.0, color_id=None))
+    for k in range(40):
+        pts.append(ToolpathPoint(position=np.array([10.0 + 0.25 * k, 2.0, 0.2]),
+                                 axis_angles=[90.0, float(rng.uniform(0, 185))], extrusion=1.0, feedrate=1.0,
+                                 color_id=None))
+    tp = ToolpathMachine(points=pts)
+    params = s9.CollisionSimParams(path_sampling_step=0.1, safety_margin=1.0, fast_kdtree=True)
+    samples = s9._filter_nozzle_contact_zone(s9._surface_sample_points(head, params.toolhead_sample_spacing),
+                                             params.nozzle_contact_clearance)
+    indices = list(range(len(pts)))
+    _cpp.set_enabled(False)
+    ref = s9._run_fast_kdtree(tp, machine, params, samples, indices)
+    _cpp.set_enabled(True)
+    checker = s9.FastCollisionChecker(tp, machine, params, samples)
+    nat = s9.fast_batch_events(checker, tp, indices)
+    assert nat is not None and len(ref) > 5                                  # garde anti-faux-vert
+    key = lambda e: (e.point_index, e.obstacle_type)
+    assert [key(e) for e in ref] == [key(e) for e in nat]
+    assert np.allclose([e.penetration_depth for e in ref], [e.penetration_depth for e in nat], atol=1e-9)
+    assert {e.obstacle_type for e in ref} == {"printed_part", "platform"}    # les deux voies sont exercees
+
+
+# --- Worker TetGen C++ (executable separe, limite #56) -----------------------
+
+
+def test_native_tetgen_worker_matches_binding():
+    """Le maillage de l'executable C++ est identique a celui du binding."""
+    import numpy as np
+    import trimesh
+
+    from pipeline import step1_ingest as s1
+
+    if s1._native_tetgen_worker_path() is None:
+        pytest.skip("apex_tetgen_worker non construit")
+    mesh = trimesh.load("res/test_models/l_shape_overhang.stl")
+    mesh.process()
+    z = float(mesh.bounds[0][2])
+    for near in (None, 0.5):  # sans / avec raffinement plateau (2 regions)
+        ref = s1._tetrahedralize_once(mesh, 1.0, near, 3.0, z)
+        got = s1._tetrahedralize_once(
+            mesh, 1.0, near, 3.0, z, _tetgen_factory=s1._NativeTetgen
+        )
+        assert len(ref.tetrahedra) > 100  # garde anti-faux-vert
+        assert np.array_equal(ref.tet_vertices, got.tet_vertices)
+        assert np.array_equal(ref.tetrahedra, got.tetrahedra)

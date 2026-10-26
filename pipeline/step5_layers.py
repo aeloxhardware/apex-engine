@@ -578,6 +578,9 @@ def _march_tetrahedra_batch(
 
 def _tet_volumes(tet_mesh: TetMesh) -> np.ndarray:
     """Volume de chaque tetraedre (meme formule que step4_field_solver, non partagee - trop petit pour justifier un utilitaire commun)."""
+    if _cpp.enabled() and hasattr(_cpp.module(), "tet_volumes"):
+        return _cpp.module().tet_volumes(np.ascontiguousarray(tet_mesh.tet_vertices, dtype=float),
+                                         np.ascontiguousarray(tet_mesh.tetrahedra, dtype=np.int64))
     verts = tet_mesh.tet_vertices[tet_mesh.tetrahedra]  # (T,4,3)
     edge_matrices = np.transpose(verts[:, 1:, :] - verts[:, 0:1, :], (0, 2, 1))  # (T,3,3)
     return np.abs(np.linalg.det(edge_matrices)) / 6.0
@@ -1734,6 +1737,9 @@ def run(
         tet_regions = np.asarray(scalar_field.branch_labels, dtype=np.int64)
         region_ranks = {int(k): int(v) for k, v in scalar_field.branch_depths.items()}
     volumes = _tet_volumes(tet_mesh)
+    tet_regions_c = np.ascontiguousarray(tet_regions, dtype=np.int64)
+    gradient_c = np.ascontiguousarray(scalar_field.gradient, dtype=float)
+    volumes_c = np.ascontiguousarray(volumes, dtype=float)
 
     scale = float(np.ptp(tet_mesh.tet_vertices, axis=0).max()) or 1.0
     weld_tolerance = params.weld_tolerance_factor * scale
@@ -1788,6 +1794,18 @@ def run(
         )
 
     for isovalue in isovalues:
+        if (native_extractor is not None and (params.split_disjoint_clusters is None)
+                and hasattr(native_extractor, "extract_layer")):
+            # Chemin par defaut en un appel natif : isosurface, contours, regions et
+            # repere local. Statut 2 (bord non simple) : on retombe sur trimesh ci-dessous.
+            layer = native_extractor.extract_layer(float(isovalue), weld_tolerance, gradient_c, volumes_c,
+                                                   tet_regions_c)
+            if isinstance(layer, tuple):
+                contours, region_ids, local_frame = layer
+                raw_layers.append((float(isovalue), contours, list(region_ids), local_frame))
+                continue
+            if layer == 0:
+                continue
         if native_extractor is not None:
             welded_vertices, welded_faces, source_tets = native_extractor.extract(float(isovalue), weld_tolerance)
             if len(welded_faces) == 0:

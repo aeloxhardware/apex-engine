@@ -13,8 +13,17 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 - ⬛ A FAIRE : retirer le code FEM directionnel restant (step4 `build_static_system`, step4b multibranch, step4c planar parts, options geodesiques/feedback, `Constraint[]` utilisateur qui en dependent) — non fait faute de pouvoir mesurer la non-regression ; les tests step4 couvrent encore ce code.
 - Tests : echecs deja presents hors de ce chantier dans cet environnement Linux/Python 3.13 : test_shape_gradients (nb de tetra), 5 tests gcode natif identique, test_branch_indicator.
 
+## 2026-10-26 — Portage C++ de ce qui restait en Python (détail : `CLAUDE.md` #82)
+- 🟢 `config.g` modifié par l'utilisateur ; salon passé avec une récompense spéciale pour l'originalité du projet. ⬛ **Le Benchy n'a toujours pas été imprimé.**
+- 🟢 Natif (avec test d'équivalence chacun) : méthode de la chaleur (death 6,5 → 2,6 s), CG de Jacobi parallèle reproductible, réorientation par paliers / locale / borne de hauteur (step10), contrôle rapide de collision par lots (step9 + step10 : ~12 → ~3 s), tri topologique de step5b, couches par défaut de step5, remplissage de couches entières avec ponts (step6, en parallèle), assemblage des points / normale par point / filtre médian (step8), en-tête et pied du G-code.
+- 🟢 **Remplissage natif (Clipper2) ACTIF par défaut** avec le noyau natif, mesuré sur les 4 modèles : l_shape 3,80 → 4,13 %, l-triple 5,10 → 5,28 %, death 3,31 → 3,43 %, turkish 0,162 → 0,152 % de matière sans appui (bruit, réversible : `APEX_NATIVE_FILL=0`).
+- 🟢 Pipeline complet death @ 0,8 : 42 → 33 s (TetGen ~14 s incompressible) ; hors TetGen 28 → 18 s.
+- ♦️ **Reste en Python** : l'enchaînement des étapes (`main.py`, dataclasses `Layer`/`ToolpathPoint` : 360 000 objets sur death), step1 (trimesh/pymeshfix/TetGen en sous-processus), repli par grille de l'IK, échantillonnage de la tête (step9), boucle `run` de step10, `OSCILLATING_SPIRAL`. Un orchestrateur natif demande de remplacer le contrat inter-étapes par des tableaux (étapes 8, 8b, 9, 9b, 10, export) : chantier de la bascule finale, à décider.
+- 🟢 Worker TetGen 100 % C++ (2026-10-26) : source vendorée, exécutable séparé `apex_tetgen_worker`, maillage identique au binding (death, turkish, l_shape), step1 un peu plus rapide.
+- ⬛ Accélérer TetGen : 95 % du temps est dans raffinement (4,6 s) + lissage (5,5 s) sur death ; lissage parallélisable par couleurs, à mesurer sur step9b des 4 modèles avant toute activation.
+
 ## ⚠️ RAPPELS PERMANENTS — à répéter à CHAQUE réponse tant que la case n'est pas cochée (demande de l'utilisateur, 2026-10-18)
-- ♦️ **[ ] Modifier les paramètres du firmware** dans `config.g` : `M203 Z8000` et `M201 Z1500` (Z actuel : 400 mm/min, 70 mm/s²). Bloquant : le pivot couple Z à B, le Benchy passe de 1,66 h à ~9,7 h, et les temps d'impression du salon (MFR 2026) en dépendent. **Cocher « [x] » ici quand l'utilisateur dit l'avoir fait ; seulement alors, cesser le rappel.**
+- 🟢 **[x] Paramètres du firmware (`config.g`, Z) modifiés** (confirmé par l'utilisateur, 2026-10-26). Rappel arrêté. **Salon (MFR 2026) passé : récompense spéciale pour l'originalité du projet.** ⬛ **Le Benchy n'a toujours PAS été imprimé.**
 - 🟢 **[x] Champ scalaire multibranche : ESSAYÉ (2026-10-19, par Claude à la demande de l'utilisateur), verdict dans `CLAUDE.md` #78.** Résultat MITIGÉ, comme les mécanismes précédents : `multibranch=True, multibranch_direction_mode="up"` (variante `mbr_up`) divise par ~2 la matière sans appui sur death (−56 %) et benchy (−53 %), neutre sur real_overhang/dino/l_shape/l-triple, mais dégrade fig (+17 %) et deer (+23 %). Reste opt-in. Rappel arrêté.
 - Contexte : MFR 2026 commence ~2026-10-23. Le lot nocturne tourne sur la voie **Bird**.
 
