@@ -241,4 +241,89 @@ BoundaryLoops boundary_loops(const std::int64_t* faces, std::int64_t face_count,
     return out;
 }
 
+LayerExtraction extract_layer(const IsosurfaceExtractor& extractor, double isovalue,
+                              double weld_tolerance, const double* gradients,
+                              const double* volumes, const std::int64_t* tet_regions) {
+    LayerExtraction out;
+    IsosurfaceResult r = extractor.extract(isovalue, weld_tolerance);
+    const auto face_count = static_cast<std::int64_t>(r.source_tets.size());
+    if (face_count == 0) return out;
+    const auto vertex_count = static_cast<std::int64_t>(r.vertices.size() / 3);
+    BoundaryLoops loops = boundary_loops(r.faces.data(), face_count, vertex_count);
+    if (!loops.ok) {
+        out.status = 2;
+        return out;
+    }
+    for (const auto& loop : loops.loops) {
+        if (loop.size() < 4) continue;
+        std::vector<double> pts(loop.size() * 3);
+        for (std::size_t k = 0; k < loop.size(); ++k) {
+            for (int c = 0; c < 3; ++c) pts[3 * k + c] = r.vertices[3 * static_cast<std::size_t>(loop[k]) + c];
+        }
+        out.contours.push_back(std::move(pts));
+    }
+    if (out.contours.empty()) return out;
+
+    out.unique_tets = r.source_tets;
+    std::sort(out.unique_tets.begin(), out.unique_tets.end());
+    out.unique_tets.erase(std::unique(out.unique_tets.begin(), out.unique_tets.end()), out.unique_tets.end());
+
+    for (const std::int64_t t : out.unique_tets) {
+        const std::int64_t region = tet_regions[t];
+        if (region >= 0) out.region_ids.push_back(region);
+    }
+    std::sort(out.region_ids.begin(), out.region_ids.end());
+    out.region_ids.erase(std::unique(out.region_ids.begin(), out.region_ids.end()), out.region_ids.end());
+
+    // origine = moyenne des points de contour (somme sequentielle, comme mean(axis=0))
+    double sum[3] = {0, 0, 0};
+    std::int64_t count = 0;
+    for (const auto& c : out.contours) {
+        for (std::size_t k = 0; k < c.size() / 3; ++k) {
+            for (int a = 0; a < 3; ++a) sum[a] += c[3 * k + a];
+            ++count;
+        }
+    }
+    for (int a = 0; a < 3; ++a) out.origin[a] = sum[a] / static_cast<double>(count);
+
+    double w[3] = {0, 0, 0};
+    for (const std::int64_t t : out.unique_tets) {
+        for (int a = 0; a < 3; ++a) w[a] += gradients[3 * t + a] * volumes[t];
+    }
+    const double norm = std::sqrt(w[0] * w[0] + w[1] * w[1] + w[2] * w[2]);
+    double n[3] = {0, 0, 1};
+    if (!(norm < 1e-12)) {
+        for (int a = 0; a < 3; ++a) n[a] = w[a] / norm;
+    }
+    double ref[3] = {1, 0, 0};
+    if (std::abs(ref[0] * n[0] + ref[1] * n[1] + ref[2] * n[2]) > 0.9) {
+        ref[0] = 0; ref[1] = 1;
+    }
+    const double rd = ref[0] * n[0] + ref[1] * n[1] + ref[2] * n[2];
+    double u[3];
+    for (int a = 0; a < 3; ++a) u[a] = ref[a] - rd * n[a];
+    const double un = std::sqrt(u[0] * u[0] + u[1] * u[1] + u[2] * u[2]);
+    for (int a = 0; a < 3; ++a) u[a] /= un;
+    const double v[3] = {n[1] * u[2] - n[2] * u[1], n[2] * u[0] - n[0] * u[2], n[0] * u[1] - n[1] * u[0]};
+    for (int a = 0; a < 3; ++a) { out.axis_u[a] = u[a]; out.axis_v[a] = v[a]; }
+    out.status = 1;
+    return out;
+}
+
+void tet_volumes(const double* vertices, const std::int64_t* tetrahedra, std::int64_t tet_count,
+                 double* out) {
+    for (std::int64_t t = 0; t < tet_count; ++t) {
+        const double* p0 = vertices + 3 * tetrahedra[4 * t];
+        double e[3][3];
+        for (int k = 0; k < 3; ++k) {
+            const double* pk = vertices + 3 * tetrahedra[4 * t + 1 + k];
+            for (int c = 0; c < 3; ++c) e[k][c] = pk[c] - p0[c];
+        }
+        const double det = e[0][0] * (e[1][1] * e[2][2] - e[1][2] * e[2][1]) -
+                           e[0][1] * (e[1][0] * e[2][2] - e[1][2] * e[2][0]) +
+                           e[0][2] * (e[1][0] * e[2][1] - e[1][1] * e[2][0]);
+        out[t] = std::abs(det) / 6.0;
+    }
+}
+
 }  // namespace apex

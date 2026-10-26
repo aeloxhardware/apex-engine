@@ -23,6 +23,7 @@
 #include "apex/heat_method.hpp"
 #include "apex/kdtree.hpp"
 #include "apex/kinematics.hpp"
+#include "apex/layer_order.hpp"
 #include "apex/interpolate.hpp"
 #include "apex/isosurface.hpp"
 #include "apex/mesh_distance.hpp"
@@ -823,6 +824,30 @@ PYBIND11_MODULE(apex_core, m) {
         "Reorientation locale (machine a premier axe couple) : angles retenus ou None.");
 
     m.def(
+        "tet_volumes",
+        [](const DoubleArray& vertices, const IntArray& tetrahedra) {
+            const auto t = static_cast<py::ssize_t>(tetrahedra.shape(0));
+            py::array_t<double> out(t);
+            apex::tet_volumes(vertices.data(), tetrahedra.data(), t, out.mutable_data());
+            return out;
+        },
+        "Volume absolu de chaque tetraedre (step5 `_tet_volumes`).");
+
+    m.def(
+        "stable_topological_order",
+        [](std::int64_t n, const IntArray& edges) {
+            if (edges.ndim() != 2 || edges.shape(1) != 2) {
+                throw std::invalid_argument("edges doit etre (E, 2)");
+            }
+            const auto e = static_cast<std::int64_t>(edges.shape(0));
+            std::vector<std::int64_t> a(static_cast<std::size_t>(e)), b(static_cast<std::size_t>(e));
+            for (std::int64_t i = 0; i < e; ++i) { a[static_cast<std::size_t>(i)] = edges.data()[2 * i]; b[static_cast<std::size_t>(i)] = edges.data()[2 * i + 1]; }
+            apex::TopologicalOrder r = apex::stable_topological_order(n, a.data(), b.data(), e);
+            return py::make_tuple(py::cast(r.order), r.broken);
+        },
+        "Tri topologique stable (step5b) : (ordre, contraintes violees).");
+
+    m.def(
         "clamp_head_height_apply",
         [](const DoubleArray& z, const DoubleArray& current, const DoubleArray& grid,
            const DoubleArray& zlow, double plate_z, double safety_margin) {
@@ -1140,6 +1165,33 @@ PYBIND11_MODULE(apex_core, m) {
              py::arg("isovalue"), py::arg("weld_tolerance"),
              "(vertices soudes (V,3), faces (F,3), tetraedre source (F,)) - "
              "_extract_isosurface_triangles puis _weld_vertices de step5.")
+        .def("extract_layer",
+             [](const apex::IsosurfaceExtractor& self, double isovalue, double weld_tolerance,
+                const DoubleArray& gradients, const DoubleArray& volumes, const IntArray& tet_regions) -> py::object {
+                 apex::LayerExtraction r;
+                 {
+                     py::gil_scoped_release release;
+                     r = apex::extract_layer(self, isovalue, weld_tolerance, gradients.data(),
+                                             volumes.data(), tet_regions.data());
+                 }
+                 if (r.status != 1) return py::int_(r.status);
+                 py::list contours;
+                 for (const auto& c : r.contours) {
+                     py::array_t<double> a({static_cast<py::ssize_t>(c.size() / 3), static_cast<py::ssize_t>(3)});
+                     std::copy(c.begin(), c.end(), a.mutable_data());
+                     contours.append(a);
+                 }
+                 auto vec3 = [](const double* v) {
+                     py::array_t<double> a(3);
+                     std::copy(v, v + 3, a.mutable_data());
+                     return a;
+                 };
+                 return py::make_tuple(contours, py::cast(r.region_ids),
+                                       py::make_tuple(vec3(r.origin), vec3(r.axis_u), vec3(r.axis_v)));
+             },
+             py::arg("isovalue"), py::arg("weld_tolerance"), py::arg("gradients"), py::arg("volumes"),
+             py::arg("tet_regions"),
+             "Couche par defaut : (contours, region_ids, repere local), ou 0 (aucune couche) / 2 (repli trimesh).")
         .def_property_readonly("tet_count", &apex::IsosurfaceExtractor::tet_count);
 
     // Pas 14 : trace de bord (outline) natif, None = repli trimesh.

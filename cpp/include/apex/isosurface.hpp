@@ -84,4 +84,24 @@ struct BoundaryLoops {
 
 BoundaryLoops boundary_loops(const std::int64_t* faces, std::int64_t face_count, std::int64_t vertex_count);
 
+// Couche par defaut de step5 (chemin sans clustering) : isosurface soudee, contours
+// fermes, region_ids (regions >= 0 des tetraedres sources, tries) et repere local
+// (`_compute_local_frame`), en un appel. status : 0 = aucune couche (pas de face ou
+// pas de contour), 1 = ok, 2 = bord non simple (l'appelant retombe sur trimesh).
+struct LayerExtraction {
+    int status = 0;
+    std::vector<std::vector<double>> contours;   // chaque contour : K*3
+    std::vector<std::int64_t> region_ids;
+    double origin[3] = {0, 0, 0}, axis_u[3] = {0, 0, 0}, axis_v[3] = {0, 0, 0};
+    std::vector<std::int64_t> unique_tets;
+};
+
+LayerExtraction extract_layer(const IsosurfaceExtractor& extractor, double isovalue,
+                              double weld_tolerance, const double* gradients,
+                              const double* volumes, const std::int64_t* tet_regions);
+
+// Volume de chaque tetraedre (`_tet_volumes`) : |det(aretes)| / 6.
+void tet_volumes(const double* vertices, const std::int64_t* tetrahedra, std::int64_t tet_count,
+                 double* out);
+
 }  // namespace apex

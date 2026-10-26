@@ -2389,3 +2389,43 @@ def test_step10_run_native_matches_python_on_coupled_machine(restore_switch):
     a_py = np.array([p.axis_angles for p in py_out.points])
     a_nat = np.array([p.axis_angles for p in nat_out.points])
     assert np.abs(a_py - a_nat).max() < 1e-9
+
+
+def test_stable_topological_order_matches_python_with_cycles(restore_switch):
+    from pipeline.step5b_collision_order import _stable_topological_order
+
+    rng = np.random.default_rng(3)
+    for n, m in [(30, 40), (60, 400), (200, 3000)]:       # le dernier est dense : cycles garantis
+        edges = {(int(a), int(b)) for a, b in rng.integers(0, n, size=(m, 2)) if a != b}
+        _cpp.set_enabled(False)
+        py = _stable_topological_order(n, edges)
+        _cpp.set_enabled(True)
+        nat = _stable_topological_order(n, edges)
+        assert nat == py
+    assert py[1] > 0                                       # garde anti-faux-vert : des contraintes violees
+
+
+def test_step5_default_layers_native_match_python(restore_switch):
+    from core.mesh_types import ScalarField
+    from pipeline.step4_field_solver import _compute_shape_gradients, _compute_per_tet_gradient
+    from pipeline.step5_layers import LayerParams, run as layers_run
+
+    mesh_data, tet_mesh, _overhang, regions = _step4_inputs(resolution=2.0)
+    shape_gradients, _volumes = _compute_shape_gradients(tet_mesh)
+    values = tet_mesh.tet_vertices[:, 2] + 0.3 * tet_mesh.tet_vertices[:, 0]
+    field = ScalarField(values=values, gradient=_compute_per_tet_gradient(tet_mesh, shape_gradients, values))
+    params = LayerParams(layer_height_base=1.0, isovalue_order=True)
+
+    _cpp.set_enabled(False)
+    py = layers_run(tet_mesh, mesh_data, field, regions, params)
+    _cpp.set_enabled(True)
+    nat = layers_run(tet_mesh, mesh_data, field, regions, params)
+
+    assert len(py) > 5 and len(py) == len(nat)                      # garde anti-faux-vert
+    for a, b in zip(py, nat):
+        assert a.isovalue == b.isovalue and a.region_ids == b.region_ids
+        assert len(a.contour_3d) == len(b.contour_3d)
+        for ca, cb in zip(a.contour_3d, b.contour_3d):
+            assert np.array_equal(ca, cb)
+        for fa, fb in zip(a.local_frame, b.local_frame):
+            assert np.allclose(fa, fb, atol=1e-12, rtol=0)
