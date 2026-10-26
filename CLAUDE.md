@@ -5449,7 +5449,25 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
       TetGen (v1.6.0, `tetgen.cxx` 36 537 lignes + `tetgen.h` + `predicates.cxx`, AGPL-3.0). Le wheel
       n'embarque que le binaire, mais le TARBALL source du paquet PyPI `tetgen` 0.8.4 les contient
       (`src/tetgen.cxx`, `src/tetgen.h`, `src/predicates.cxx`, `src/tetgen-license`) : vérifié le
-      2026-10-26. Pas encore vendoré dans `cpp/third_party/`.
+      2026-10-26. **FAIT le 2026-10-26** : vendoré dans `cpp/third_party/tetgen/` (+ `LICENSE.txt`,
+      `VERSION.txt`), exécutable séparé `apex_tetgen_worker` (`cpp/tools/tetgen_worker.cpp`, cible CMake
+      jamais liée à `apex_core`, sortie dans `cpp/lib/`). Format binaire en entrée/sortie ; cette variante
+      de TetGen lève des `std::runtime_error` dont le texte est relayé tel quel (la cascade de step1 y
+      cherche « self-intersection », « recoversubfaces », « split_segment »). `step1_ingest` :
+      `_NativeTetgen` (même interface que `tetgen.TetGen`) injecté dans `_tetrahedralize_once`
+      (`_tetgen_factory`), utilisé par `_tetrahedralize_once_isolated` quand l'exécutable existe ;
+      `APEX_TETGEN_WORKER=0` rend le worker Python. Crash natif → `_TetgenCrashError`, erreur →
+      `_TetgenNamedConflictError`, comme avant. **Maillage IDENTIQUE au binding** (nœuds et tétraèdres
+      `array_equal`) sur l_shape (sans/avec raffinement plateau), death (318 691 tét.) et turkish
+      (328 531 tét., cascade de réparation comprise) ; step1 death 13,3 → 11,3-12,0 s, turkish 20,3 →
+      17,6-18,3 s. Test : `test_native_tetgen_worker_matches_binding`.
+    - **Temps par phase (death, `pq1.2a3.375`, `APEX_TETGEN_LOG=<fichier>` les journalise)** :
+      Delaunay 0,005 s, surface 0,003, récupération du bord 0,04, **raffinement 4,5-4,6 s,
+      lissage du maillage 5,3-5,7 s**, amélioration 0,12, sortie 0,03 ; total ~10,2-10,5 s. Turkish
+      identique à 10,6 s (bord 0,25 s). **Plus de 95 % du temps est dans le raffinement et le lissage** ;
+      Delaunay initial et récupération du bord sont négligeables, donc paralléliser ces deux-là ne
+      rapporterait rien. Pistes restantes (non mesurées sur step9b) : lissage de sommets par couleurs
+      indépendantes (parallélisable), réglage de `-s`/`-O`, maillage intérieur plus grossier.
 
     ### Ce que le portage avait rendu visible (conservé pour mémoire)
 

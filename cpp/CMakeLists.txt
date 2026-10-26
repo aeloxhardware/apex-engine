@@ -115,3 +115,17 @@ set_target_properties(apex_core PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY_RELEASE ${APEX_LIB_DIR}
   RUNTIME_OUTPUT_DIRECTORY_DEBUG   ${APEX_LIB_DIR}
 )
+
+# Worker TetGen : executable SEPARE (AGPL-3.0), jamais lie dans apex_core.
+# Les crashs natifs de TetGen restent isoles du processus appelant (limites #35
+# et #56). Compile avec TETLIBRARY comme le binding Python.
+add_executable(apex_tetgen_worker
+  tools/tetgen_worker.cpp
+  third_party/tetgen/tetgen.cxx
+  third_party/tetgen/predicates.cxx
+)
+target_compile_definitions(apex_tetgen_worker PRIVATE TETLIBRARY)
+target_include_directories(apex_tetgen_worker PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tetgen)
+set_target_properties(apex_tetgen_worker PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY ${APEX_LIB_DIR}
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE ${APEX_LIB_DIR})

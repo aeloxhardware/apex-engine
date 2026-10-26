@@ -2605,3 +2605,28 @@ def test_fast_batch_events_match_python_checker(restore_switch):
     assert [key(e) for e in ref] == [key(e) for e in nat]
     assert np.allclose([e.penetration_depth for e in ref], [e.penetration_depth for e in nat], atol=1e-9)
     assert {e.obstacle_type for e in ref} == {"printed_part", "platform"}    # les deux voies sont exercees
+
+
+# --- Worker TetGen C++ (executable separe, limite #56) -----------------------
+
+
+def test_native_tetgen_worker_matches_binding():
+    """Le maillage de l'executable C++ est identique a celui du binding."""
+    import numpy as np
+    import trimesh
+
+    from pipeline import step1_ingest as s1
+
+    if s1._native_tetgen_worker_path() is None:
+        pytest.skip("apex_tetgen_worker non construit")
+    mesh = trimesh.load("res/test_models/l_shape_overhang.stl")
+    mesh.process()
+    z = float(mesh.bounds[0][2])
+    for near in (None, 0.5):  # sans / avec raffinement plateau (2 regions)
+        ref = s1._tetrahedralize_once(mesh, 1.0, near, 3.0, z)
+        got = s1._tetrahedralize_once(
+            mesh, 1.0, near, 3.0, z, _tetgen_factory=s1._NativeTetgen
+        )
+        assert len(ref.tetrahedra) > 100  # garde anti-faux-vert
+        assert np.array_equal(ref.tet_vertices, got.tet_vertices)
+        assert np.array_equal(ref.tetrahedra, got.tetrahedra)

@@ -1,0 +1,4 @@
+TetGen 1.6.0 (Hang Si, WIAS Berlin) - AGPL-3.0.
+Source: tarball PyPI tetgen==0.8.4 (src/tetgen.cxx, tetgen.h, predicates.cxx), recuperee le 2026-10-26.
+Licence commerciale alternative: WIAS Berlin. Voir LICENSE.txt.
+NE JAMAIS lier dans apex_core : uniquement l'executable separe apex_tetgen_worker (CLAUDE.md limite #56).
