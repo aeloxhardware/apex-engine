@@ -2330,3 +2330,62 @@ def test_reorient_coupled_tiers_native_matches_python(restore_switch):
     a_py = np.array([p.axis_angles for p in py_out.points])
     a_nat = np.array([p.axis_angles for p in nat_out.points])
     assert np.abs(a_py - a_nat).max() < 1e-9
+
+
+def test_clamp_head_height_native_matches_python(restore_switch):
+    from tests.test_step10_adjustment import _clamp_machine
+    from core.mesh_types import ToolpathMachine, ToolpathPoint
+    from pipeline.step9_collision_sim import CollisionSimParams
+    from pipeline.step10_adjustment import clamp_head_height
+
+    machine = _clamp_machine()
+    sim = CollisionSimParams(path_sampling_step=1.0, safety_margin=1.0, nozzle_contact_clearance=0.0)
+    rng = np.random.default_rng(7)
+    pts = [ToolpathPoint(position=np.array([10.0, 0.0, float(z)]), axis_angles=[90.0, float(b)],
+                         extrusion=1.0, feedrate=1.0)
+           for z, b in zip(rng.uniform(0.0, 40.0, 300), rng.uniform(0.0, 185.0, 300))]
+    tp = ToolpathMachine(points=pts)
+    _cpp.set_enabled(False)
+    py_out, py_moved, py_dev = clamp_head_height(tp, machine, sim)
+    _cpp.set_enabled(True)
+    nat_out, nat_moved, nat_dev = clamp_head_height(tp, machine, sim)
+    assert py_moved > 5 and py_moved == nat_moved           # garde anti-faux-vert
+    assert np.allclose(py_dev, nat_dev, atol=1e-12)
+    assert [p.axis_angles for p in py_out.points] == [p.axis_angles for p in nat_out.points]
+
+
+def test_step10_run_native_matches_python_on_coupled_machine(restore_switch):
+    import trimesh
+    from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
+    from pipeline import step9_collision_sim as s9
+    from pipeline.step10_adjustment import Step10Params, run as step10_run
+
+    head = trimesh.creation.box(extents=[6, 6, 20])
+    head.apply_translation([0, 0, 13])
+    machine = MachineProfile(
+        rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
+                       RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
+        platform_origin=np.array([0.0, 0.0, -50.0]), nozzle_model=head, nozzle_diameter=0.4,
+        position_coupled_axes=[0], max_angular_velocity=float(np.radians(1667.0)))
+    pts = []
+    for k in range(60):
+        pts.append(ToolpathPoint(position=np.array([10.0, 0.0, 0.2 * k]), axis_angles=[0.0, 0.0],
+                                 extrusion=1.0, feedrate=25.0, color_id=None))
+    for k in range(40):
+        pts.append(ToolpathPoint(position=np.array([10.0 + 0.25 * k, 2.0, 0.2]), axis_angles=[0.0, 0.0],
+                                 extrusion=1.0, feedrate=25.0, color_id=None))
+    tp = ToolpathMachine(points=pts)
+    sim = s9.CollisionSimParams(path_sampling_step=0.1, safety_margin=1.0, fast_kdtree=True)
+    _cpp.set_enabled(False)
+    report = s9.run(tp, machine, sim)
+    py_out, py_rep = step10_run(tp, report, machine, sim, Step10Params())
+    _cpp.set_enabled(True)
+    nat_out, nat_rep = step10_run(tp, report, machine, sim, Step10Params())
+
+    assert report.events                                                   # garde anti-faux-vert
+    assert any(e.method == "local_reorientation" for e in py_rep.entries)
+    assert [(e.point_index, e.method) for e in py_rep.entries] == [(e.point_index, e.method) for e in nat_rep.entries]
+    assert py_rep.converged == nat_rep.converged
+    a_py = np.array([p.axis_angles for p in py_out.points])
+    a_nat = np.array([p.axis_angles for p in nat_out.points])
+    assert np.abs(a_py - a_nat).max() < 1e-9

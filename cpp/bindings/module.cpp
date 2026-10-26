@@ -782,6 +782,61 @@ PYBIND11_MODULE(apex_core, m) {
         "Reorientation par paliers (etape 10) : (angles (n,A), [(indice, trouve, angle, palier)]).");
 
     m.def(
+        "try_local_reorientation_coupled",
+        [](const DoubleArray& positions, const DoubleArray& feedrates, const DoubleArray& angles,
+           const DoubleArray& axes, std::int64_t point_index, const DoubleArray& inner_lo,
+           const DoubleArray& inner_hi, std::int64_t samples_per_axis, double max_deviation,
+           double max_velocity_deg_s, std::int64_t neighbor_margin, const DoubleArray& samples,
+           const apex::PastMaterialIndex& material, double reach, const py::object& plate_origin,
+           double plate_radius, double plate_half_height, double plate_center_offset,
+           double safety_margin) {
+            apex::LocalReorientationInput in;
+            in.n = static_cast<std::int64_t>(positions.shape(0));
+            in.axis_count = static_cast<std::int64_t>(axes.shape(0));
+            in.point_index = point_index;
+            in.positions = positions.data(); in.feedrates = feedrates.data();
+            in.angles = angles.data(); in.axes = axes.data();
+            in.inner_lo = inner_lo.data(); in.inner_hi = inner_hi.data();
+            in.samples_per_axis = samples_per_axis;
+            in.max_direction_deviation_deg = max_deviation;
+            in.max_velocity_deg_s = max_velocity_deg_s;
+            in.neighbor_margin = neighbor_margin;
+            in.samples = samples.data();
+            in.sample_count = static_cast<std::int64_t>(samples.shape(0));
+            in.reach = reach;
+            if (!plate_origin.is_none()) {
+                DoubleArray o = plate_origin.cast<DoubleArray>();
+                in.has_plate = true;
+                for (int i = 0; i < 3; ++i) in.plate_origin[i] = o.data()[i];
+            }
+            in.plate_radius = plate_radius; in.plate_half_height = plate_half_height;
+            in.plate_center_offset = plate_center_offset; in.safety_margin = safety_margin;
+            py::array_t<double> out(in.axis_count);
+            bool ok;
+            {
+                py::gil_scoped_release release;
+                ok = apex::try_local_reorientation_coupled(in, material, out.mutable_data());
+            }
+            if (!ok) return py::object(py::none());
+            return py::object(std::move(out));
+        },
+        "Reorientation locale (machine a premier axe couple) : angles retenus ou None.");
+
+    m.def(
+        "clamp_head_height_apply",
+        [](const DoubleArray& z, const DoubleArray& current, const DoubleArray& grid,
+           const DoubleArray& zlow, double plate_z, double safety_margin) {
+            const auto n = static_cast<py::ssize_t>(z.size());
+            py::array_t<double> out(n);
+            py::array_t<std::uint8_t> moved(n);
+            apex::clamp_head_height_apply(z.data(), current.data(), n, grid.data(), zlow.data(),
+                                          static_cast<std::int64_t>(grid.size()), plate_z,
+                                          safety_margin, out.mutable_data(), moved.mutable_data());
+            return py::make_tuple(std::move(out), std::move(moved));
+        },
+        "Borne de B selon la hauteur de la pointe : (angles, masque des points ramenes).");
+
+    m.def(
         "heat_method_distance",
         [](const DoubleArray& tet_vertices, const IntArray& tetrahedra,
            const DoubleArray& shape_gradients, const DoubleArray& volumes,
