@@ -5446,7 +5446,10 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
       assumer (perte de l'isolation et du parallélisme), à décider explicitement.
     - Un worker 100 % C++ (sans Python) est possible : il remplacerait
       `_tetrahedralize_worker.py`, toujours en exécutable séparé. Il exige la SOURCE de
-      TetGen, absente du dépôt (le wheel `tetgen` n'embarque que le binaire).
+      TetGen (v1.6.0, `tetgen.cxx` 36 537 lignes + `tetgen.h` + `predicates.cxx`, AGPL-3.0). Le wheel
+      n'embarque que le binaire, mais le TARBALL source du paquet PyPI `tetgen` 0.8.4 les contient
+      (`src/tetgen.cxx`, `src/tetgen.h`, `src/predicates.cxx`, `src/tetgen-license`) : vérifié le
+      2026-10-26. Pas encore vendoré dans `cpp/third_party/`.
 
     ### Ce que le portage avait rendu visible (conservé pour mémoire)
 
