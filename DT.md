@@ -6,6 +6,13 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 **Tests : 505/505 dans les positions `APEX_USE_CPP=0`, `=1` et `=1` + `APEX_USE_GPU=1`** (2026-10-13 soir, suite complète).
 
 
+## 2026-10-27 — Retrait de FEM et de Bird termine ; collisions de tete mesurees
+- 🟢 Voie unique = chaleur. Retires : champ FEM directionnel, multibranche, parties planes, `Constraint[]`, options de step3/step5 liees, copie de recherche S4 Slicer (citation et licence gardees). Contrat d'interface passe a 2 (`CONTRACT_CHANGES.md`). Tests : 348 passes en Python pur, suite native verte (Linux, g++).
+- 🟢 Decisions de l'utilisateur : essai a sec de B — B+ va vers le centre du plateau (coherent avec `b_sign=+1`). La Gen 0 de l'Aetheris-4 a ete retiree prematurement apres un accident qui l'a detruite ; elle sera remplacee par la Gen 1, sur laquelle l'essai a sec est a refaire. Placement FEM : sans objet.
+- ⬛ A refaire sur la voie chaleur : points d'attache (contraintes utilisateur). Code C++ mort restant : melange de directions et terme de gradient dans `field_solver.cpp`.
+- ♦️ Collisions de tete (death, resolution 1,2, step9 rapide, part des points) : defaut 15,1 % ; avec step5b 24,1 % (pire) ; couches scindees 50,5 % ; flux non projete 27,8 %. Le defaut est donc la meilleure variante testee. Apres step10 : 0 collision non resolue mais 7 805 des 7 840 sont traitees en « support de secours » (35 reorientations seulement). Piste non mesuree : step5b par morceau de couche avec la normale locale par pose, ou reorientation de step10 sur la grille couplee.
+- ⬛ Purge du docx confidentiel de l'historique : document deja dans `aeloxhardware/CONFIDENTIAL_INFO` ; purge a faire en dernier (copie d'essai, puis force-push, ids de commit changes).
+
 ## 2026-10-25 — Decision : voie principale = CHALEUR ; Bird retire ; FEM directionnel plus par defaut
 - 🟢 Bird supprime (pipeline/bird, tests, scripts, noyau C++ bird_lsq/bird_locate/skin_check, artefacts out/). **Sauvegarde integrale : branche `bird_old`** (poussee, commit 79549f08). L'autodocteur de surface (utilise par step1) est extrait dans `pipeline/mesh_doctor.py`.
 - 🟢 Remerciement et citation de S4 Slicer (Joshua Bird) conserves : README (Credits) et `CITATION.cff`.
