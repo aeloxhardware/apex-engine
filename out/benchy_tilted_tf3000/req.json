@@ -1,0 +1,1 @@
+{"contract": 2, "mesh": "out/benchy_tilted_tf3000/in.stl", "output_dir": "out/benchy_tilted_tf3000", "output_name": "benchy_tilted_tf3000", "params": {"field_solver": {"heat_method_time_factor": 3000.0}}, "gcode_params": {"strict": false}}
