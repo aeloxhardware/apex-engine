@@ -109,8 +109,8 @@ def test_native_params_header_matches_python_defaults():
     assert d["out_of_plane_interpolation_power"] == p.toolpath2d.out_of_plane_interpolation_power
     assert d["split_rings_into_runs"] == p.toolpath2d.split_rings_into_runs
     assert d["infill_pattern"] == p.toolpath2d.infill_pattern.value
-    assert d["direction_blend_radius"] == p.field_solver.direction_blend_radius
-    assert d["enforce_upward_growth"] == p.field_solver.enforce_upward_growth
+    assert d["heat_method_time_factor"] == p.field_solver.heat_method_time_factor
+    assert d["heat_project_reachable"] == p.field_solver.heat_project_reachable
     assert d["rotation_axes_count"] == len(p.machine_profile.rotation_axes)
     assert d["b_max_deg"] == p.machine_profile.rotation_axes[1].angle_range_deg[1]
     assert d["position_coupled_axes"] == list(p.machine_profile.position_coupled_axes)

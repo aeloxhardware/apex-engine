@@ -883,9 +883,8 @@ def resolve_raw_points(
     Points bruts (position + direction visee, extrusion, couche) -> trajectoire
     machine : IK (couplee a la position si la machine l'impose), filtre median
     des axes libres, lissage optionnel, diagnostics. Extrait de `run` le
-    2026-10-07 sans changement de comportement, pour que la voie Bird
-    (pipeline/bird), qui produit ses points sans couches ni planning, passe
-    par exactement la meme resolution.
+    2026-10-07 sans changement de comportement, pour qu'un appelant qui produit
+    ses points sans couches ni planning passe par exactement la meme resolution.
     """
     axes = machine_profile.rotation_axes or []
     # Direction a angles nuls = SENS D'IMPRESSION de la tete au repos : tete

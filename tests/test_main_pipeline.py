@@ -75,7 +75,7 @@ def test_pipeline_propagates_detected_platform_z_from_step1_to_step3():
 
     assert np.any(region_graph.platform_contact_faces), (
         "platform_contact_faces ne doit jamais etre vide sur un mesh pose a "
-        "plat, meme translate en Z - sinon l'ancrage plateau du solveur FEM "
+        "plat, meme translate en Z - sinon l'ancrage plateau du solveur de champ "
         "(step4) devient un no-op silencieux (CLAUDE.md)"
     )
 

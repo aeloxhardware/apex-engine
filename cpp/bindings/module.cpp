@@ -1287,8 +1287,8 @@ PYBIND11_MODULE(apex_core, m) {
         d["out_of_plane_interpolation_power"] = p.toolpath2d.out_of_plane_interpolation_power.value_or(-1.0);
         d["split_rings_into_runs"] = p.toolpath2d.split_rings_into_runs;
         d["infill_pattern"] = std::string(apex::params::to_string(p.toolpath2d.infill_pattern));
-        d["direction_blend_radius"] = p.field_solver.direction_blend_radius;
-        d["enforce_upward_growth"] = p.field_solver.enforce_upward_growth;
+        d["heat_method_time_factor"] = p.field_solver.heat_method_time_factor;
+        d["heat_project_reachable"] = p.field_solver.heat_project_reachable;
         d["rotation_axes_count"] = static_cast<int>(p.machine_profile.rotation_axes.size());
         d["b_max_deg"] = p.machine_profile.rotation_axes.size() > 1 ? p.machine_profile.rotation_axes[1].angle_range_deg[1] : -1.0;
         d["position_coupled_axes"] = p.machine_profile.position_coupled_axes;
@@ -1747,7 +1747,7 @@ PYBIND11_MODULE(apex_core, m) {
             return py::make_tuple(out_layers, passes);
         });
 
-    // Socle Vulkan (phase 1 du plan Bird/Vulkan, 2026-10-13). Jamais d'exception
+    // Socle Vulkan (phase 1 du plan C++/Vulkan, 2026-10-13). Jamais d'exception
     // pour l'absence de GPU : gpu_status() rend la raison.
     m.def(
         "gpu_status",

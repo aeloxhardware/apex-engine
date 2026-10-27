@@ -82,7 +82,7 @@ def _pipeline_layers_from_trimesh(
         overhang_map,
         SegmentationParams(platform_z=platform_z, platform_contact_tolerance=0.5),
     )
-    field = field_run(tet_mesh, mesh_data, overhang_map, regions, [], FieldSolverParams())
+    field = field_run(tet_mesh, mesh_data, overhang_map, regions, FieldSolverParams())
     layers = layers_run(tet_mesh, mesh_data, field, regions, LayerParams(layer_height_base=layer_height_base))
     return mesh_data, overhang_map, layers
 
@@ -1067,7 +1067,7 @@ def test_infill_spacing_follows_nozzle_and_density():
     """Carre de 40 mm, buse 0,4, densite 0,2 : une ligne tous les 2 mm, soit
     environ 20 lignes. L'ancienne formule (fondee sur la diagonale de la
     couche) en donnait ~5 : c'est le defaut qui laissait les grandes couches
-    presque vides (mesure sur les couches Bird du Benchy)."""
+    presque vides (mesure sur les couches du Benchy)."""
     lines = _generate_infill(_square(40.0), 0.2, InfillPattern.LINES, nozzle_width=0.4)
     assert 18 <= len(lines) <= 22
     ys = sorted(float(line[0][1]) for line in lines)

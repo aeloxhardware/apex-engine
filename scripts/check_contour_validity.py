@@ -1,7 +1,7 @@
 """
 Contours de couche AUTO-INTERSECTANTS dans le repere local 2D de step6
 (entree de shapely.buffer) : combien de groupes (contour + trous) forment un
-polygone invalide, et quelle part de l'aire. Pipeline FEM par defaut.
+polygone invalide, et quelle part de l'aire. Pipeline par defaut.
 Usage : APEX_USE_CPP=1 .venv/Scripts/python.exe -u scripts/check_contour_validity.py <stl>
 """
 import os

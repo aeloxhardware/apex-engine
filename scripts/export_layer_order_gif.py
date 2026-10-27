@@ -41,12 +41,6 @@ from scripts.export_slicing_preview import run_slicing_only  # noqa: E402
 # l'utilisateur) : premier depose en bleu, dernier en jaune.
 FIRST_COLOR = np.array([0x00, 0x00, 0xFF]) / 255.0
 LAST_COLOR = np.array([0xFF, 0xF7, 0x00]) / 255.0
-# Couche support_unresolved (Layer.support_unresolved, step5) : rouge vif,
-# pour la distinguer immediatement du degrade normal - c'est le signal qu'on
-# cherche a inspecter visuellement (une couche imprimee faute de support
-# suffisant, repoussee en dernier recours par le glouton).
-UNRESOLVED_COLOR = np.array([1.0, 0.1, 0.1])
-
 
 def _layer_segments(layer) -> list[np.ndarray]:
     """Toutes les arêtes (paires de points consécutifs) des boucles de contour d'une couche."""
@@ -96,7 +90,7 @@ def build_gif(
     accumulated_colors: list[np.ndarray] = []
 
     for i, layer in enumerate(selected):
-        color = UNRESOLVED_COLOR if getattr(layer, "support_unresolved", False) else _color_for_index(i, total)
+        color = _color_for_index(i, total)
         for segment in _layer_segments(layer):
             accumulated_segments.append(segment)
             accumulated_colors.append(color)
@@ -145,89 +139,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--fps", type=int, default=12, help="images par seconde du GIF")
     parser.add_argument(
-        "--support-driven-order", type=float, default=None, metavar="FRACTION",
-        help="Ordonne les couches par support reel au lieu de l'isovaleur croissante "
-             "(voir LayerParams.support_driven_order).",
-    )
-    parser.add_argument(
         "--split-disjoint-clusters", type=float, default=None, metavar="FACTEUR",
         help="Scinde une couche en plusieurs Layer quand ses contours forment des "
              "composantes spatialement disjointes (voir LayerParams). REQUIS pour "
              "que --frontier-order serve a quelque chose.",
-    )
-    parser.add_argument(
-        "--frontier-order", action="store_true",
-        help="Ordre par CROISSANCE DE FRONT : une couche n'est imprimable que si "
-             "elle touche de la matiere deja imprimee (voir LayerParams.frontier_order). "
-             "Sans --split-disjoint-clusters, sans effet.",
-    )
-    parser.add_argument(
-        "--geodesic-order", action="store_true",
-        help="Ordre d'impression dont la PROGRESSION vient de la distance "
-             "geodesique au plateau (Dijkstra a travers la matiere), la continuite "
-             "spatiale restant celle du parcours DFS. Voir LayerParams.geodesic_order.",
-    )
-    parser.add_argument(
-        "--support-feedback", type=int, default=None, metavar="MAX_ITER",
-        help="Boucle de retroaction de surplomb dans step4 : re-evalue le surplomb "
-             "contre le champ REELLEMENT resolu et corrige les directions cibles "
-             "fautives, jusqu'a stagnation du gain (plafond dur a 50). "
-             "Voir FieldSolverParams.support_feedback_iterations.",
-    )
-    parser.add_argument(
-        "--feedback-geodesic-target", action="store_true",
-        help="La boucle de retroaction corrige les tetraedres fautifs avec leur "
-             "direction GEODESIQUE LOCALE au lieu d'une rotation minimale "
-             "(voir FieldSolverParams.support_feedback_use_geodesic_target). "
-             "Sans --support-feedback, sans effet.",
-    )
-    parser.add_argument(
-        "--geodesic-directions", action="store_true",
-        help="Directions cibles issues de la distance geodesique au plateau "
-             "(voir FieldSolverParams.use_geodesic_directions, limite #52).",
-    )
-    parser.add_argument(
-        "--smoothness-modulation", type=float, default=None, metavar="STRENGTH",
-        help="Module le poids de lissage PAR TETRAEDRE, abaisse la ou la piece se "
-             "ramifie (|div(X)| du flux geodesique). Mesure : sans effet quand la "
-             "direction cible est CONSTANTE sur le modele (une seule region step3, "
-             "ce qui est le cas de real_overhang) - rien a departager entre. "
-             "Voir FieldSolverParams.smoothness_modulation_strength.",
-    )
-    parser.add_argument(
-        "--branch-cut-threshold", type=float, default=None, metavar="SEUIL",
-        help="Segmentation step3 par STRUCTURE VOLUMIQUE plutot que par "
-             "orientation de face : coupe le graphe d'adjacence tetraedre-"
-             "tetraedre la ou |div(X)| depasse ce seuil, une composante = une "
-             "branche = sa propre region. Corrige le defaut mesure sur "
-             "real_overhang.stl (3 branches jamais separees par l'angle, a "
-             "aucun seuil) - residu de planeite 1.1%% -> 0.0%%, inclinaison "
-             "du pilier 50deg -> 0deg. Voir SegmentationParams.branch_cut_threshold. "
-             "0.05 mesure comme separant proprement les 3 branches sur "
-             "real_overhang (0.07 les refusionne deja).",
-    )
-    parser.add_argument(
-        "--anchor-growth-weight", type=float, default=None, metavar="POIDS",
-        help="Penalise les directions candidates opposees au sens de "
-             "croissance depuis l'ancrage reel de la region (plateau ou "
-             "region parent). Corrige la degenerescence mesuree du critere "
-             "par defaut (risque residuel nul pour plusieurs candidats, "
-             "argmin tranche par ordre d'indice - regions differentes "
-             "convergent vers la MEME direction). Voir "
-             "SegmentationParams.anchor_growth_weight. NON monotone : ne pas "
-             "interpoler entre deux valeurs mesurees.",
-    )
-    parser.add_argument(
-        "--transition-distance", type=float, default=None, metavar="MM",
-        help="Distance (mm) sur laquelle les couches commencent a se deformer "
-             "pour prendre l'orientation de la branche suivante. Diffuse le "
-             "champ de DIRECTIONS CIBLES (auto-limite aux jonctions : a "
-             "l'interieur d'une branche les directions sont constantes, les "
-             "moyenner ne change rien). PETIT = cassure tardive et nette ; "
-             "GRAND = transition precoce et progressive. Mesure sur "
-             "real_overhang.stl (inclinaison mediane a z=+5) : OFF/2mm -> 0 "
-             "deg, 20mm -> 8 deg, 40mm -> 17 deg. Voir "
-             "FieldSolverParams.transition_distance_mm.",
     )
     parser.add_argument(
         "--export-parts-glb", metavar="CHEMIN.glb", default=None,
@@ -247,10 +162,6 @@ def main(argv: list[str] | None = None) -> int:
              "produit des couches ~40%% plus epaisses a valeur nominale identique, "
              "et comparer sans compenser fausserait la lecture.",
     )
-    parser.add_argument("--planar-parts", action="store_true",
-                        help="parties a couches planes (step4c, 2026-10-19)")
-    parser.add_argument("--reeb", type=float, default=None, metavar="MM",
-                        help="parties planes decoupees par le squelette (graphe de Reeb geodesique, tranches de MM)")
     parser.add_argument("--merge-angle", type=float, default=None, metavar="DEG",
                         help="max_region_merge_angle_deg de step3 (decoupage plus fin)")
     parser.add_argument("--elev", type=float, default=20.0, help="Elevation de la camera (degres)")
@@ -260,49 +171,10 @@ def main(argv: list[str] | None = None) -> int:
     params = PipelineParams()
     if args.resolution is not None:
         params.resolution = args.resolution
-    if args.support_driven_order is not None:
-        params.layers.support_driven_order = args.support_driven_order
-        params.layers.nozzle_width = params.machine_profile.nozzle_diameter
-        params.layers.support_rotation_axes = params.machine_profile.rotation_axes
     if args.split_disjoint_clusters is not None:
         params.layers.split_disjoint_clusters = args.split_disjoint_clusters
-    if args.frontier_order:
-        params.layers.frontier_order = True
-    if args.geodesic_order:
-        params.layers.geodesic_order = True
-    if args.support_feedback is not None:
-        params.field_solver = replace(
-            params.field_solver,
-            support_feedback_iterations=args.support_feedback,
-            support_feedback_use_geodesic_target=args.feedback_geodesic_target,
-        )
-    if args.geodesic_directions:
-        params.field_solver = replace(params.field_solver, use_geodesic_directions=True)
-    if args.smoothness_modulation is not None:
-        params.field_solver = replace(
-            params.field_solver,
-            smoothness_modulation_strength=args.smoothness_modulation,
-        )
-    if args.branch_cut_threshold is not None:
-        params.segmentation = replace(
-            params.segmentation, branch_cut_threshold=args.branch_cut_threshold
-        )
-    if args.anchor_growth_weight is not None:
-        params.segmentation = replace(
-            params.segmentation, anchor_growth_weight=args.anchor_growth_weight
-        )
-    if args.transition_distance is not None:
-        params.field_solver = replace(
-            params.field_solver, transition_distance_mm=args.transition_distance
-        )
     if args.merge_angle is not None:
         params.segmentation = replace(params.segmentation, max_region_merge_angle_deg=args.merge_angle)
-    if args.planar_parts:
-        params.field_solver = replace(params.field_solver, planar_parts=True)
-        params.collision_order = None
-        if args.reeb is not None:
-            params.field_solver = replace(params.field_solver, planar_parts_partition="reeb",
-                                          planar_reeb_band_mm=args.reeb)
     if args.layer_height is not None:
         params.layers.layer_height_base = args.layer_height
 

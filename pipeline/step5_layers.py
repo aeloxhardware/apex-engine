@@ -44,8 +44,6 @@ import numpy as np
 import trimesh
 
 from core.geometry_utils import (
-    composed_rotation_directions,
-    point_has_support_along_direction,
     point_in_polygon_2d,
 )
 from core.mesh_types import (
@@ -53,7 +51,6 @@ from core.mesh_types import (
     Layer,
     MeshData,
     RegionDependencyGraph,
-    RotationAxisSpec,
     ScalarField,
     TetMesh,
 )
@@ -107,87 +104,6 @@ class LayerParams:
     # independant ajouterait une combinatoire sans benefice reel.
     split_disjoint_clusters: Optional[float] = None
 
-    # Ordonne les couches par SUPPORT REEL plutot que par isovaleur croissante
-    # (voir `_support_driven_order`). None (defaut) = DESACTIVE, tri historique
-    # inchange - meme discipline que `split_disjoint_clusters` ci-dessus.
-    #
-    # Le tri historique `(rang de region, isovaleur)` traite le rang comme un
-    # ordre TOTAL et, A L'INTERIEUR d'un rang, ne connait que l'isovaleur
-    # croissante. Or l'isovaleur n'est PAS le support : une coque rattachee au
-    # reste du modele UNIQUEMENT PAR LE HAUT voit ses isovaleurs basses passer
-    # en premier, donc sa matiere deposee avant l'unique matiere qui la porte.
-    # Ce mecanisme pose directement la bonne question, couche par couche : "si
-    # j'imprime cette couche maintenant, ses points ont-ils de la matiere DEJA
-    # PLACEE en dessous ?", avec exactement la geometrie de test qui sert deja
-    # a COMPTER ces defauts en step9b (`point_has_support_along_direction`) -
-    # pour DECIDER l'ordre au lieu de seulement CONSTATER les degats.
-    #
-    # Valeur = fraction minimale de points de contour devant etre supportes
-    # pour qu'une couche soit ELIGIBLE (0.9 = 90%, valeur de reference
-    # CLAUDE.md). Le support est la cle PRIMAIRE ; proximite a la couche
-    # precedente puis altitude ne departagent que des couches DEJA jugees
-    # imprimables - c'est ce qui protege les surplombs par construction (une
-    # piece pendante est plus basse que son porteur, mais tant que le porteur
-    # n'existe pas elle n'est pas supportee, donc jamais choisie).
-    #
-    # NON UNIVERSEL, et c'est pourquoi il reste opt-in : mesure CLAUDE.md,
-    # -44% de defauts d'ordre sur une piece massive (death.stl) mais une
-    # DEGRADATION sur une piece fine/ajouree (l-triple-axis, 113/141 couches
-    # `support_unresolved`) - le test porte sur les CONTOURS seuls, l'infill
-    # n'existant qu'a partir de step6, donc le support est SOUS-ESTIME des que
-    # les contours de couches successives ne se recouvrent pas.
-    support_driven_order: Optional[float] = None
-
-    # --- ORDRE PAR DISTANCE GEODESIQUE AU PLATEAU -------------------------
-    # Separe deux questions que le pipeline confond depuis l'origine, parce
-    # qu'un seul champ scalaire y repond :
-    #   - quelle FORME doit avoir une couche ? -> il faut un champ lisse et
-    #     regulierement espace, c'est le role du FEM de step4 ;
-    #   - dans quel ORDRE les imprimer ? -> il faut savoir par ou la matiere
-    #     rejoint le plateau, ce qui est un probleme de PLUS COURT CHEMIN.
-    # Rien n'oblige la meme quantite a bien repondre aux deux. Ici, la forme
-    # reste celle des isosurfaces de phi (inchangee) et seul l'ORDRE est
-    # re-derive de la distance geodesique au plateau A TRAVERS LA MATIERE
-    # (Dijkstra multi-source sur les aretes du TetMesh, ~220ms sur death.stl).
-    #
-    # Pourquoi ce critere ne peut PAS reproduire l'echec de
-    # `support_driven_order` : celui-ci posait une question BINAIRE et
-    # gloutonne ("cette couche est-elle posee sur de la matiere deja
-    # ancree ?"), qui detruit la continuite de proche en proche des surplombs
-    # progressifs. La distance geodesique varie CONTINUMENT le long de la
-    # matiere : une coque suspendue est ordonnee depuis son attache vers son
-    # extremite, de facon monotone, sans saut possible par construction.
-    #
-    # False (defaut) = DESACTIVE, ordre historique strictement inchange.
-    geodesic_order: bool = False
-
-    # --- CROISSANCE DE FRONT (Dijkstra sur l'adjacence des couches) -------
-    # Contrainte plus forte que `geodesic_order`, et c'est tout l'ecart :
-    # celui-ci TRIE les couches par distance geodesique, ce qui n'interdit
-    # nullement d'imprimer deux couches voisines en distance mais situees aux
-    # antipodes du modele (mesure : x3,7 de degradation). Ici, une couche
-    # n'est imprimable QUE si elle touche de la matiere DEJA imprimee.
-    #
-    # Parcours de Dijkstra sur le graphe d'adjacence des couches, amorce sur
-    # la couche la plus proche du plateau : a chaque etape, on choisit parmi
-    # les couches ATTEIGNABLES (adjacentes au deja-imprime) celle de plus
-    # petite distance geodesique. Le front de matiere est connexe a chaque
-    # instant, par construction.
-    #
-    # Consequence recherchee, impossible a exprimer avec l'ordre par isovaleur :
-    # un pilier suspendu, relie au reste par un pont situe au-dessus de lui,
-    # n'est atteignable qu'APRES ce pont - et se construit alors du haut vers
-    # le bas. Mesure sur `real_overhang.stl` en ordre historique : ce pilier
-    # demarre a 29% de l'impression, son point le plus bas a 6,87mm au-dessus
-    # du plateau, sans rien dessous ni a cote.
-    #
-    # LIMITE ASSUMEE : une seule composante progresse a la fois. Une piece a
-    # branches reellement simultanees (helice multi-pales) demanderait un front
-    # multiple - non traite, et signale plutot que masque.
-    #
-    # False (defaut) = DESACTIVE, ordre historique strictement inchange.
-    frontier_order: bool = False
-
     # --- TRI PAR ISOVALEUR SEULE (2026-10-22) ------------------------------
     # Le tri historique `(rang de region, isovaleur)` suppose que l'isovaleur
     # ne dit pas a elle seule l'ordre de croissance, et s'en remet au rang de
@@ -198,52 +114,9 @@ class LayerParams:
     # passaient avant celles de rang 3 a phi 8,3, donc des pieces imprimees
     # avant la matiere qui les relie au reste (correlation ordre/isovaleur 0,78).
     #
-    # False (defaut) = DESACTIVE, ordre historique strictement inchange.
-    isovalue_order: bool = False
-
-    # Largeur de cordon, REQUISE des que `support_driven_order` est actif
-    # (rayon des capsules de matiere + echelle des rayons de recherche). Aucun
-    # defaut arbitraire : step5 ne connait pas `MachineProfile`, et deviner
-    # cette valeur creerait une seconde source de verite divergeant en silence
-    # de `MachineProfile.nozzle_diameter` - meme discipline que `platform_z`,
-    # passe explicitement a step3/step9b.
-    nozzle_width: Optional[float] = None
-
-    # Rayons de recherche du support, en multiples de `nozzle_width` et de
-    # `layer_height_base` - memes grandeurs et memes defauts que
-    # `SupportCheckParams` (step9b), pour que la couche jugee imprimable ici et
-    # le defaut compte la-bas partagent exactement le meme critere.
-    support_horizontal_radius_factor: float = 2.5
-    support_vertical_height_factor: float = 7.5
-
-    # Tolerance "pose sur le plateau", en multiples de `nozzle_width` - meme
-    # grandeur et meme defaut que `SupportCheckParams.platform_contact_tolerance_factor`
-    # (step9b). Amorce l'ANCRAGE (voir `_support_driven_order`) sans avoir
-    # besoin de `platform_z` : un point assez proche du Z minimal de toutes
-    # les couches est structurellement au contact du plateau.
-    platform_contact_tolerance_factor: float = 2.5
-
-    # Cinematique de la machine (RotationAxisSpec), pour tester le support le
-    # long des directions REELLEMENT atteignables, pas seulement la
-    # verticale monde - meme fix que step9b (limite "Validite du test
-    # vertical", voir sa docstring de module). Bug reel trouve en session sur
-    # res/test_models/l_shape_overhang.stl (surplomb a 90 degres, cas simple) :
-    # un test purement vertical fait grimper `support_unresolved` a 55.5% des
-    # couches, alors que le bras incline REPOSE bien sur le pied, juste pas
-    # verticalement au-dessus de lui - la meme cascade genait deja death.stl,
-    # en pire (94%). None (defaut) = comportement historique inchange
-    # (verticale seule) : step5 ne connait pas `MachineProfile`, l'appelant
-    # (main.py) doit passer explicitement `MachineProfile.rotation_axes` s'il
-    # veut ce fix - meme discipline que `nozzle_width`, jamais une seconde
-    # source de verite devinee.
-    support_rotation_axes: Optional[list[RotationAxisSpec]] = None
-
-    # Nombre de directions candidates testees quand `support_rotation_axes`
-    # est actif - meme grandeur et meme defaut que
-    # `SegmentationParams.direction_candidate_count` (step3) et
-    # `SupportCheckParams.direction_candidate_count` (step9b), jamais une
-    # nouvelle densite inventee.
-    support_direction_candidate_count: int = 26
+    # True (defaut) : le champ est la distance a travers la matiere. False =
+    # tri (rang de region, isovaleur).
+    isovalue_order: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -675,7 +548,7 @@ def _extract_closed_contours(vertices: np.ndarray, faces: np.ndarray) -> list[np
     # un noeud est a moins de la tolerance de soudure du plan, les points de
     # coupe de toutes ses aretes fusionnent. Sans aire, ils ne portent aucun
     # bord, mais leurs aretes repetees (multiplicite 6 a 22 mesuree) cassent le
-    # trace de bord : boucles ouvertes, donc jetees. Mesure sur un Benchy Bird
+    # trace de bord : boucles ouvertes, donc jetees. Mesure sur un Benchy
     # (noeuds a 2,6e-5 et 9,2e-5 mm du plan) : couche entiere perdue (192 mm2)
     # et 23 % d'une autre.
     if len(faces):
@@ -1212,489 +1085,8 @@ def _spatial_dfs_order(
 
 
 # ---------------------------------------------------------------------------
-# Ordre pilote par le SUPPORT REEL (LayerParams.support_driven_order)
-# ---------------------------------------------------------------------------
-
-def _layer_support_points(contours: list[np.ndarray]) -> np.ndarray:
-    """Tous les points de contour d'une couche, en un seul (P,3)."""
-    usable = [np.asarray(c, dtype=float) for c in contours if len(c) > 0]
-    if not usable:
-        return np.empty((0, 3), dtype=float)
-    return np.vstack(usable)
-
-
-def _place_layer_in_index(
-    index, contours: list[np.ndarray], anchored_mask: Optional[np.ndarray] = None
-) -> int:
-    """
-    Ajoute la matiere d'une couche a l'index de capsules, un segment par
-    arete de contour - c'est l'approximation "contours seuls" assumee du
-    mecanisme (l'infill n'existe qu'a partir de step6, voir
-    `LayerParams.support_driven_order`).
-
-    `anchored_mask` (booleen, aligne sur la concatenation des contours -
-    meme ordre et meme filtrage des contours vides que
-    `_layer_support_points`) restreint l'ajout aux aretes dont les DEUX
-    extremites sont ancrees. Une couche n'est ainsi jamais ancree "en bloc" :
-    seule la part de sa matiere qui repose reellement sur de l'ancre le
-    devient a son tour.
-
-    C'est ce qui permet a une couche partiellement posee sur le plateau de
-    servir d'appui pour la suivante, sans pretendre que sa part en
-    porte-a-faux tient. Sans ce filtrage par ARETE, il fallait choisir entre
-    deux comportements egalement faux : ancrer toute la couche (le faux
-    support du defaut n°1 de la limite #51, qui laisse une coque suspendue
-    s'auto-ancrer de proche en proche) ou n'ancrer que les couches
-    integralement supportees (cascade bloquee des la premiere couche
-    partiellement posee - mesure : 100% des couches signalees non resolues
-    sur death.stl alors que la geometrie produite etait, elle, meilleure).
-
-    Retourne le nombre d'aretes reellement ajoutees : 0 signifie que cette
-    couche n'a rien ancre, et donc qu'aucune couche voisine n'a besoin d'etre
-    reevaluee.
-    """
-    placed = 0
-    offset = 0
-    for contour in contours:
-        points = np.asarray(contour, dtype=float)
-        if len(points) == 0:
-            continue  # meme filtrage que _layer_support_points : l'offset ne bouge pas
-        for i in range(1, len(points)):
-            if anchored_mask is not None and not (
-                anchored_mask[offset + i - 1] and anchored_mask[offset + i]
-            ):
-                continue
-            index.append_segment(points[i - 1], points[i])
-            placed += 1
-        offset += len(points)
-    return placed
-
-
-def _supported_mask(
-    index,
-    points: np.ndarray,
-    up: np.ndarray,
-    horizontal_radius: float,
-    vertical_height: float,
-    candidate_directions: Optional[np.ndarray] = None,
-) -> np.ndarray:
-    """
-    Masque booleen (P,) : pour chaque point, existe-t-il de la matiere deja
-    placee qui le supporte le long de `-up`, OU le long d'au moins une des
-    `candidate_directions` (D,3) si fournies ?
-
-    `candidate_directions` reproduit le fix de step9b (docstring de module,
-    "Validite du test vertical") : un point sans support VERTICAL peut quand
-    meme reposer reellement sur de la matiere existante si la machine peut
-    deposer selon une direction inclinee atteignable - bug reel trouve en
-    session sur un simple surplomb a 90 degres (l_shape_overhang.stl) : le
-    champ scalaire courbe fait "demarrer" un bras incline a une hauteur
-    superieure a celle ou son porteur vertical s'arrete (~2.5mm d'ecart
-    mesure), un test purement vertical ne voit alors JAMAIS le support qui
-    existe bel et bien en diagonale, juste en dessous dans la direction
-    inclinee reelle du bras - et comme aucune couche du bras ne s'ancre
-    jamais, TOUT le reste bascule en cascade (55.5% des couches signalees a
-    tort, mesure). None (defaut) = comportement historique, verticale seule.
-
-    Une requete spatiale par point (AABB isotrope couvrant toutes les
-    directions testees), puis EXACTEMENT la meme geometrie de test que
-    step9b (`point_has_support_along_direction`, vectorisee sur les
-    candidats pour chaque direction) - jamais une seconde implementation du
-    critere de support. Court-circuite des la premiere direction trouvee.
-    """
-    supported = np.zeros(len(points), dtype=bool)
-    directions = (
-        candidate_directions if candidate_directions is not None else up.reshape(1, 3)
-    )
-    for i, position in enumerate(points):
-        aabb = _search_aabb_below(position, up, horizontal_radius, vertical_height)
-        if index.has_support(
-            aabb, position, directions, horizontal_radius, vertical_height
-        ):
-            supported[i] = True
-    return supported
-
-
-def _search_aabb_below(
-    position: np.ndarray, up: np.ndarray, horizontal_radius: float, vertical_height: float
-) -> AABB:
-    """
-    Boite de recherche englobant la zone "sous" `position` le long de `-up`.
-
-    Etendue isotrope de `max(horizontal_radius, vertical_height)` plutot que
-    la boite verticale serree de step9b : `up` est ici une direction
-    quelconque, et une boite alignee sur les axes ne peut pas la suivre. Un
-    sur-ensemble strict des vrais candidats - jamais un faux negatif, seulement
-    moins de filtrage grossier ; la geometrie precise reste faite par
-    `point_has_support_along_direction`.
-    """
-    extent = max(horizontal_radius, vertical_height)
-    return AABB(min_corner=position - extent, max_corner=position + extent)
-
-
-def _support_driven_order(
-    raw_layers: list[tuple],
-    params: LayerParams,
-    up_vector: np.ndarray,
-) -> tuple[list[int], set[int]]:
-    """
-    Ordonne les couches par SUPPORT REEL ET CONNECTE AU PLATEAU, plutot que
-    par isovaleur croissante.
-
-    Glouton : a chaque tour, une couche est ELIGIBLE si au moins
-    `support_driven_order` (fraction) de ses points de contour ont de la
-    matiere ANCREE juste en dessous d'eux. Parmi les eligibles, on prend la
-    plus proche de la couche precedente (anti-trajets a vide), puis la plus
-    basse. Aucune eligible -> on place la plus basse restante et on la marque
-    `support_unresolved`, jamais une exception ni un blocage (meme discipline
-    que `CollisionReport.chuck_checked`).
-
-    ANCRAGE, PAS SEULEMENT SUPPORT LOCAL - piege reel rencontre et corrige en
-    cours de session : une premiere version testait juste "y a-t-il de la
-    matiere deja placee en dessous", sans se soucier de savoir si CETTE
-    matiere est elle-meme reliee au plateau. Sur une coque en surplomb
-    imprimee du bas vers le haut, chaque couche se retrouve alors bien
-    au-dessus de la precedente et passe le test a CHAQUE etape - meme si
-    l'ensemble de la coque ne touche le reste du modele qu'en un point tout en
-    haut, ce qui degenere silencieusement vers le tri par hauteur (mesure
-    directement sur res/test_models/death.stl : ordre quasi strictement
-    croissant en Z malgre le mecanisme actif). La geometrie DEJA PLACEE ne
-    suffit donc pas : seule la geometrie ANCREE (au contact du plateau, ou
-    supportee EXCLUSIVEMENT par de la matiere deja ancree) alimente l'index de
-    test. Une couche choisie faute de mieux (`unresolved`) est bien imprimee,
-    mais N'ENTRE PAS dans l'index ancre : elle ne peut pas servir de faux
-    support a une couche suivante, exactement comme le veut la
-    discipline "surplomb reel jamais masque".
-
-    Amorcage de l'ancrage : une couche est ancree D'EMBLEE si un de ses points
-    est a moins de `platform_contact_tolerance_factor * nozzle_width` du Z
-    minimal de TOUTES les couches - la meme tolerance de contact plateau que
-    `SupportCheckParams` (step9b), sans avoir besoin de cabler `platform_z`
-    ici (source de verite = la geometrie des couches elles-memes).
-
-    Le support est la cle PRIMAIRE ; proximite et altitude ne departagent que
-    des couches deja jugees imprimables. C'est ce qui protege les surplombs
-    PAR CONSTRUCTION : une piece pendante est plus basse que son porteur, mais
-    tant que le porteur n'existe pas ANCRE elle n'est pas supportee, donc
-    jamais choisie - la regle "ce qui pend s'imprime apres" n'est pas encodee
-    a part, elle DECOULE du test.
-
-    Performance : une reevaluation naive de toutes les couches a chaque tour
-    coute O(couches^2 x points). On exploite la MONOTONIE (la matiere ancree
-    ne disparait jamais, un point supporte le reste) : chaque couche ne
-    conserve que ses points ENCORE non supportes, et seules les couches dont
-    l'AABB touche celle qui vient d'etre ANCREE sont reevaluees.
-
-    Returns:
-        (permutation des indices de `raw_layers`, indices places sans support).
-    """
-    from pipeline.step3_segmentation import _samples_per_axis
-    from pipeline.step9_collision_sim import _PrintedGeometryIndex
-
-    if params.nozzle_width is None:
-        raise LayerExtractionError(
-            "LayerParams.support_driven_order est actif mais nozzle_width est None. "
-            "Cette largeur de cordon n'a pas de defaut arbitraire : passez "
-            "explicitement MachineProfile.nozzle_diameter, pour ne pas creer une "
-            "seconde source de verite divergeant en silence."
-        )
-
-    nozzle_width = max(float(params.nozzle_width), 1e-6)
-    horizontal_radius = params.support_horizontal_radius_factor * nozzle_width
-    vertical_height = params.support_vertical_height_factor * max(
-        float(params.layer_height_base), 1e-6
-    )
-    platform_tolerance = params.platform_contact_tolerance_factor * nozzle_width
-    min_fraction = float(params.support_driven_order)
-
-    up = np.asarray(up_vector, dtype=float)
-    norm = np.linalg.norm(up)
-    up = up / norm if norm > 1e-12 else np.array([0.0, 0.0, 1.0])
-
-    # Directions candidates pour le test de support (voir docstring de
-    # `_supported_mask`) - memes fonction et defaut que step3/step9b, jamais
-    # une nouvelle densite inventee. None/vide -> verticale seule, repli
-    # exact sur le comportement historique.
-    candidate_directions: Optional[np.ndarray] = None
-    if params.support_rotation_axes:
-        samples_per_axis = _samples_per_axis(
-            params.support_direction_candidate_count, len(params.support_rotation_axes)
-        )
-        candidate_directions = np.vstack(
-            [up.reshape(1, 3), composed_rotation_directions(params.support_rotation_axes, up, samples_per_axis)]
-        )
-
-    all_points = [_layer_support_points(entry[1]) for entry in raw_layers]
-    # Masque des points DEJA ANCRES, par couche (monotonie : la matiere
-    # ancree ne disparait jamais, un point ancre le reste). Un MASQUE, et non
-    # un simple compteur avec une liste de points restants : il faut savoir
-    # QUELS points sont ancres pour n'ajouter a l'index que les aretes
-    # correspondantes (voir `_place_layer_in_index`).
-    anchored_masks = [np.zeros(len(points), dtype=bool) for points in all_points]
-    total_counts = [len(points) for points in all_points]
-
-    heights = [
-        float(points[:, 2].mean()) if len(points) else 0.0 for points in all_points
-    ]
-    centroids = [
-        points.mean(axis=0) if len(points) else np.zeros(3) for points in all_points
-    ]
-    aabbs = [
-        (points.min(axis=0), points.max(axis=0)) if len(points) else (np.zeros(3), np.zeros(3))
-        for points in all_points
-    ]
-
-    # Amorcage : les points au contact direct du plateau comptent d'emblee
-    # comme "supportes par ancrage", sans attendre qu'une capsule ne les
-    # couvre - exactement l'exemption "pose sur le plateau" de step9b.
-    global_min_z = min((float(points[:, 2].min()) for points in all_points if len(points)), default=0.0)
-    for idx, points in enumerate(all_points):
-        if len(points) == 0:
-            continue
-        anchored_masks[idx] |= points[:, 2] <= global_min_z + platform_tolerance
-
-    # Index de la matiere ANCREE UNIQUEMENT - jamais toute la matiere deja
-    # imprimee (voir docstring : c'est precisement la distinction qui corrige
-    # le defaut de support purement local). Sert au calcul du statut
-    # `unresolved`, jamais au departage.
-    anchored_index = _PrintedGeometryIndex(nozzle_width)
-    remaining = set(range(len(raw_layers)))
-    # Toutes les couches doivent etre evaluees au premier tour ; ensuite,
-    # seules celles voisines de la derniere couche ANCREE.
-    stale = set(remaining)
-    order: list[int] = []
-    unresolved: set[int] = set()
-    previous_centroid: Optional[np.ndarray] = None
-
-    def _fraction(idx: int) -> float:
-        if total_counts[idx] == 0:
-            return 1.0  # couche sans point exploitable : jamais bloquante
-        return float(anchored_masks[idx].sum()) / total_counts[idx]
-
-    while remaining:
-        for idx in stale & remaining:
-            pending = ~anchored_masks[idx]
-            if not pending.any():
-                continue
-            # Seuls les points ENCORE non ancres sont retestes (monotonie) ;
-            # le resultat est reinjecte a leur position d'origine, pour que le
-            # masque reste aligne sur la concatenation des contours.
-            pending_indices = np.where(pending)[0]
-            mask = _supported_mask(
-                anchored_index, all_points[idx][pending_indices], up,
-                horizontal_radius, vertical_height, candidate_directions,
-            )
-            anchored_masks[idx][pending_indices[mask]] = True
-        stale = set()
-
-        eligible = [idx for idx in remaining if _fraction(idx) >= min_fraction]
-
-        if eligible:
-            if previous_centroid is None:
-                chosen = min(eligible, key=lambda i: (heights[i], i))
-            else:
-                chosen = min(
-                    eligible,
-                    key=lambda i: (
-                        float(np.linalg.norm(centroids[i] - previous_centroid)),
-                        heights[i],
-                        i,
-                    ),
-                )
-        else:
-            # Aucune couche n'est ANCREE (statut inchange, reste honnete) -
-            # mais parmi les couches suspendues, on privilegie quand meme
-            # celle la plus proche de la MATIERE DEJA DEPOSEE (ancree ou
-            # non), plutot que la seule altitude : reduit les sauts a vide
-            # entre couches suspendues qui se recouvrent geometriquement
-            # (ex: un dome qui se referme progressivement sur lui-meme sans
-            # jamais retoucher le plateau) sans jamais faire croire qu'une
-            # couche suspendue est supportee - `unresolved` reste base
-            # UNIQUEMENT sur `anchored_index`, inchange.
-            if previous_centroid is None:
-                chosen = min(remaining, key=lambda i: (heights[i], i))
-            else:
-                chosen = min(
-                    remaining,
-                    key=lambda i: (
-                        float(np.linalg.norm(centroids[i] - previous_centroid)),
-                        heights[i],
-                        i,
-                    ),
-                )
-            unresolved.add(chosen)
-
-        order.append(chosen)
-        remaining.discard(chosen)
-        previous_centroid = centroids[chosen]
-
-        # La couche est imprimee quoi qu'il arrive, mais seule la part de sa
-        # matiere REELLEMENT ANCREE entre dans l'index - arete par arete, les
-        # deux extremites devant etre ancrees. Une couche suspendue n'ancre
-        # donc rien (son masque est vide) et ne peut jamais servir de faux
-        # support ; une couche partiellement posee ancre sa seule part posee,
-        # ce qui laisse la cascade progresser. Voir `_place_layer_in_index`.
-        placed_edges = _place_layer_in_index(
-            anchored_index, raw_layers[chosen][1], anchored_masks[chosen]
-        )
-
-        if placed_edges > 0:
-            # Seules les couches dont l'AABB touche celle qui vient d'ancrer
-            # de la matiere peuvent avoir gagne du support - les autres
-            # gardent leur compte.
-            placed_min, placed_max = aabbs[chosen]
-            reach = max(horizontal_radius, vertical_height)
-            for idx in remaining:
-                other_min, other_max = aabbs[idx]
-                if np.all(other_min - reach <= placed_max) and np.all(
-                    other_max + reach >= placed_min
-                ):
-                    stale.add(idx)
-
-    return order, unresolved
-
-
-# ---------------------------------------------------------------------------
 # Point d'entree principal de l'etape
 # ---------------------------------------------------------------------------
-
-# Multiple de `layer_height_base` servant de seuil de connexion spatiale quand
-# `geodesic_order` est actif SANS `split_disjoint_clusters`. Reprend la valeur
-# de ce dernier mesuree comme fonctionnelle sur le modele en T (CLAUDE.md,
-# limite #39) plutot que d'introduire une constante independante : c'est le
-# meme seuil, pour le meme graphe de continuite.
-GEODESIC_ORDER_GAP_FACTOR = 3.0
-
-
-def _frontier_order(
-    raw_layers: list[tuple],
-    progress: np.ndarray,
-    gap_threshold: float,
-) -> tuple[list[int], set[int]]:
-    """
-    Ordre d'impression par CROISSANCE DE FRONT : une couche n'est imprimable
-    que si elle touche de la matiere deja imprimee.
-
-    Retourne `(ordre, indices deposes a contre-sens)`. Le second ensemble
-    contient les couches atteintes depuis un voisin d'isovaleur SUPERIEURE :
-    on y descend le long du champ, donc le depot s'y fait selon `-grad(phi)`
-    et la tete doit pointer vers le haut. C'est le parcours - et lui seul -
-    qui connait cette information : il sait par quel voisin chaque couche a
-    ete atteinte, ce qu'aucun tri a posteriori ne peut retrouver.
-
-    Dijkstra sur le graphe d'ADJACENCE des couches (non oriente - deux couches
-    voisines peuvent etre imprimees dans un sens ou dans l'autre, c'est
-    justement ce qui permet de descendre le long d'un pilier suspendu une fois
-    son pont construit). A chaque etape, parmi les couches ATTEIGNABLES depuis
-    le deja-imprime, on prend celle de plus petite `progress`.
-
-    Difference essentielle avec un tri par `progress` : le tri autorise deux
-    couches consecutives situees aux antipodes du modele du moment qu'elles
-    sont a distance geodesique voisine (mesure : x3,7 de degradation). Ici la
-    connexite du front est une contrainte DURE, pas une preference.
-
-    L'amorce est la couche de plus petite `progress` (la plus proche du
-    plateau a travers la matiere). Si le front s'epuise alors que des couches
-    restent - piece en plusieurs composantes deconnectees, ou adjacence non
-    detectee sous `gap_threshold` - une nouvelle amorce est prise parmi les
-    restantes, toujours a plus petite `progress`. Le saut est alors REEL et
-    inevitable (rien ne relie ces couches), jamais un choix de l'algorithme.
-    """
-    import heapq
-
-    graph = _build_continuity_graph(raw_layers, gap_threshold).to_undirected()
-
-    remaining = set(range(len(raw_layers)))
-    order: list[int] = []
-    reversed_layers: set[int] = set()
-    heap: list[tuple[float, int, int]] = []   # (progression, noeud, parent)
-
-    def seed() -> None:
-        start = min(remaining, key=lambda n: (progress[n], n))
-        heapq.heappush(heap, (float(progress[start]), start, -1))
-
-    seed()
-    while remaining:
-        if not heap:
-            seed()
-        _key, node, parent = heapq.heappop(heap)
-        if node not in remaining:
-            continue
-        remaining.discard(node)
-        order.append(node)
-        # Atteinte depuis un voisin d'isovaleur SUPERIEURE : on descend le
-        # champ, donc on depose sous la matiere deja posee. Une amorce
-        # (parent = -1) n'a aucun voisin anterieur, donc aucun sens impose.
-        if parent >= 0 and raw_layers[parent][0] > raw_layers[node][0]:
-            reversed_layers.add(node)
-        for neighbour in graph.neighbors(node):
-            if neighbour in remaining:
-                heapq.heappush(heap, (float(progress[neighbour]), neighbour, node))
-
-    return order, reversed_layers
-
-
-def _geodesic_layer_progress(
-    raw_layers: list[tuple],
-    tet_mesh: TetMesh,
-    mesh_data: MeshData,
-    region_dependency_graph: RegionDependencyGraph,
-) -> np.ndarray:
-    """
-    PROGRESSION d'impression de chaque couche, derivee de la distance
-    GEODESIQUE au plateau mesuree a travers la matiere - "par ou cette couche
-    rejoint-elle le plateau", et non "a quelle hauteur est-elle".
-
-    C'est une mesure de progression, PAS un ordre a elle seule : trier
-    globalement sur cette valeur a ete mesure comme degradant d'un facteur 4
-    (l'isosurface d'une distance geodesique est une coquille entiere, donc un
-    tri global entrelace des couches spatialement eloignees qui n'ont en
-    commun que leur distance au plateau). Elle est destinee a etre passee en
-    `progress` au parcours de continuite spatiale, qui l'utilise pour ORIENTER
-    et AMORCER, jamais pour sauter.
-
-    Chaque couche est representee par la MEDIANE de la distance geodesique de
-    ses points de contour, pas par leur minimum ni leur moyenne : le minimum
-    ferait passer une couche entiere devant les autres pour un seul point
-    proche de l'attache, et la moyenne serait tiree par les valeurs extremes
-    d'une couche qui s'etale. La mediane represente ou se trouve l'essentiel
-    de la matiere de la couche.
-
-    Les primitives sont celles de step4 (`_geodesic_distance_to_platform`,
-    `_identify_platform_nodes`), jamais une seconde implementation du meme
-    calcul : une divergence silencieuse entre deux definitions du "plateau"
-    est exactement le piege deja rencontre avec `platform_z`.
-
-    Repli : si la geodesique est inexploitable (aucun noeud plateau, ou une
-    couche dont aucun point n'atteint un noeud fini), les couches concernees
-    recoivent `+inf` et sont donc repoussees a la fin, dans leur ordre
-    d'origine - jamais une exception, et jamais un ordre invente en silence.
-    """
-    from pipeline.step4_field_solver import (
-        _geodesic_distance_to_platform,
-        _identify_platform_nodes,
-    )
-
-    platform_nodes = _identify_platform_nodes(
-        tet_mesh, mesh_data, region_dependency_graph
-    )
-    geodesic = _geodesic_distance_to_platform(tet_mesh, platform_nodes)
-
-    node_tree = KDTree(tet_mesh.tet_vertices)
-
-    keys: list[float] = []
-    for _isovalue, contours, _region_ids, _frame in raw_layers:
-        points = [np.asarray(c, dtype=float) for c in contours if len(c) > 0]
-        if not points:
-            keys.append(float("inf"))
-            continue
-        _, nearest = node_tree.query(np.vstack(points))
-        values = geodesic[np.asarray(nearest, dtype=np.int64)]
-        finite = values[np.isfinite(values)]
-        keys.append(float(np.median(finite)) if len(finite) else float("inf"))
-
-    return np.asarray(keys, dtype=float)
-
 
 def run(
     tet_mesh: TetMesh,
@@ -1731,11 +1123,6 @@ def run(
 
     tet_regions = _map_tets_to_regions(tet_mesh, mesh_data, region_dependency_graph)
     region_ranks = _compute_region_ranks(region_dependency_graph)
-    if getattr(scalar_field, "branch_labels", None) is not None:
-        # Champ multibranche : l'ordre suit l'arbre de BRANCHES (profondeur depuis le plateau),
-        # pas les regions de step3, qui ne sont plus ce qui porte la croissance.
-        tet_regions = np.asarray(scalar_field.branch_labels, dtype=np.int64)
-        region_ranks = {int(k): int(v) for k, v in scalar_field.branch_depths.items()}
     volumes = _tet_volumes(tet_mesh)
     tet_regions_c = np.ascontiguousarray(tet_regions, dtype=np.int64)
     gradient_c = np.ascontiguousarray(scalar_field.gradient, dtype=float)
@@ -1744,19 +1131,11 @@ def run(
     scale = float(np.ptp(tet_mesh.tet_vertices, axis=0).max()) or 1.0
     weld_tolerance = params.weld_tolerance_factor * scale
 
-    # Seuil de connexion spatiale entre boucles, invariant de boucle (il ne
-    # depend que des params) - hisse ici parce que `geodesic_order` en a besoin
-    # meme sans `split_disjoint_clusters`, les deux mecanismes partageant le
-    # graphe de continuite. Repli sur GEODESIC_ORDER_GAP_FACTOR : deux couches
-    # successives sont distantes d'environ `layer_height_base`, donc quelques
-    # hauteurs de couche separent ce qui est physiquement le prolongement
-    # direct d'un cluster de ce qui ne l'est pas.
-    gap_factor = (
-        params.split_disjoint_clusters
-        if params.split_disjoint_clusters is not None
-        else GEODESIC_ORDER_GAP_FACTOR
-    )
-    gap_threshold = gap_factor * params.layer_height_base
+    # Seuil de connexion spatiale entre boucles (clustering et tri par
+    # continuite) : quelques hauteurs de couche separent le prolongement direct
+    # d'un cluster de ce qui ne l'est pas. Valeur mesuree sur le modele en T.
+    gap_threshold = (params.split_disjoint_clusters if params.split_disjoint_clusters is not None else 3.0) \
+        * params.layer_height_base
 
     # taille caracteristique d'un tetraedre (mediane des longueurs d'arete
     # sur tout le TetMesh) - utilisee comme tolerance de proximite pour
@@ -1858,53 +1237,7 @@ def run(
             )
             raw_layers.append((float(isovalue), cluster_contours, region_ids, local_frame))
 
-    unresolved: set[int] = set()
-    reversed_final: set[int] = set()
-
-    if params.support_driven_order is not None:
-        # Ordre pilote par le SUPPORT REEL - prioritaire sur les deux tris
-        # ci-dessous, qui ne connaissent que l'isovaleur/la continuite
-        # spatiale et jamais ce qui porte reellement la matiere. `up` = +Z,
-        # convention deja actee dans tout le projet (le plateau est a
-        # z=platform_z, l'impression progresse en Z croissant).
-        support_order, unresolved = _support_driven_order(
-            raw_layers, params, np.array([0.0, 0.0, 1.0])
-        )
-        raw_layers = [raw_layers[i] for i in support_order]
-        # `unresolved` indexait `raw_layers` AVANT permutation : le reindexer
-        # sur les positions finales, sinon le diagnostic designe des couches
-        # arbitraires.
-        unresolved = {new_i for new_i, old_i in enumerate(support_order) if old_i in unresolved}
-    elif params.frontier_order:
-        # Croissance de front : le deja-imprime doit toujours etre connexe.
-        # Voir `LayerParams.frontier_order` - contrainte DURE d'adjacence, la
-        # geodesique ne servant qu'a departager les couches atteignables.
-        progress = _geodesic_layer_progress(
-            raw_layers, tet_mesh, mesh_data, region_dependency_graph
-        )
-        order, reversed_before = _frontier_order(raw_layers, progress, gap_threshold)
-        raw_layers = [raw_layers[i] for i in order]
-        # Les indices du parcours designent les couches AVANT reordonnancement :
-        # les retraduire dans la numerotation finale, sans quoi le drapeau
-        # atterrirait sur une autre couche.
-        reversed_final = {
-            new_i for new_i, old_i in enumerate(order) if old_i in reversed_before
-        }
-    elif params.geodesic_order:
-        # La PROGRESSION vient du plus court chemin jusqu'au plateau a travers
-        # la matiere ; la CONTINUITE SPATIALE reste celle du parcours DFS
-        # existant. Les deux sont necessaires : la progression seule entrelace
-        # des couches eloignees (mesure x4 de degradation), la continuite
-        # seule suit l'isovaleur meme quand celle-ci part de l'extremite d'une
-        # coque suspendue au lieu de son attache.
-        progress = _geodesic_layer_progress(
-            raw_layers, tet_mesh, mesh_data, region_dependency_graph
-        )
-        geodesic_order = _spatial_dfs_order(
-            raw_layers, region_ranks, gap_threshold, progress
-        )
-        raw_layers = [raw_layers[i] for i in geodesic_order]
-    elif params.split_disjoint_clusters is not None:
+    if params.split_disjoint_clusters is not None:
         # tri spatial DFS (Decision 8) : degenere exactement vers le tri
         # historique (rank, isovalue) quand le clustering ne produit jamais
         # plus d'un cluster par isovaleur (graphe = chaine simple sans
@@ -1929,8 +1262,6 @@ def run(
             region_ids=region_ids,
             local_frame=local_frame,
             isovalue=isovalue,
-            support_unresolved=i in unresolved,
-            deposition_reversed=i in reversed_final,
         )
         for i, (isovalue, contours, region_ids, local_frame) in enumerate(raw_layers)
     ]

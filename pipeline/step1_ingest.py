@@ -2402,9 +2402,9 @@ def _repair_and_tetrahedralize(
 ) -> tuple[trimesh.Trimesh, TetMesh, str]:
     """REPARATION SYSTEMATIQUE de la surface (2026-10-22), appelee quand l'autodocteur trouve un
     defaut AVANT TetGen, ou quand TetGen refuse / produit un maillage inexploitable. Cascade
-    que la voie Bird (`pipeline.mesh_doctor.repair_candidates` : soudure des aretes courtes,
+    la reparation d'Apex (`pipeline.mesh_doctor.repair_candidates` : soudure des aretes courtes,
     union des coques qui se traversent, resolution geometrique, pymeshfix), chaque candidat passe
-    par la tetraedrisation FEM habituelle, rejete s'il ampute la piece (etendue) ou donne un
+    par la tetraedrisation habituelle, rejete s'il ampute la piece (etendue) ou donne un
     maillage inexploitable ; en dernier recours TetGen sans point de Steiner en surface (`Y`).
     Rend (surface retenue, maillage tetraedrique, libelle) ; leve `MeshIngestError` avec TOUTES
     les raisons si rien ne passe - jamais un maillage faux en silence."""

@@ -1,4 +1,4 @@
-// Socle Vulkan compute (phase 1 du plan « Bird entier en C++, puis Vulkan »).
+// Socle Vulkan compute (phase 1 du plan « portage C++, puis Vulkan »).
 //
 // CONTRAT : l'absence de GPU n'est JAMAIS une erreur. Sans APEX_WITH_VULKAN a la
 // compilation, sans vulkan-1.dll (charge a l'execution par volk, aucun lien

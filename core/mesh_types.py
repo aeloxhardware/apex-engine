@@ -180,148 +180,6 @@ class JunctionZone:
 # ---------------------------------------------------------------------------
 
 @dataclass
-class UpwardGrowthDiagnostic:
-    """
-    Résidu du redressement des directions de croissance descendantes
-    (étape 4, `FieldSolverParams.enforce_upward_growth`).
-
-    Un champ scalaire dont le gradient pointe VERS LE BAS empile ses couches
-    du haut vers le bas : chaque couche atterrit dans le vide. Sur cette
-    machine la pièce n'est jamais retournée (le plateau ne tourne qu'autour
-    de l'axe de la gravité), donc « le bas » dans le repère pièce est
-    toujours `-up_vector` — une direction de croissance descendante est
-    physiquement irréalisable, pas seulement sous-optimale.
-
-    `residual_descending_volume_fraction` est mesurée sur le champ
-    RÉELLEMENT résolu, pas sur les directions cibles : redresser les cibles
-    ne garantit pas mathématiquement un gradient montant partout, puisque le
-    lissage FEM peut encore produire une descente locale. Le résidu est donc
-    une mesure, jamais une supposition — donnée explicite, même discipline
-    que `CollisionReport.chuck_checked` et `AdjustmentReport.converged`.
-
-    Les fractions sont pondérées par VOLUME de tétraèdre, jamais un compte
-    brut : un maillage tétraédrique n'est pas uniforme (le raffinement local
-    près du plateau en est la preuve directe), donc un compte brut
-    surpondérerait les zones finement maillées.
-    """
-    # Nombre / fraction de volume des tétraèdres dont la direction CIBLE a été
-    # retournée avant l'assemblage.
-    flipped_tet_count: int = 0
-    flipped_volume_fraction: float = 0.0
-    # Ce qui descend ENCORE dans le champ résolu, malgré le redressement.
-    residual_descending_volume_fraction: float = 0.0
-    residual_descending_tet_count: int = 0
-
-
-@dataclass
-class SupportFeedbackDiagnostic:
-    """
-    Résidu de la boucle de rétroaction de surplomb
-    (étape 4, `FieldSolverParams.support_feedback_iterations`).
-
-    Tout le reste du pipeline évalue le surplomb en BOUCLE OUVERTE : l'étape 2
-    mesure l'angle des normales contre la verticale MACHINE globale, une fois,
-    **avant que le champ scalaire n'existe** ; ce risque figé pondère ensuite
-    le terme de gradient de l'étape 4. Le solveur n'est donc jamais pénalisé
-    pour les surplombs que ses PROPRES couches créent. L'étape 9b les mesure,
-    mais après tout, en pur diagnostic, sans rien réinjecter.
-
-    La boucle ferme ce circuit : résoudre φ, ré-évaluer le surplomb contre
-    `∇φ` (la direction de dépôt réellement produite, et non la verticale
-    machine), corriger les directions cibles fautives, re-résoudre.
-
-    `residual_*` est mesuré sur le champ RÉELLEMENT résolu à la dernière
-    itération — jamais sur les cibles corrigées, dont rien ne garantit
-    mathématiquement que le lissage FEM les respecte. Même discipline que
-    `UpwardGrowthDiagnostic.residual_descending_volume_fraction` et
-    `CollisionReport.chuck_checked` : une donnée explicite sur ce qui n'a pas
-    pu être résolu, jamais un silence.
-
-    Les fractions sont pondérées par VOLUME de tétraèdre, jamais un compte
-    brut — même raison qu'`UpwardGrowthDiagnostic` (maillage non uniforme).
-    """
-    iterations_used: int = 0
-    # Surplomb auto-infligé AVANT la première correction (boucle ouverte,
-    # c'est-à-dire l'état du pipeline historique).
-    initial_self_overhang_tet_count: int = 0
-    initial_self_overhang_volume_fraction: float = 0.0
-    # Ce qui reste après la dernière itération.
-    residual_self_overhang_tet_count: int = 0
-    residual_self_overhang_volume_fraction: float = 0.0
-    # Nombre de tétraèdres dont la direction cible a été corrigée (cumulé sur
-    # toutes les itérations, un tétraèdre pouvant l'être plusieurs fois).
-    corrected_tet_count: int = 0
-    # Parmi ces corrections, combien ont pris la direction GÉODÉSIQUE LOCALE
-    # du tétraèdre plutôt que la rotation minimale (voir
-    # `FieldSolverParams.support_feedback_use_geodesic_target`). Cumulé sur
-    # toutes les itérations. 0 avec le mécanisme désactivé — ce qui le rend
-    # distinguable d'un mécanisme actif mais dont la géodésique n'a jamais été
-    # retenue, cas qui signalerait que le signal n'aide pas sur ce modèle.
-    geodesic_target_count: int = 0
-    # True si une itération n'a plus rien trouvé à corriger (surplomb
-    # auto-infligé strictement nul) — la seule vraie convergence.
-    converged: bool = False
-    # True si la boucle s'est arrêtée parce que le gain d'une itération à la
-    # suivante était devenu négligeable (voir
-    # `FieldSolverParams.support_feedback_min_improvement`), sans que le
-    # surplomb soit résorbé. Distinct de `converged` : s'arrêter faute de
-    # progrès n'est pas avoir résolu le problème, et confondre les deux
-    # masquerait un plateau derrière un succès apparent.
-    stalled: bool = False
-    # Fraction de volume en surplomb auto-infligé mesurée à CHAQUE itération,
-    # dans l'ordre. Permet de lire la courbe de décroissance (et de constater
-    # un éventuel rebond) plutôt que ses seules extrémités.
-    volume_fraction_history: list[float] = field(default_factory=list)
-
-
-@dataclass
-class SmoothnessModulationDiagnostic:
-    """
-    Ce qu'a fait la modulation spatiale du lissage (étape 4,
-    `FieldSolverParams.smoothness_modulation_strength`).
-
-    Le terme de lissage était jusqu'ici pondéré par UN scalaire global, le
-    même partout. Sur une pièce qui se ramifie, il force le champ à étaler de
-    part et d'autre du branchement le compromis entre deux directions de dépôt
-    incompatibles (« monter dans le pilier » contre « partir à l'horizontale
-    dans le bras ») — d'où des couches qui se courbent AVANT l'angle au lieu
-    de rester planes puis de casser. La modulation abaisse localement ce poids
-    là où la pièce se ramifie, ce qui rend la cassure possible sans découper
-    le domaine (le champ reste UNIQUE, donc ses couches ne peuvent toujours
-    pas se croiser).
-
-    L'indicateur de ramification est `|div(X)|`, X étant le flux géodésique
-    normalisé : dans un tube de section constante le front n'accélère pas et
-    la divergence est nulle ; à un branchement l'aire du front change d'un
-    coup et elle s'élève. Mesuré sur `real_overhang.stl` : 1,0× dans le corps
-    du pilier, 2,0× au milieu du bras, jusqu'à 103× aux jonctions.
-
-    FAUX POSITIFS CONNUS, mesurés et non masqués : l'indicateur s'élève aussi
-    aux FRONTIÈRES du champ de distance, qui ne sont pas des branchements — la
-    source plateau (26×) et les extrémités libres (257× au sommet du pilier,
-    805× au bout du pilier suspendu). C'est ce que `boundary_tet_count`
-    quantifie. Le plancher de poids borne leur effet ; il ne les supprime pas.
-    """
-    # Quantiles de l'indicateur brut |div(X)|, dans l'ordre des quantiles
-    # nommés ci-dessous — permet de lire la forme de la distribution plutôt
-    # que ses seules extrémités (même discipline que
-    # `SupportFeedbackDiagnostic.volume_fraction_history`).
-    indicator_quantile_levels: list[float] = field(default_factory=list)
-    indicator_quantiles: list[float] = field(default_factory=list)
-    # Poids de lissage effectivement appliqués (après plancher).
-    min_weight: float = 1.0
-    median_weight: float = 1.0
-    # Nombre de tétraèdres réellement ramenés AU plancher : s'il est élevé,
-    # c'est le plancher qui pilote le mécanisme et non l'indicateur, ce que le
-    # simple `min_weight` ne dirait pas.
-    floored_tet_count: int = 0
-    # Tétraèdres touchant un nœud source (plateau) ou une frontière libre du
-    # domaine, où l'indicateur est un artefact de bord. Donnée explicite : le
-    # mécanisme les module quand même, et il faut pouvoir le savoir.
-    boundary_tet_count: int = 0
-
-
-@dataclass
 class ScalarField:
     """
     Champ scalaire résolu sur le TetMesh. Ses isosurfaces définissent les
@@ -334,57 +192,6 @@ class ScalarField:
     # une approximation. C'est aussi directement ce dont l'étape 5 a besoin
     # (norme moyenne du gradient local par couche).
     gradient: Optional[np.ndarray] = None
-    # Résidu du redressement des directions descendantes (étape 4). None = le
-    # mécanisme était DÉSACTIVÉ (défaut historique), à distinguer d'un
-    # diagnostic présent avec un résidu nul (mécanisme actif et pleinement
-    # efficace).
-    upward_growth_diagnostic: Optional["UpwardGrowthDiagnostic"] = None
-    # Résidu de la boucle de rétroaction de surplomb (étape 4). None = le
-    # mécanisme était DÉSACTIVÉ (défaut), à distinguer d'un diagnostic présent
-    # avec un résidu nul (mécanisme actif et pleinement efficace).
-    support_feedback_diagnostic: Optional["SupportFeedbackDiagnostic"] = None
-    # Ce qu'a fait la modulation spatiale du lissage (étape 4). None = le
-    # mécanisme était DÉSACTIVÉ (défaut), à distinguer d'un diagnostic présent
-    # dont tous les poids valent 1.0 (mécanisme actif mais indicateur plat,
-    # ce qui est le cas normal d'une pièce SANS ramification).
-    smoothness_modulation_diagnostic: Optional["SmoothnessModulationDiagnostic"] = None
-    # Champ multibranche (step4b) : branche de chaque tetraedre et profondeur de chaque
-    # branche dans l'arbre de croissance depuis le plateau. L'etape 5 s'en sert comme
-    # « regions » et « rangs » de l'ordre d'impression. None = champ unique.
-    branch_labels: Optional[np.ndarray] = None
-    branch_depths: Optional[dict] = None
-
-
-# ---------------------------------------------------------------------------
-# Contraintes utilisateur (points d'attache, esthétique, structurel)
-# ---------------------------------------------------------------------------
-
-class ConstraintType(Enum):
-    ATTACH_POINT = "attach_point"
-    AESTHETIC = "aesthetic"
-    STRUCTURAL = "structural"
-
-
-class ConstraintFalloff(Enum):
-    LINEAR = "linear"
-    GAUSSIAN = "gaussian"
-    CUBIC = "cubic"
-
-
-@dataclass
-class Constraint:
-    """
-    Contrainte injectée dans le solveur de champ scalaire (étape 4).
-    Envoyée dynamiquement depuis l'UI TypeScript, une par point d'attache
-    ou par zone esthétique/structurelle.
-    """
-    type: ConstraintType
-    position: Vec3
-    target_field_value: Optional[float] = None
-    target_normal: Optional[Vec3] = None
-    influence_radius: float = 1.0
-    falloff: ConstraintFalloff = ConstraintFalloff.GAUSSIAN
-    weight: float = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -425,17 +232,6 @@ class Layer:
     # `_compute_junction_variance_scores`). Champ pur, jamais utilisé pour
     # modifier `contour_3d`/`toolpath_2d` : un diagnostic, pas un fix.
     junction_variance_score: Optional[float] = None
-    # Diagnostic de `LayerParams.support_driven_order` (step5) : `False` sauf
-    # si ce mécanisme est actif ET que cette couche a dû être placée sans
-    # support suffisant sous elle. DONNÉE EXPLICITE, jamais un silence — même
-    # discipline que `CollisionReport.chuck_checked` et
-    # `AdjustmentReport.converged` : une couche placée faute de mieux doit être
-    # signalée, pas noyée dans un ordre d'apparence normale. Porté par `Layer`
-    # plutôt qu'un objet agrégé séparé, même patron que
-    # `junction_variance_score` ci-dessus : ne change pas la signature de
-    # retour de step5.run() (`-> list[Layer]`).
-    support_unresolved: bool = False
-
     # Le dépôt de cette couche se fait dans le sens OPPOSÉ à la normale de son
     # repère local, c'est-à-dire le long de `-∇φ`.
     #
@@ -443,8 +239,7 @@ class Layer:
     # lequel on parcourt ses isosurfaces. Tant que l'ordre était « φ
     # croissant » (tout l'historique du projet), déposer selon `+∇φ` était vrai
     # par construction, et l'étape 8 pouvait le supposer sans le dire. Un ordre
-    # qui redescend le long d'une pièce suspendue — voir
-    # `LayerParams.frontier_order` — rend cette supposition fausse : on colle
+    # qui redescend le long d'une pièce suspendue — une croissance de front — rend cette supposition fausse : on colle
     # alors de la matière SOUS ce qui existe déjà, ce qui demande à la tête de
     # pointer vers le haut (B ≈ 180° sur cette machine, qui couvre 0-185°).
     #

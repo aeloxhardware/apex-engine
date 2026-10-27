@@ -2,8 +2,7 @@
 Part de la surface du modele hors du volume tetraedrise (core/tet_coverage.py).
 
 Usage :
-  .venv/Scripts/python.exe scripts/check_tet_coverage.py <stl> [--resolution=0.8]   # pipeline FEM d'Apex (step1)
-  .venv/Scripts/python.exe scripts/check_tet_coverage.py --bird <modele> <passe> [variante]   # maillage de la voie Bird
+  .venv/Scripts/python.exe scripts/check_tet_coverage.py <stl> [--resolution=0.8]   # maillage de step1
 Affiche la fraction, l'aire et les plus grands amas (aire mm2, centre x y z).
 """
 import os
@@ -32,21 +31,6 @@ def show(label, rep, seconds):
 def main():
     flags = {a.split("=")[0]: a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--") and "=" in a}
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
-    if "--bird" in sys.argv:
-        model, k = args[0], int(args[1])
-        variant = args[2] if len(args) > 2 else "_pin"
-        pre = os.path.join(ROOT, "research", "S4_Slicer", "output_models", "loop_" + model.replace(" ", "_") + variant)
-        cells = np.load(pre + "_cells.npy")
-        p0 = np.load(pre + "_pass0.npy")
-        src = os.path.join(ROOT, "research", "S4_Slicer", "input_models", model + ".stl")
-        part = trimesh.load(src)
-        # la voie Bird recentre la piece (xy sur le plateau, z = 0) : meme repere que son maillage
-        lo, hi = part.bounds
-        part.apply_translation([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]])
-        t0 = time.time()
-        rep = surface_outside_volume(part.vertices, part.faces, p0, cells)
-        show(f"{model} (maillage Bird, passe 0)", rep, time.time() - t0)
-        return
     from pipeline import step1_ingest
     stl = args[0]
     t0 = time.time()

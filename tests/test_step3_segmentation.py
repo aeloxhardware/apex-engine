@@ -36,7 +36,6 @@ from core.geometry_utils import build_face_adjacency
 from pipeline.step3_segmentation import (
     SegmentationError,
     SegmentationParams,
-    _anchor_growth_directions,
     _compute_platform_contact,
     _face_direction_compatibility,
     run as segmentation_run,
@@ -634,95 +633,3 @@ def test_l_shape_angular_gate_does_not_over_fragment(l_shape_data):
         f"bras : {len(distinct_non_vertical_directions)} directions "
         f"non-verticales distinctes trouvees"
     )
-
-
-# ---------------------------------------------------------------------------
-# anchor_growth_weight - la direction doit suivre l'ANCRAGE, pas seulement
-# minimiser le surplomb residuel (voir SegmentationParams.anchor_growth_weight)
-# ---------------------------------------------------------------------------
-
-def test_anchor_growth_disabled_by_default_leaves_directions_unchanged(l_shape_data):
-    """
-    `anchor_growth_weight=None` (defaut) = comportement historique STRICTEMENT
-    inchange - meme discipline opt-in que max_region_merge_angle_deg.
-    """
-    mesh_data, overhang_map = l_shape_data
-    base = SegmentationParams(platform_z=0.0, platform_contact_tolerance=0.5)
-
-    without = segmentation_run(mesh_data, overhang_map, base)
-    explicit_none = segmentation_run(
-        mesh_data, overhang_map, replace(base, anchor_growth_weight=None)
-    )
-
-    assert set(without.regions) == set(explicit_none.regions)
-    for region_id, region in without.regions.items():
-        np.testing.assert_allclose(
-            region.target_direction, explicit_none.regions[region_id].target_direction
-        )
-
-
-def test_anchor_growth_accepts_downward_growth_for_a_pendant_region():
-    """
-    Le critere d'ancrage n'est PAS "toujours vers le haut" : une region
-    reellement SUSPENDUE (rattachee a son parent par le HAUT) croit vers le
-    BAS, et `_anchor_growth_directions` doit rendre cette direction telle
-    quelle, sans la redresser.
-
-    C'est exactement ce qui distingue ce mecanisme de
-    `FieldSolverParams.enforce_upward_growth` (step4), qui retourne de force
-    TOUTE direction descendante et se tromperait donc ici. Sans ce test, rien
-    n'empecherait de "corriger" l'ancrage en une simple regle de verticalite,
-    qui casserait le cas d'usage 4 axes vise par le projet.
-
-    Configuration minimale et deterministe (une fixture maillee reelle fusionne
-    tout en une seule region, ce qui ne permet pas d'isoler le pendant) :
-      - region 0, racine posee sur le plateau, faces hautes ;
-      - region 1, pendante, rattachee a la region 0 par sa face HAUTE (z=8)
-        et descendant jusqu'a z=2.
-    """
-    face_centers = np.array(
-        [
-            [0.0, 0.0, 10.0],   # face 0 - region 0, contact plateau (ancrage)
-            [0.0, 0.0, 14.0],   # face 1 - region 0, haut de la table
-            [1.0, 0.0, 8.0],    # face 2 - region 1, haut du pendant (ancrage)
-            [1.0, 0.0, 2.0],    # face 3 - region 1, bas du pendant
-        ]
-    )
-    region_labels = np.array([0, 0, 1, 1], dtype=np.int64)
-    is_platform_contact = np.array([True, False, False, False])
-    rows = [0, 1, 0, 2, 2, 3]
-    cols = [1, 0, 2, 0, 3, 2]
-    face_adjacency = sp.coo_matrix(
-        (np.ones(len(rows)), (rows, cols)), shape=(4, 4)
-    ).tocsr()
-    up = np.array([0.0, 0.0, 1.0])
-
-    growth = _anchor_growth_directions(
-        region_labels, face_centers, is_platform_contact, face_adjacency,
-        {0: 0, 1: 1}, up,
-    )
-
-    # La racine posee au plateau croit vers le haut...
-    assert float(growth[0] @ up) > 0.0
-    # ...et le pendant, ancre par le haut, croit vers le BAS - jamais redresse.
-    assert float(growth[1] @ up) < 0.0
-
-
-def test_anchor_growth_directions_point_away_from_platform_anchor(flat_box_data):
-    """
-    `_anchor_growth_directions` : une region posee sur le plateau a une
-    croissance qui s'en ELOIGNE (composante montante), jamais l'inverse.
-    """
-    mesh_data, overhang_map = flat_box_data
-    face_adjacency = build_face_adjacency(mesh_data.faces, mesh_data.face_count)
-    face_centers = mesh_data.vertices[mesh_data.faces].mean(axis=1)
-    up = np.array([0.0, 0.0, 1.0])
-
-    is_platform_contact = _compute_platform_contact(mesh_data, -5.0, 0.5)
-    region_labels = np.zeros(mesh_data.face_count, dtype=np.int64)  # une seule region
-
-    growth = _anchor_growth_directions(
-        region_labels, face_centers, is_platform_contact, face_adjacency, {0: 0}, up
-    )
-
-    assert float(growth[0] @ up) > 0.0

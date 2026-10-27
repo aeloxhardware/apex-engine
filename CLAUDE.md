@@ -12,6 +12,19 @@ sans redemander les spécifications déjà actées. L'IA peut et doit modifier c
 
 ---
 
+## VOIE UNIQUE : LA MÉTHODE DE LA CHALEUR (décision de l'utilisateur, 2026-10-27)
+
+Le champ scalaire EST la distance au plateau à travers la matière, par la méthode de la chaleur
+(`pipeline/step4_field_solver.py`) ; les couches sont ses isosurfaces, ordonnées par isovaleur
+(limite #79). **Le champ FEM directionnel et la voie Bird sont supprimés**, avec tout ce qui ne
+servait qu'eux (champ multibranche, parties planes, contraintes utilisateur `Constraint[]`,
+options de step3 et step5 liées). Leur code et leurs mesures restent dans l'historique git et
+dans la branche `bird_old` ; ils ne sont plus cités que comme inspiration (S4 Slicer, Joshua
+Bird, voir README et `CITATION.cff`). Contrat d'interface passé à la version 2
+(`CONTRACT_CHANGES.md`). Les mesures chiffrées des limites ci-dessous qui parlent de « FEM » ou
+de mécanismes retirés sont des archives, pas des comportements du code actuel. À refaire sur la
+voie chaleur : points d'attache (contraintes utilisateur).
+
 ## NUMÉRO DE VERSION ET DÉPÔT COMMUN (décision de l'utilisateur, 2026-10-26)
 
 L'application Apex (moteur + interface) a **un seul numéro de version**, rangé dans le dépôt
@@ -270,9 +283,6 @@ slicer_engine/
 │   └── schema.py                    #   (de)sérialisation JSON <-> dataclasses, pont avec l'UI TS
 ├── pipeline/
 │   ├── __init__.py
-│   ├── bird/                        # FAIT (phase 1) — voie Bird (GPL-3.0, Joshua Bird), limite #75 :
-│   │                                 #   deformation, loop, fold_judge, deformed_slicing, machine_toolpath,
-│   │                                 #   skin/ (zones P2, skin_carve P3, paths P4, print_order P5, chain)
 │   ├── step1_ingest.py              # FAIT — ingestion mesh + tétraédrisation (+ détection
 │   │                                 #   automatique des cavités internes pour tetgen, voir limite #7 ;
 │   │                                 #   + raffinement local près du plateau via add_region, limite #36)
@@ -295,9 +305,6 @@ slicer_engine/
 │   │                                 #   composed_rotation_angles_and_directions,
 │   │                                 #   refine_axis_angles_local_search (IK generique, step8),
 │   │                                 #   point_in_polygon_2d
-│   ├── constraints.py               # FAIT — registre extensible d'assembleurs de contraintes
-│   │                                 #   utilisateur (ATTACH_POINT/AESTHETIC/STRUCTURAL), point
-│   │                                 #   d'extension pour tout nouveau type sans toucher step4
 │   ├── _cpp.py                      # FAIT — chargeur du noyau natif + interrupteur APEX_USE_CPP
 │   │                                 #   (Python par DÉFAUT ; absence du .pyd jamais une erreur).
 │   │                                 #   Échafaudage de migration, retiré à la bascule.
@@ -448,21 +455,9 @@ SlicingParams {
 }
 
 FieldSolverParams {
-  laplacian_smoothness_weight: float
-  gradient_overhang_weight: float
   resolution: float                                   // taille de tétra pour la résolution FEM
   max_solver_iterations: int
   convergence_tolerance: float
-}
-
-Constraint[] {                                        // un par point d'attache / zone
-  type: "attach_point" | "aesthetic" | "structural"
-  position: Vec3
-  target_field_value: float | null
-  target_normal: Vec3 | null
-  influence_radius: float
-  falloff: enum (linear, gaussian, cubic)
-  weight: float
 }
 
 ColorMap {
@@ -517,21 +512,9 @@ SlicingParams {
 }
 
 FieldSolverParams {
-  laplacian_smoothness_weight: float                 // pondération lissage vs contrainte d'angle
-  gradient_overhang_weight: float                    // poids de la contrainte "gradient ~ normale locale"
   resolution: float                                   // taille de voxel/tétra pour la résolution FEM
   max_solver_iterations: int
   convergence_tolerance: float
-}
-
-Constraint[] (envoyés dynamiquement, un par point d'attache ou zone) {
-  type: "attach_point" | "aesthetic" | "structural"
-  position: Vec3
-  target_field_value: float | null
-  target_normal: Vec3 | null
-  influence_radius: float
-  falloff: enum (linear, gaussian, cubic)
-  weight: float
 }
 
 ColorMap {
@@ -590,17 +573,19 @@ Les 10 étapes du pipeline
 **Sortie :** `region_id` par face + `RegionDependencyGraph`.
 
 
-## Étape 4 — Construction et résolution du champ scalaire continu
+## Étape 4 — Champ scalaire : distance au plateau (méthode de la chaleur)
 
-**Ce que le code fait précisément :**
-- Sur le `TetMesh`, assemble l'opérateur Laplacien discret (matrice creuse, `scipy.sparse`).
-- Ajoute les contraintes dures/molles au système :
-  - Contrainte de surplomb (issue de l'étape 2/3) : le gradient du champ à chaque tétraèdre proche d'une face à risque doit s'aligner avec la direction candidate de sa région, pondéré par `gradient_overhang_weight`.
-  - Contraintes utilisateur (`Constraint[]` reçus de l'UI) : pour chaque point d'attache, ajoute une ligne au système forçant `field(position) ≈ target_field_value`, atténuée par `influence_radius` et `falloff`.
-  - Lissage global pondéré par `laplacian_smoothness_weight`.
-- Résout le système linéaire (`scipy.sparse.linalg.spsolve` ou solveur itératif `cg`/`gmres` si gros système, potentiellement accéléré CuPy comme sur ton pipeline mesh existant) jusqu'à `convergence_tolerance` ou `max_solver_iterations`.
+**Ce que le code fait précisément (`pipeline/step4_field_solver.py`) :**
+- Sur le `TetMesh`, assemble la rigidité FEM P1 `L` et la masse concentrée `M`.
+- Diffuse la chaleur depuis les nœuds du plateau : `(M + t L) u = source`, `t = h² ·
+  heat_method_time_factor` (h = arête médiane).
+- Normalise le flux `X = −∇u/‖∇u‖` par tétraèdre ; sur la machine actuelle (C imposé par la
+  position, B vers +R seulement), `X` est projeté sur le demi-plan atteignable.
+- Intègre `L φ = div X`, recale `φ` à 0 sur le plateau : `φ` est la distance au plateau à travers
+  la matière, `‖∇φ‖ ≈ 1`. Les couches sont ses isosurfaces ; l'ordre d'impression par isovaleur
+  croissante est la progression de la matière (une pièce suspendue vient après ce qui la porte).
 
-**Sortie :** `ScalarField` (valeur par nœud du TetMesh).
+**Sortie :** `ScalarField` (valeur par nœud, gradient constant par tétraèdre).
 
 
 ## Étape 5 — Génération des couches courbes (isosurfaces)
@@ -1248,762 +1233,6 @@ pour affichage/validation avant export G-code.
     activation explicite.
 
 
-50. **AVERTISSEMENT DE FIABILITÉ (ajouté après coup) — cette limite #50 a
-    décrit pendant un temps `LayerParams.support_driven_order` comme écrit,
-    testé et mesuré, alors que RIEN de ce mécanisme n'existait dans
-    `pipeline/step5_layers.py` : ni le champ de paramètre, ni la fonction
-    `_support_driven_order`, ni le branchement dans `run()` — seul le champ de
-    diagnostic `Layer.support_unresolved` existait dans `core/mesh_types.py`,
-    jamais renseigné par personne. Les chiffres ci-dessous (1054 → 592, etc.)
-    n'ont donc PAS été reproduits par le code réellement présent. Le mécanisme
-    a depuis été implémenté pour de bon (voir limite #51), et sa
-    réimplémentation a fait apparaître trois défauts que la description
-    ci-dessous ne mentionnait pas. Leçon de méthode, valable pour tout ce
-    fichier : une limite documentée n'est une preuve de rien tant que le code
-    n'a pas été relu — vérifier l'existence avant de raisonner dessus.**
-
-    **Cause racine du dépôt sans support : l'ordre DES COUCHES entre elles,
-    jamais l'ordre à l'intérieur d'une couche. Corrigé par un ORACLE DE
-    SUPPORT (`LayerParams.support_driven_order`, step5) — 1054 → 592 défauts
-    (−44 %) pour +0,08 % de trajet à vide.**
-
-    ### Le diagnostic, vérifié maillon par maillon (pas une hypothèse)
-
-    Sur `res/test_models/death.stl`, 1054 dépôts se faisaient sans rien en
-    dessous (0,53 % de la matière extrudée). Mesures complètes, sur les 1054
-    défauts localisés un par un via
-    `SupportCheckParams(locate_supporting_point=True)` :
-
-    | Constat | Valeur |
-    |---|---|
-    | Défauts qui sont un problème d'ordre **à l'intérieur** d'une couche | **0,3 %** (3/1054) |
-    | Points fautifs ayant bien de la matière sous eux **dans le modèle** | **98,9 %** |
-    | …dont le support est sur une couche **postérieure** | **84,1 %**, écart médian **55 couches** |
-    | …dont le support est sur une couche **antérieure** | **0 %** |
-    | Chevauchement d'altitude entre rangs de régions (rang 2→3) | **25,71 mm** |
-    | Espacement réel des couches | 0,215 mm pour 0,2 mm visé — **correct** |
-
-    Le modèle est bon, le remplissage est bon, l'espacement est bon. Le tri
-    historique `(rang de région, isovaleur)` traitait le **rang comme un ordre
-    TOTAL** : il montait jusqu'à z=84,11 mm puis **redescendait à z=58,40 mm**
-    pour y imprimer 111 des 257 couches — des allers-retours verticaux de
-    plusieurs centimètres, déposant de la matière là où la couche porteuse
-    n'existait pas encore.
-
-    ### Cinq mécanismes tentés AVANT, tous mesurés, tous écartés
-
-    | Tentative | Fichier | Résultat mesuré |
-    |---|---|---|
-    | Découpage sur distance horizontale | step6 | 1055 → 1115 (**+5,7 %**) |
-    | Tri des polylignes par altitude | step6 | 1055 → 1084 (+2,7 %), trajet **+45 %** |
-    | Direction de fusion des tronçons courts | step6 | 1055 → 1054 (−1) |
-    | Découpage des polylignes ouvertes | step6 | 1054 → 1021 (−3,1 %), trajet **+16 %** |
-    | Dépendances de régions + altitude | step5 | 1054 → 1521 (**+44 %**) |
-
-    **Les deux leçons, payées cinq fois — à ne pas réapprendre :**
-    - **Réordonner ne CRÉE jamais de support** : ça déplace seulement qui en
-      manque. Couper un tronçon pour supprimer une descente transforme le point
-      bas en début de segment — il reste sans appui, il change de catégorie.
-    - **Un critère d'altitude GLOBAL ignore le support LOCAL.** C'est ce qui a
-      fait échouer la tentative n°5 : l'altitude en clé PRIMAIRE fait passer une
-      pièce pendante (plus basse) avant son porteur.
-
-    Corollaire de méthode : les quatre tentatives dans step6 visaient **0,3 %**
-    du défaut. Mesurer *où* est le défaut avant de choisir *quel fichier* ouvrir
-    aurait économisé quatre implémentations complètes.
-
-    ### Le mécanisme retenu (`pipeline/step5_layers.py::_support_driven_order`)
-
-    Poser **directement** la bonne question, couche par couche : « si j'imprime
-    cette couche maintenant, ses points ont-ils de la matière déjà déposée en
-    dessous ? » — avec **exactement** le test qui compte déjà les défauts
-    (`step9b._has_support_below`), pour **décider** l'ordre au lieu de seulement
-    **constater** les dégâts. Aucune primitive réécrite :
-    `_PrintedGeometryIndex` (step9) + `_has_support_below` (step9b) +
-    `point_has_support_along_direction` (core) sont réutilisés tels quels.
-
-    Glouton : une couche est ÉLIGIBLE si ≥ `min_supported_fraction` (0,9) de
-    ses points de contour ont un appui dans la matière déjà placée. Parmi les
-    éligibles : la plus proche de la précédente (anti-trajets à vide), puis la
-    plus basse. **Le support est la clé PRIMAIRE ; altitude et proximité ne
-    départagent que des couches déjà jugées imprimables.**
-
-    **Les surplombs sont protégés par construction** — le point qui avait fait
-    échouer la tentative n°5, soulevé explicitement par l'utilisateur : une
-    pièce qui pend est plus basse que ce qui la porte, mais tant que le porteur
-    n'existe pas elle n'est PAS supportée, donc jamais choisie. La règle « ce
-    qui pend s'imprime après » n'est plus encodée à part : elle **découle** du
-    test. Verrouillé par
-    `test_support_order_prefers_supported_over_lower`.
-
-    **Amorçage** : index vide → aucune couche éligible → le départage par
-    altitude prend la plus basse. Pas besoin de câbler `platform_z` dans step5.
-
-    **Performance** : une réévaluation naïve coûte O(couches² × points)
-    (~10 M de tests) — intenable en Python (même pathologie que #27/#30). On
-    exploite la **monotonie** (la matière ne disparaît jamais, un point supporté
-    le reste) : chaque couche ne retient que ses points *encore* non supportés,
-    et seules les couches dont l'AABB touche celle qui vient d'être placée sont
-    réévaluées. Coût mesuré : step1→8 de 238 s → 299 s (+26 %).
-
-    **Diagnostic explicite** : `Layer.support_unresolved` marque une couche
-    placée faute de support suffisant (11 sur 257 sur death.stl) — jamais une
-    exception, jamais un silence, même discipline que
-    `CollisionReport.chuck_checked` et `AdjustmentReport.converged`.
-
-    ### Limite assumée, documentée et non masquée
-
-    Le test porte sur `contour_3d` — les **contours**, pas le remplissage
-    (l'infill n'existe qu'à partir de step6). Le support est donc
-    **sous-estimé** : une couche portée uniquement par l'infill de la précédente
-    est jugée non supportée. Conservateur (jamais un faux « supporté ») et
-    suffisant pour un défaut à l'échelle de **55 couches**. Un test sur la
-    matière réelle exigerait de réordonner après step6, donc de recâbler
-    step6/step7 — chantier distinct, non fait.
-
-    ### Résultat mesuré (`death.stl`)
-
-    | | avant | après |
-    |---|---:|---:|
-    | défauts d'ordre | 1054 | **592 (−44 %)** |
-    | dépôts sans support | 0,53 % | **0,33 %** |
-    | trajet à vide total | 84 444 mm | 84 516 mm (**+0,08 %**) |
-    | step1→8 | 238 s | 299 s |
-
-    Opt-in (`support_driven_order=None` par défaut) : `nozzle_width` est un
-    champ REQUIS sans défaut arbitraire, step5 ne connaissant pas
-    `MachineProfile` — même discipline que `platform_z`, une source de vérité
-    unique jamais redevinée.
-
-    ### Généralisation : NON universelle, mesurée sur un second modèle
-
-    Sur `res/test_models/l-triple-axis-overhanged-shape.stl` (pièce fine,
-    ajourée, surplombs sur 3 axes) le mécanisme **dégrade légèrement** :
-    1 → 13 défauts d'ordre, et surtout **113 couches sur 141 signalées
-    `support_unresolved`**. Ce modèle n'avait quasiment aucun défaut d'ORDRE à
-    corriger (1 seul) — ses 596 dépôts non supportés sont des surplombs réels
-    résolus par inclinaison. Le mécanisme n'avait donc rien à y gagner.
-
-    Le 113/141 est le chiffre instructif : c'est la limite « contours seuls »
-    ci-dessus qui se manifeste. Sur une pièce massive les contours de couches
-    successives se recouvrent ; sur une pièce fine et ajourée, non — et le test
-    ne trouve presque jamais d'appui.
-
-    **Conséquence actée : le mécanisme reste opt-in et DÉSACTIVÉ par défaut**
-    (`main.py` ne l'active pas). Il vaut pour les pièces massives à branches
-    multiples, pas comme réglage universel. L'activer partout répéterait
-    exactement l'erreur des cinq tentatives précédentes. Le diagnostic
-    `Layer.support_unresolved` est le signal à regarder pour décider modèle par
-    modèle.
-
-51. **Le mécanisme d'ordre par support de la limite #50, écrit POUR DE BON —
-    quatre défauts trouvés en l'implémentant, puis MESURÉ COMME DÉGRADANT et
-    écarté (6ᵉ tentative du genre). La cause racine du surplomb négatif a
-    été remontée jusqu'au choix de direction de step3
-    (`anchor_growth_weight`), qui corrige un raisonnement réellement faux —
-    mais qui, mesuré sur un 4ᵉ modèle, DÉGRADE là où les trois premiers
-    disaient l'inverse : lui aussi reste opt-in et désactivé par défaut.
-    Bilan honnête de la session : deux mécanismes qui EXISTENT enfin
-    réellement et sont mesurables, aucun gain net universel.**
-
-    Point de départ : sur `res/test_models/death.stl` (Benchy imprimé à
-    l'envers), le GIF d'ordre d'impression montrait la coque en porte-à-faux
-    déposée **avant** ce qui la porte. La limite #50 décrivait le remède —
-    mais son code n'existait pas (voir l'avertissement en tête de #50).
-
-    ### Les quatre défauts, dans l'ordre où ils ont été trouvés
-
-    **1. Support LOCAL sans connectivité au plateau.** Première version :
-    « y a-t-il de la matière déjà placée juste en dessous ? ». Une coque bâtie
-    de bas en haut passe ce test à CHAQUE couche — chacune repose bien sur la
-    précédente — alors que l'ENSEMBLE ne touche le plateau nulle part. Le
-    mécanisme dégénérait silencieusement vers un tri par hauteur : ordre
-    mesuré quasi strictement croissant en Z, exactement le défaut à corriger.
-    **Fix** : deux notions distinctes, jamais confondues — la matière *placée*
-    et la matière *ANCRÉE* (au contact du plateau, ou supportée exclusivement
-    par de l'ancré). Seul un index d'ancrage (`anchored_index`) alimente le
-    test d'éligibilité ; une couche placée faute de mieux (`unresolved`) est
-    imprimée mais **n'ancre rien**, donc ne peut jamais servir de faux support.
-    Verrouillé par `test_support_order_rejects_shell_only_locally_supported`.
-
-    **2. Test de support purement VERTICAL.** Corollaire direct de la limite
-    déjà documentée dans step9b (« Validité du test vertical ») — non
-    transposée ici au départ. Sur un simple surplomb à 90°
-    (`l_shape_overhang.stl`), le champ courbe fait « démarrer » le bras
-    incliné ~2,5 mm PLUS HAUT que le sommet de son pied porteur : un test
-    vertical (fenêtre de 1,5 mm) ne voit jamais l'appui, qui existe pourtant
-    juste en dessous **en diagonale**. Aucune couche du bras ne s'ancrant, tout
-    le reste bascule en cascade. Mesure : **55,5 % des couches** signalées à
-    tort. **Fix** : tester le long des directions réellement atteignables par
-    la machine (`composed_rotation_directions`, la MÊME fonction que
-    step3/step9b), via `LayerParams.support_rotation_axes`. Résultat :
-    **55,5 % → 0,0 %** sur ce modèle.
-
-    **3. Départage par altitude seule parmi les couches suspendues.** Quand
-    aucune couche n'est éligible, le repli prenait la plus basse. Le statut
-    `unresolved` reste correct, mais l'ordre ENTRE couches suspendues ignorait
-    la proximité, donc les trajets à vide. **Fix** : même critère de proximité
-    au centroïde précédent que pour les couches éligibles — sans jamais
-    toucher au statut, qui reste calculé sur le seul `anchored_index`.
-
-    **4. Ancrage à la granularité de la COUCHE, et non de l'ARÊTE.** Une
-    couche entrait dans l'index d'ancrage en bloc, ou pas du tout — ce qui
-    ne laissait que deux comportements, tous deux faux :
-    - ancrer toute couche placée : c'est le faux support du défaut n°1, une
-      coque suspendue s'auto-ancre de proche en proche ;
-    - n'ancrer que les couches éligibles (≥ 90 % de points ancrés) : la
-      première couche seulement PARTIELLEMENT posée sur le plateau n'ancre
-      alors rien, et **toute la cascade se bloque dès le départ** — mesuré
-      sur death.stl : **100 % des couches** signalées non résolues, alors que
-      la géométrie produite était par ailleurs meilleure (cf. tableau step9b
-      ci-dessous, où la même configuration améliore la matière sans appui).
-
-    **Fix** : `_place_layer_in_index` n'ajoute qu'une arête dont les DEUX
-    extrémités sont ancrées. Une couche suspendue n'ancre toujours rien (son
-    masque est vide, le test du défaut n°1 continue de le vérifier) ; une
-    couche partiellement posée ancre sa seule part réellement posée, ce qui
-    est physiquement fidèle et laisse la cascade progresser. Cela impose de
-    suivre un MASQUE de points ancrés par couche, et non un simple compteur :
-    il faut savoir QUELS points le sont pour filtrer les arêtes.
-    Mesure sur death.stl : **100 % → 87,5 %** de couches non résolues, soit
-    le niveau de la référence (86,8 %) mais avec la géométrie améliorée.
-
-    ### Ce que le mécanisme fait, et ce qu'il ne peut pas faire
-
-    Il répond à « dans quel ORDRE ». Il ne peut pas faire apparaître un appui
-    qui n'existe pas : sur death.stl, la coque ne touche le pilier qu'à sa
-    base (couches 34-36 mesurées à 0,12-0,36 mm ; toutes les suivantes s'en
-    écartant **de façon monotone jusqu'à 36,4 mm** — vérifié couche par
-    couche, il n'existe aucun second point de contact). Les ~87 % de couches
-    `support_unresolved` sont donc un constat **fidèle** : ces couches sont
-    réellement suspendues, et le mécanisme les imprime bien **en dernier**.
-
-    ### VERDICT MESURÉ : le réordonnancement DÉGRADE — 6ᵉ tentative écartée
-
-    Imprimer les couches suspendues en dernier est bien ce que fait le
-    mécanisme — et cela **n'améliore pas** la matière réellement déposée dans
-    le vide. Mesure step9b sur death.stl, même configuration par ailleurs :
-
-    | ordre des couches | dépôts sans appui | % matière | défauts d'ORDRE |
-    |---|---:|---:|---:|
-    | historique (isovaleur croissante) | 1219 | **0,47 %** | **991** |
-    | piloté par le support | 1401 | 0,54 % | 1173 |
-
-    **+15 % de matière déposée sans appui, +18 % de défauts d'ordre.** Cette
-    tentative rejoint donc les cinq de la limite #50 : la sixième mesurée,
-    la sixième écartée.
-
-    **La raison, et c'est la leçon à retenir** : sur une pièce dont la masse
-    est suspendue, l'ordre par isovaleur construit la coque **de proche en
-    proche**, chaque couche reposant sur la précédente. Ce support LOCAL est
-    physiquement réel et utile — c'est ainsi qu'un surplomb progressif
-    s'imprime — même quand l'ensemble n'est relié au plateau par aucune
-    chaîne continue. Le mécanisme refuse de le compter, et il a raison de le
-    faire **pour le DIAGNOSTIC** (sans quoi une coque suspendue se déclare
-    supportée, défaut n°1 ci-dessus). Mais appliquer ce même refus à
-    l'ORDRE détruit une continuité qui, elle, servait à quelque chose.
-
-    Autrement dit : **« ancré au plateau » est le bon critère pour SIGNALER un
-    risque, et le mauvais pour ORDONNER.** Les deux questions se ressemblent
-    et n'ont pas la même réponse.
-
-    ### Le conflit d'objectifs à trancher (ouvert, pas une conclusion)
-
-    Ce résultat oppose deux exigences qui semblaient n'en faire qu'une :
-
-    - **« imprimer les couches suspendues en dernier »** — la demande
-      explicite à l'origine de ce chantier, motivée par une observation
-      visuelle juste (sur `death.stl`, la coque apparaît déposée avant ce qui
-      la porte). `support_driven_order` FAIT exactement cela : les ~196
-      couches suspendues sont repoussées après toutes les autres.
-    - **minimiser la matière déposée dans le vide** — ce que mesure step9b,
-      et qui se DÉGRADE de 15 % quand on applique le point précédent.
-
-    Les deux sont légitimes et ne coïncident pas : regrouper les couches
-    suspendues à la fin les prive de la continuité de proche en proche qui,
-    dans l'ordre par isovaleur, leur donnait un appui local réel. Aucune
-    mesure ne tranche entre « déposer moins de matière en l'air » et
-    « n'aborder les zones suspendues qu'une fois le reste solide » : c'est un
-    arbitrage d'usage, pas un fait géométrique. Il appartient à
-    l'utilisateur, et c'est pourquoi le mécanisme reste disponible et
-    paramétrable plutôt que supprimé ou imposé.
-
-    **Conséquence actée** : `support_driven_order` reste **opt-in et désactivé
-    par défaut** (`main.py` ne l'active pas). Contrairement à l'état décrit
-    avant cette session, il EXISTE désormais réellement et ses quatre défauts
-    sont corrigés : il est donc mesurable modèle par modèle, et son diagnostic
-    `Layer.support_unresolved` reste exploitable seul. Ne pas l'activer
-    globalement sans remesurer — ce serait répéter l'erreur payée six fois.
-
-    ### La vraie cause racine du surplomb négatif : le choix de direction (step3)
-
-    Remontée en mesurant, non en supposant :
-    - le gradient du champ sur la coque était à **158,5°** de la
-      `target_direction` que step3 lui assigne — quasi opposé ;
-    - cause : `main.py` activait `FieldSolverParams.enforce_upward_growth`,
-      qui retourne de force TOUTE direction descendante ;
-    - **le désactiver** aligne bien le champ sur la cible (158,5° → **29,4°**
-      d'écart : le solveur n'a jamais eu de bug, il obéissait au flip) — mais
-      **dégrade tout** : la couche la plus basse remonte de z=51,49 à z=53,19
-      pour un plateau à z=51,40 (plus AUCUNE couche ne touche le plateau) et
-      100 % d'entre elles deviennent `support_unresolved`. **Tentative
-      mesurée puis annulée**, `enforce_upward_growth` reste actif.
-    - Le vrai coupable est en amont : `_select_region_directions` (step3)
-      choisissait la direction en minimisant **uniquement le surplomb
-      résiduel**, sans jamais considérer par où la région rejoint le plateau.
-      Pour un plafond de cavité, la direction de moindre surplomb est **vers
-      le bas** (mesuré `[-0.26, 0.08, -0.96]` sur la plus grande région du
-      modèle, 717 faces) : optimale au sens du critère, et pourtant absurde —
-      la suivre voudrait dire commencer à imprimer **en l'air** au sommet du
-      capot (z≈100) pour descendre, alors qu'il ne tient que par sa base
-      (z≈59). `enforce_upward_growth` n'était qu'un cataplasme sur ce défaut.
-
-    ### `SegmentationParams.anchor_growth_weight` (opt-in, défaut `None`)
-
-    Pénalise les directions candidates qui s'opposent au sens de croissance
-    depuis l'**ANCRAGE RÉEL** de la région : ses faces au contact du plateau,
-    ou à défaut ses faces frontières avec une région **strictement moins
-    profonde** (ses parents). `_compute_print_depths` ne dépend d'aucune
-    direction — aucune circularité à s'en servir avant le choix des
-    directions ; les mêmes primitives (`_region_adjacency_graph`,
-    `_platform_root_region_ids`) servent ensuite à `_build_dependency_graph`,
-    une seule source de vérité sur « qui porte qui ».
-
-    **Pourquoi ce critère plutôt qu'une règle de verticalité** : il ACCEPTE
-    une direction descendante quand l'ancrage est en haut — une pièce
-    réellement suspendue croît vers le bas, et c'est le cas d'usage 4 axes
-    même du projet. `enforce_upward_growth` s'y tromperait. Verrouillé par
-    `test_anchor_growth_accepts_downward_growth_for_a_pendant_region`.
-
-    Deux pièges mesurés pendant la mise au point, tous deux corrigés :
-    - **filtrer les frontières sur la profondeur est essentiel, pas
-      cosmétique** : prendre toutes les frontières sans distinguer parents et
-      enfants place l'« ancrage » d'une région au-dessus d'elle — mesuré
-      **aggravant** (4 → 6 régions descendantes) ;
-    - **la pénalité doit être CONTINUE** (`(1 - alignement)/2`) et non un
-      simple `max(0, -alignement)` : ce dernier rend toutes les directions
-      non-opposées strictement équivalentes, si bien que sur une région sans
-      risque — résidu déjà nul partout — l'`argmin` restait arbitraire et
-      pouvait élire une direction quasi-opposée (3 régions du sommet
-      basculaient ainsi de montantes à descendantes).
-
-    Effet sur les directions (death.stl, `w=2.0`) : faces à direction
-    descendante **47,2 % → 15,4 %**, composante verticale moyenne pondérée
-    **-0,098 → +0,297**, et surtout la plus grande région du modèle (la coque,
-    717 faces) passe de **-0,96 à +0,58**. Sur `l_shape_overhang.stl` :
-    **strictement aucun changement**, à tous les poids testés.
-
-    **Non monotone en `w` — à ne pas régler à l'aveugle** : `w=0.25` AGGRAVE
-    (74,8 % de faces descendantes, pire que les 47,2 % de départ) avant que
-    `w>=0.5` n'améliore. Un poids trop faible déplace l'`argmin` sans le
-    dominer. Mesurer avant de choisir, ne jamais interpoler.
-
-    ### Résultat sur la métrique de RÉFÉRENCE (step9b), pas sur un intermédiaire
-
-    Le nombre de faces à direction descendante est un indicateur
-    INTERMÉDIAIRE : l'améliorer ne prouve rien tant que la matière
-    réellement déposée dans le vide n'a pas été recomptée (piège déjà payé
-    cinq fois en limite #50). Mesure `step9b` sur `death.stl`, qui compte les
-    dépôts sans appui sur la trajectoire machine finale :
-
-    | | couches | dépôts sans support | % matière | défauts d'ORDRE | surplomb réel |
-    |---|---:|---:|---:|---:|---:|
-    | `anchor=None` (référence) | 257 | 1266 | 0,53 % | 1054 | 1 |
-    | **`anchor=2.0`** | 224 | **1219** | **0,47 %** | **991** | **0** |
-    | `anchor=2.0`, `enforce_upward_growth=False` | 228 | 1312 | 0,49 % | 1090 | 0 |
-
-    Gain réel mais MODESTE : **-11 % de matière déposée sans support**
-    (0,53 % → 0,47 %), -6 % de défauts d'ordre, et le seul surplomb classé
-    irrésolvable disparaît. La 3ᵉ ligne confirme au passage, par une seconde
-    voie, que réactiver `enforce_upward_growth` était le bon choix : le
-    désactiver reste moins bon même avec l'ancrage actif.
-
-    **Comparer les COMPTES absolus entre ces lignes serait fautif** : le
-    nombre de couches change (257 → 224), donc le nombre de points testés
-    aussi. Le pourcentage de matière extrudée est la seule des trois colonnes
-    qui reste comparable d'une ligne à l'autre.
-
-    ### Généralisation : NON UNIVERSEL — mesuré dégradant sur un 4ᵉ modèle
-
-    | modèle | matière sans appui (step9b) | verdict |
-    |---|---|---|
-    | `death.stl` | 0,53 % → **0,47 %** | améliore |
-    | `l_shape_overhang.stl` | inchangé à tous les poids | neutre |
-    | `l-triple-axis-overhanged-shape.stl` | 4,11 % → 4,11 % (identique au bit près) | neutre |
-    | `turkish.stl` | 2,78 % → **4,89 %** (défauts d'ordre 5475 → 7715) | **dégrade (+76 %)** |
-
-    **Erreur de méthode commise puis corrigée en cours de session, à ne pas
-    refaire** : sur la foi des TROIS premiers modèles (améliorant ou
-    strictement neutre), le mécanisme a été activé par défaut dans
-    `main.py` — c'est-à-dire traité comme un réglage universel. Le
-    quatrième modèle montre qu'il ne l'est pas, et l'activation a été
-    RETIRÉE. Trois mesures concordantes ne font pas une généralité : c'est
-    exactement la mise en garde déjà écrite en limite #50 (« l'activer
-    partout répéterait l'erreur des cinq tentatives précédentes »), qui n'a
-    pas suffi à l'éviter.
-
-    **Conséquence actée** : `anchor_growth_weight` reste **opt-in, désactivé
-    par défaut**, à mesurer modèle par modèle — même statut que
-    `support_driven_order`. Il corrige un raisonnement réellement faux dans
-    `_select_region_directions` (une direction de moindre surplomb peut être
-    physiquement absurde) ; cela ne suffit pas à en faire un gain net partout,
-    et la raison de l'écart entre `death.stl` et `turkish.stl` n'est PAS
-    élucidée. Deux hypothèses ont été testées et **réfutées** — inutile de
-    les reprendre :
-    - *« turkish aurait ses régions toutes à profondeur 0, donc sans parent
-      identifiable »* : faux, les deux modèles ont 2 racines et des
-      profondeurs étagées comparables (death `{0:2, 1:1, 2:2, 3:12, 4:3,
-      5:2}`, turkish `{0:2, 1:5, 2:3, 3:1}`) ;
-    - *« l'ancrage sacrifierait trop de risque de surplomb sur turkish »* :
-      faux, et même inversé — death sacrifie **13,2 %** du risque total et
-      s'améliore, turkish n'en sacrifie que **5,6 %** et se dégrade.
-
-    ### Découverte annexe : le critère de risque résiduel est DÉGÉNÉRÉ
-
-    En mesurant ce qui précède : le risque résiduel de la direction élue est
-    **exactement 0 sur les deux modèles** sans ancrage. Autrement dit, il
-    existe toujours au moins une direction candidate compatible avec TOUTES
-    les faces de la région — souvent plusieurs — et `np.argmin` en choisit
-    alors une **arbitrairement**, par ordre d'indice dans la grille.
-
-    C'est le même phénomène que celui déjà constaté pour
-    `max_region_merge_angle_deg` (« la sphère de candidats est assez dense
-    pour qu'un compromis numérique existe sans être géométriquement
-    cohérent »), mais ici il touche le choix de direction lui-même, pas la
-    décision de fusion. Deux conséquences :
-    - la direction d'une région n'est, dans le cas général, **pas déterminée
-      par un optimum** mais par un départage arbitraire ;
-    - tout terme ajouté à ce critère (l'ancrage, ou autre) opère donc sur un
-      ensemble où le critère principal est indifférent — ce qui explique
-      qu'il ait un effet massif et peu prévisible, sans être pour autant un
-      « mauvais arbitrage » entre risque et ancrage.
-
-    Piste qui découlait de ce constat, **implémentée, MESURÉE ET ÉCARTÉE** :
-    départager les directions à risque résiduel égal par un critère
-    **intrinsèque** — la marge angulaire de la face la plus critique à son
-    seuil de surplomb, qui distingue une direction « tout juste compatible »
-    d'une direction confortable — au lieu de laisser `argmin` trancher par
-    ordre d'indice. Départage lexicographique strict : le risque résiduel
-    reste le critère primaire, jamais sacrifié.
-
-    | modèle | sans départage | avec départage par marge |
-    |---|---:|---:|
-    | `death.stl` | **0,53 %** | 0,55 % |
-    | `l_shape_overhang.stl` | **2,67 %** | 3,08 % |
-    | `l-triple-axis-overhanged-shape.stl` | **4,11 %** | 4,28 % |
-    | `turkish.stl` | **2,78 %** | 2,88 % |
-
-    **Dégrade sur les quatre modèles**, légèrement mais systématiquement (sur
-    `death` et `turkish`, à nombre de couches identique — 257 et 193 — donc
-    sans biais de comparaison). Le code a été **retiré** : contrairement à
-    `anchor_growth_weight` et `support_driven_order`, qui améliorent au moins
-    sur un modèle et restent donc disponibles en opt-in, celui-ci n'a aucun
-    cas d'usage — le garder serait du code mort.
-
-    Interprétation plausible, **non vérifiée** : maximiser la marge de la
-    face la plus critique pousse vers des directions de compromis, à
-    mi-chemin de toutes les faces de la région, qui n'épousent la géométrie
-    d'aucune zone en particulier. La dégénérescence du critère reste donc
-    réelle et non résolue — mais « choisir la direction la plus robuste »
-    n'en est pas la bonne sortie.
-
-    ### Ce qui reste ouvert
-
-    Le gain est réel mais modeste, et le fond du problème n'est pas résolu :
-    **991 défauts d'ORDRE subsistent sur death.stl**. Un champ scalaire
-    UNIQUE doit à la fois croître depuis le plateau (ancrage global) et
-    décroître localement pour un plafond suspendu — contrainte que le terme
-    de lissage arbitre en écrasant la seconde. Les pistes non explorées, dans
-    l'ordre de coût croissant : rendre `enforce_upward_growth` conditionnel à
-    la plage angulaire réelle de la tête plutôt que binaire (la machine
-    couvre 0-185°, elle PEUT déposer vers le bas) ; pondérer le terme de
-    direction par région plutôt qu'uniformément ; ou un champ à plusieurs
-    branches. Aucune n'a été mesurée — ne pas les présenter comme acquises.
-
-52. **`FieldSolverParams.use_geodesic_directions` (opt-in, défaut `False`) —
-    direction cible issue de la DISTANCE GÉODÉSIQUE au plateau. Corrige
-    réellement le défaut de direction identifié en limite #51, et pourtant
-    DÉGRADE la métrique de référence sur `death.stl` (×2,2). Idée de
-    l'utilisateur, implémentée et mesurée ; conservée en opt-in, jamais
-    activée par défaut.**
-
-    ### Le mécanisme
-    `_geodesic_distance_to_platform` : Dijkstra **multi-source** sur le
-    graphe des arêtes du `TetMesh`, pondéré par les longueurs euclidiennes
-    réelles, depuis TOUS les nœuds au contact du plateau (`min_only=True`).
-    Suivre les arêtes du maillage garantit que le chemin reste **dans la
-    matière** — c'est exactement ce qui distingue cette distance de la
-    hauteur : une pièce suspendue est proche du plateau à vol d'oiseau mais
-    géodésiquement lointaine, sa matière ne le rejoignant qu'en faisant le
-    tour par ce qui la porte.
-
-    `_geodesic_tet_directions` : la direction cible d'un tétraèdre devient le
-    gradient **normalisé** de cette distance. Répond à la question physique
-    directe « par où la matière rejoint-elle le plateau, et dans quel sens
-    s'en éloigne-t-elle ICI » — une réponse **par tétraèdre**, là où step3
-    donne une direction unique pour toute une région, choisie par un critère
-    dégénéré (limite #51).
-
-    **Seule la DIRECTION est retenue, jamais le champ lui-même.** La distance
-    de Dijkstra est trop irrégulière pour servir d'isosurfaces : elle suit les
-    arêtes en zigzag, `‖∇φ‖` médian mesuré à **4,81** sur death.stl au lieu
-    de 1,0 attendu pour une distance (dispersion 0,87 contre 0,29 pour le
-    champ FEM). Le lissage FEM et l'ancrage plateau, inchangés, apportent la
-    régularité. Repli explicite sur les directions par région là où le
-    gradient géodésique est inexploitable (nœud inatteignable, gradient de
-    norme quasi nulle).
-
-    **Pourquoi Dijkstra et pas A\*** (question posée explicitement) : le
-    problème est *tous-les-nœuds → ensemble-plateau*, pas point-à-point. Un
-    seul Dijkstra multi-source résout les 76 220 nœuds de death.stl en
-    **217 ms** (302 sources) et 80 851 nœuds de turkish.stl en **223 ms**
-    (4 291 sources) — négligeable devant les ~74 s du pipeline. A\* exigerait
-    ~76 000 exécutions séparées, et **partagerait exactement le même artefact
-    de métrique de graphe** (le zigzag ci-dessus), qui est la vraie limite de
-    précision. Le remède à cet artefact serait un solveur eikonal volumique
-    (Fast Marching, ou méthode de la chaleur de Crane) — **non implémenté, non
-    mesuré**.
-
-    ### Mesure (step9b, matière déposée sans appui)
-    Comparaison **à épaisseur de couche réelle égale** : les couches
-    géodésiques sortent ~40 % plus épaisses à `layer_height_base` identique,
-    et comparer tel quel surestimerait le gain (moins de couches = moins de
-    transitions = moins de défauts). `layer_height_base` est donc réduit du
-    même facteur côté géodésique, et l'épaisseur réelle **vérifiée** avant
-    toute comparaison.
-
-    | modèle | actuel | géodésique (épaisseur égalisée) | verdict |
-    |---|---:|---:|---|
-    | `l_shape_overhang.stl` | 2,67 % | **1,18 %** | améliore (−56 %) |
-    | `l-triple-axis-overhanged-shape.stl` | 4,11 % | **2,37 %** | améliore (−42 %) |
-    | `death.stl` | **0,53 %** | 1,18 % | **dégrade (×2,2)** |
-    | `turkish.stl` | — | — | **NON MESURÉ** |
-
-    Détail death.stl (257 couches / 0,213 mm contre 278 / 0,217 mm — épaisseur
-    bien égalisée, donc aucun biais de nombre de couches) : 1266 → 2791 dépôts
-    sans appui, défauts d'ordre **1054 → 2547**. La ligne « actuel » reproduit
-    exactement les chiffres de référence des limites #50/#51, ce qui valide la
-    chaîne de mesure.
-
-    ### Ce que ça apprend
-    Le mécanisme corrige bien le défaut de direction diagnostiqué en limite
-    #51 — sur les tétraèdres du dôme de death.stl, le champ FEM actuel ne fait
-    **jamais** pointer le dépôt vers le bas (0 %, composante verticale médiane
-    +0,955) là où le capot redescend pourtant, tandis que la géodésique y
-    pointe vers le bas sur **28 %** d'entre eux (médiane +0,299). C'est
-    géométriquement plus juste.
-
-    Et cela **n'améliore pas** la matière réellement déposée dans le vide sur
-    ce modèle. C'est le quatrième mécanisme de suite à améliorer un indicateur
-    INTERMÉDIAIRE sans améliorer la métrique de référence (après
-    `support_driven_order`, `anchor_growth_weight` et le départage par marge).
-    Le schéma est désormais assez répété pour être une règle du projet :
-    **aucun indicateur intermédiaire — direction, ancrage, ordre — ne prédit
-    la métrique step9b. Mesurer step9b, ou ne rien conclure.**
-
-    Hypothèse **non vérifiée** sur l'écart entre les modèles : death.stl est
-    massif avec une coque suspendue reliée au plateau par un seul pilier
-    étroit, de sorte que la géodésique de toute la coque passe par ce goulot
-    et y devient très irrégulière ; les deux modèles où le mécanisme améliore
-    sont fins et bien connectés. Ne pas présenter cette lecture comme établie.
-
-    **Conséquence actée** : `use_geodesic_directions=False` par défaut, comme
-    `support_driven_order` et `anchor_growth_weight`. Ne pas l'activer sans
-    avoir mesuré `turkish.stl` — le 4ᵉ modèle est précisément celui qui a
-    invalidé `anchor_growth_weight` après trois mesures favorables (limite
-    #51).
-
-53. **`FieldSolverParams.support_feedback_iterations` — LA BOUCLE DE
-    RÉTROACTION DE SURPLOMB. Premier mécanisme du chantier à améliorer
-    réellement la métrique de référence : matière déposée sans appui
-    DIVISÉE PAR DEUX sur `death.stl` (0,53 % → 0,25 %), contre −11 % pour le
-    meilleur des six précédents. Idée de l'utilisateur.**
-
-    ### Le circuit ouvert que personne n'avait vu
-
-    Tout le pipeline évaluait le surplomb en **boucle ouverte** :
-    - `step2` mesure l'angle des normales contre la **verticale MACHINE**,
-      une seule fois, **avant que le champ scalaire n'existe** ;
-    - ce `risk_score` figé pondère ensuite le terme de gradient de `step4` ;
-    - `step9b` mesure correctement le résultat, mais **après tout**, en pur
-      diagnostic, sans rien réinjecter.
-
-    **Le solveur n'était donc jamais pénalisé pour les surplombs que ses
-    PROPRES couches créaient.** Le test manquant existait déjà deux fois dans
-    le code — il était simplement branché au mauvais endroit.
-
-    Six mécanismes (limites #50/#51) ont échoué à corriger ce défaut parce
-    qu'ils modifiaient tous une **entrée** de ce circuit (choix de direction,
-    ancrage, ordre) sans jamais interroger le circuit lui-même. Voir la
-    section « COMMENT LIRE CE FICHIER » en tête : c'est de ce constat qu'est
-    née la règle « après deux ou trois mécanismes sans effet, auditer le
-    circuit au lieu d'en ajouter un quatrième ».
-
-    ### Le mécanisme
-
-    Point fixe : résoudre φ → ré-évaluer le surplomb **contre `-∇φ`** (la
-    verticale locale réellement produite, `_self_overhang_angles`) → faire
-    pivoter les directions cibles fautives → re-résoudre.
-
-    Le critère est **exactement** celui de `step2`
-    (`angle(normale, -direction) < seuil`), appliqué à une référence
-    différente. C'est toute l'idée : les deux quantités portent le même nom
-    et ne sont pas la même chose.
-
-    - `_rotate_directions_out_of_overhang` corrige du **minimum** nécessaire
-      (rotation autour de `n × u` d'exactement le déficit angulaire) : au-delà,
-      la cible s'éloignerait de ce que la géométrie de la région demande sans
-      rien résoudre de plus. Cas dégénéré `n ∥ u` (plafond parfaitement plat,
-      le pire cas) : axe perpendiculaire stable construit explicitement.
-    - Les tétraèdres corrigés sont **sur-pondérés** (`support_feedback_weight`),
-      sans quoi la correction est absorbée par le lissage. Poids **posé, jamais
-      cumulé** — sinon il exploserait au fil des itérations.
-    - La boucle ignore les `Constraint[]` utilisateur : elle convergerait sinon
-      vers un problème que `solve_with_constraints` ne résout pas ensuite.
-    - Le résidu est mesuré sur le champ **réellement résolu**, jamais sur les
-      cibles corrigées — rien ne garantit que le lissage FEM les respecte
-      (même discipline qu'`UpwardGrowthDiagnostic`).
-
-    ### Arrêt dynamique + plafond dur
-
-    `support_feedback_iterations` est un **plafond**, pas un nombre fixe. La
-    boucle s'arrête dès que le gain **relatif** passe sous
-    `support_feedback_min_improvement` (2 %), et `SUPPORT_FEEDBACK_ITERATION_CAP
-    = 50` borne toute valeur demandée (10 000 → 50, verrouillé par test).
-
-    Gain **relatif** et non absolu : le résidu part de ~26 % du volume et
-    descend d'un ordre de grandeur ; un seuil absolu serait soit inatteignable
-    au début, soit franchi immédiatement à la fin. Un résidu qui **remonte**
-    arrête aussi la boucle. `stalled` et `converged` sont deux champs
-    **distincts** : s'arrêter faute de progrès n'est pas avoir résorbé le
-    surplomb, et les confondre masquerait un plateau derrière un succès.
-
-    ### Mesures (`death.stl`)
-
-    Courbe du surplomb auto-infligé (fraction de VOLUME), 13 itérations avant
-    stagnation, +17 s de calcul :
-
-    ```
-    26,52 → 19,84 → 12,48 → 8,49 → 6,76 → 5,84 → 5,13
-          → 4,59 → 4,25 → 3,86 → 3,73 → 3,49 → 3,47 %
-    ```
-
-    Métrique de référence (step9b), **à épaisseur de couche réelle égalisée** :
-
-    | | couches | épaisseur | dépôts sans appui | ordre |
-    |---|---:|---:|---:|---:|
-    | référence | 257 | 0,213 mm | 1266 (**0,53 %**) | 1054 |
-    | ×3 itérations | 254 | 0,214 mm | 668 (**0,25 %**) | 476 |
-    | dynamique (×13) | 251 | 0,213 mm | 716 (**0,27 %**) | 512 |
-
-    Le `true_overhang_count` tombe aussi de **1 à 0**.
-
-    ### Le résultat NÉGATIF à retenir : l'indicateur interne ne pilote pas
-
-    **13 itérations font 3,6× mieux que 3 en interne (3,47 % contre 12,48 %) et
-    LÉGÈREMENT MOINS BIEN sur step9b** (0,27 % contre 0,25 %). Cinquième
-    occurrence du même schéma dans ce projet.
-
-    Conséquence directe et non résolue : **le critère d'arrêt ne peut pas
-    trouver le nombre optimal d'itérations, puisqu'il observe une quantité non
-    corrélée à l'objectif.** Il aurait fallu exiger >32 % de gain par itération
-    pour s'arrêter à 3 — un seuil injustifiable autrement qu'en le calquant sur
-    death.stl, c'est-à-dire l'erreur de sur-ajustement déjà payée avec
-    `anchor_growth_weight`. **Ne pas régler ce seuil sur un seul modèle.**
-
-    ### Statut
-
-    Opt-in, `0` par défaut. **Mesuré sur `death.stl` UNIQUEMENT** — les trois
-    autres modèles de `res/test_models/` restent à faire avant toute activation
-    par défaut. 11 tests (`tests/test_step4_field_solver.py`), dont celui qui
-    verrouille l'essentiel : le critère est bien évalué contre `∇φ` et non
-    contre la verticale machine.
-
-54. **`LayerParams.geodesic_order` — ordre d'impression par distance
-    géodésique. Atteint VISUELLEMENT l'objectif « imprimer les couches
-    suspendues en dernier », et DÉGRADE la métrique d'un facteur 3,5 à 4.
-    Opt-in, désactivé. Démontre que les deux objectifs du projet sont
-    incompatibles en l'état.**
-
-    ### L'idée (utilisateur) et ce qu'elle corrige
-
-    Le pipeline confond deux questions parce qu'un seul champ y répond : la
-    **forme** d'une couche (il faut un champ lisse et régulièrement espacé —
-    le FEM) et leur **ordre** (il faut savoir par où la matière rejoint le
-    plateau — un plus court chemin). L'ordre d'impression était une fonction
-    croissante de l'isovaleur, point : si le champ croît de l'extrémité d'une
-    coque vers son attache, **aucun réglage ne pouvait l'inverser**.
-
-    `geodesic_order` re-dérive la seule **séquence** de la distance géodésique
-    au plateau (Dijkstra multi-source, ~220 ms), la forme des couches restant
-    strictement celle des isosurfaces de φ.
-
-    ### Deux versions mesurées, et un diagnostic FAUX corrigé en route
-
-    **v1 — tri global par distance médiane** : 0,53 % → **2,25 %**. Le
-    contrôle posé sur l'écart entre couches consécutives a sauté (0,213 →
-    0,376 mm), désignant des sauts spatiaux. Diagnostic posé : l'isosurface
-    d'une distance géodésique est une **coquille entière**, donc un tri global
-    entrelace des couches spatialement éloignées n'ayant en commun que leur
-    distance au plateau.
-
-    **v2 — progression géodésique + continuité spatiale** : la géodésique
-    n'**oriente** les arêtes du graphe de continuité et n'**amorce** le DFS
-    que dans la limite de la connexité spatiale (adjacence toujours fondée sur
-    l'isovaleur : « quelles couches se touchent » est de la géométrie, « laquelle
-    vient avant » est de la progression). Une arête peut désormais être
-    **inversée** par rapport à l'isovaleur — capacité nouvelle, pas un réglage.
-
-    Résultat : les sauts spatiaux sont **éliminés** (0,376 → 0,219 mm, niveau
-    de la référence) et la métrique ne bouge quasiment pas — **1,98 %**,
-    toujours ×3,7. **Le diagnostic v1 était donc faux : les sauts spatiaux
-    étaient un symptôme, pas la cause.**
-
-    ### La vraie cause (hypothèse géométrique, cohérente avec #50/#51)
-
-    Dans une coque mince, la distance géodésique varie surtout **le long** de
-    la coque ; ses isosurfaces la coupent donc **en travers**. Ordonner les
-    couches de φ par cette distance les empile transversalement — chaque couche
-    est une nervure posée sur sa tranche — au lieu de les empiler **dans
-    l'épaisseur**, où chacune repose à plat sur la précédente. C'est
-    exactement l'appui local de proche en proche déjà identifié en limite #51
-    comme réel et utile, et que `support_driven_order` détruisait aussi. **Même
-    échec, mécanisme différent.**
-
-    Piste qui en découle, **non implémentée** : la géodésique est le bon
-    critère pour décider **quelle branche** avant quelle autre, et le mauvais
-    **à l'intérieur** d'une branche, où l'empilement doit rester celui de φ.
-
-    ### Mesures (`death.stl`)
-
-    | configuration | dépôts sans appui | ordre |
-    |---|---:|---:|
-    | référence | 1266 (0,53 %) | 1054 |
-    | ordre géodésique seul | 4758 (1,98 %) | 4546 |
-    | **rétroaction seule** | **819 (0,34 %)** | **602** |
-    | géodésique + rétroaction | 4545 (1,86 %) | 4328 |
-
-    **Les deux mécanismes ne se combinent pas** : l'ordre géodésique domine et
-    dégrade quelle que soit la qualité du champ sous-jacent.
-
-    ### LE RÉSULTAT LE PLUS IMPORTANT : les deux objectifs sont incompatibles
-
-    Vérifié **image par image** sur le GIF d'ordre d'impression, aux mêmes
-    fractions d'avancement :
-    - référence, couche 116/257 : un contour de coque **isolé, flottant en
-      l'air**, sans rien dessous — le défaut d'origine ;
-    - géodésique, couche 106/234 : **aucune pièce détachée**, la coque n'a pas
-      commencé, et elle est déposée **en dernier** (jaune franc à 85 %).
-
-    L'objectif énoncé par l'utilisateur — « imprimer les couches suspendues en
-    dernier » — est donc **visuellement atteint**, et il coûte **4× plus de
-    matière déposée dans le vide**. Ce n'est plus une conjecture (limite #51) :
-    c'est démontré par une image ET un chiffre. Aucune mesure ne dit lequel
-    prime — **c'est un arbitrage d'usage qui revient à l'utilisateur**, et
-    c'est pourquoi le mécanisme reste disponible plutôt que supprimé.
-
----
-
 59. **Cinématique : sur la machine ACTUELLE, C est IMPOSÉ par la position du
     point (constaté le 2026-09-28, en préparant P5 du lissage non-planaire).**
     La machine n'a que R, C, Z et B, sans axe Y (confirmé par l'utilisateur).
@@ -2023,16 +1252,6 @@ pour affichage/validation avant export G-code.
     - Benchy : 7 % ;
     - dino : 11 %.
 
-    **La méthode Bird n'est PAS entièrement compatible (corrigé le
-    2026-09-29, l'affirmation contraire était fausse).** Elle fait bien
-    tourner chaque cellule autour de l'axe TANGENTIEL, donc ses couches
-    penchent dans le plan radial. Mais elle penche dans les DEUX sens, et B ne
-    penche que vers +R. Mesuré sur les normales du corps du Benchy : 16 %
-    penchent vers le centre, 2,3 % au-delà de 45°. Avec un axe D sans limite,
-    ou un axe Y, on tombe à 0 %.
-    - **Contrainte d'inclinaison** : option sélectionnable, jamais imposée
-      (recherche : `bird_loop.py --reachable-tilt` et
-      `--reachable-normal=<w>`).
     - **Constat mesuré** : « orientation atteignable » ≠ « sans collision ».
       Sur le Benchy centré, avec w = 0,5, le nombre de contacts passe de 83
       à 903 (plateau).
@@ -2092,11 +1311,6 @@ pour affichage/validation avant export G-code.
     de sens ; ×1,45 sur le temps des passes de lissage du Benchy à 25 mm/s).
     Il est à porter dans l'export G-code.
 
-60. **Étape 5 : couche entière perdue quand un nœud frôle le plan (corrigé le
-    2026-09-29).** Mesuré sur le Benchy Bird de référence
-    (`research/S4_Slicer/check_step5_sections.py` : contour de step5 contre
-    union des sections réelles des tétraèdres) : la couche 6 perdait 100 % de
-    sa matière (192 mm²) et la couche 174 en perdait 23 %.
     - **Cause** : un nœud de la SURFACE à 2,6e-5 et 9,2e-5 mm du plan, sous la
       tolérance de soudure (`weld_tolerance_factor` × diagonale ≈ 8e-5 mm).
       Les points de coupe de ses arêtes fusionnent ; on obtient des triangles
@@ -2313,22 +1527,6 @@ pour affichage/validation avant export G-code.
     | death | 31,0 % | **41,4 % (dégrade)** |
     | turkish | 61,3 % (+ 36 contacts plateau) | 53,8 % (0 plateau) |
 
-    Décision maintenue (métrique de référence step9b meilleure sur les 4,
-    collisions meilleures sur 2), **à valider par l'utilisateur** à cause de
-    death. **TRANCHÉ PAR LA MESURE le 2026-10-01, après l'ordre contraint par
-    la tête (limite #67)** : avec / sans `radial`, collisions death 0,13 / 0,35 %,
-    turkish 0,21 / 31 %, l-triple 0 / 15 %, l_shape 0 / 0 ; matière sans appui
-    death 0,22 / 0,36 %, turkish 0,20 / 1,03 %, l-triple 2,7 / 5,5 %, l_shape
-    3,1 / 3,7 %. `radial` gagne partout ; seul coût, le temps réel de turkish
-    (+15 %). Plus rien à valider. Constat plus important que le choix lui-même : **le pipeline FEM
-    par défaut n'est pas imprimable sur death et turkish** dans tous les cas.
-    Diagnostic sur death (échantillon de 3 000 points) : la tête touche, à
-    ~11 mm au-dessus de sa pointe, de la matière déposée ~55 000 points plus
-    tôt et ~9 mm PLUS HAUT que la couche en cours. C'est le défaut d'ORDRE des
-    limites #50 à #54, désormais chiffré en collisions réelles ; la voie Bird
-    de la recherche (0 contact dans le lissage, 0 à 9 dans le corps) est la
-    voie d'impression de ces pièces.
-
     **Normale par point (step8, opt-in, ARBITRAGE À TRANCHER PAR
     L'UTILISATEUR)** : `Step8Params.per_point_normal` (gradient local du
     champ, `gradient_direction_field`) et `per_point_normal_nodal` (variante
@@ -2459,74 +1657,6 @@ pour affichage/validation avant export G-code.
       couches en anneau ; découper les couches en morceaux les lèverait) ; la
       granularité est la couche entière.
 
-68. **Trous dans la peau du Benchy (2026-10-02) : CAUSE TROUVÉE — le seuil de
-    coupure au retour dans la pièce réelle (`bird_slice_deformed.py`,
-    `keep = score <= w/2`) coupait des morceaux de la paroi extérieure. Corrigé
-    (`--cut-factor`, défaut 2,0). Le chemin pour y arriver a produit deux
-    conclusions fausses, retirées : à lire avant de reprendre une enquête.**
-    - **Constat** (prévisualiseur de l'utilisateur, G-code `..._pass4`) : bord
-      déchiqueté sur une paroi quasi verticale du haut de l'arche (x≈5,6 ;
-      y≈−7,5 ; z≈52–55,5), coupures visibles dans l'inspecteur (lignes
-      968238, 973645, 992290, 994100).
-    - **Chaîne de mesures qui l'a localisé** (surface du STL → distance à
-      l'élément le plus proche, tous DENSIFIÉS le long des segments) :
-      maillage tétra (couvre la peau : frontière à 0,124 mm, rapport de volumes
-      1,0006) → contours de couche `contour_3d` (0,1 % de la peau à > 0,3 mm)
-      → trajectoires par couche `toolpath_3d` (5,4 % dans la zone) → G-code
-      (5,4 %, identique : l'export, step8 et step9 ne perdent rien). La perte
-      est donc entre le contour de couche et `toolpath_3d`.
-    - **Mécanisme** : au retour de l'espace déformé vers la pièce, un point de
-      trajectoire à plus de `w/2` (0,2 mm) HORS du volume déformé est coupé
-      (garde-fou contre les fausses zones pleines des plis, jusqu'à 4 mm
-      mesuré sur la couche 65). Les parois de cette zone sont à 0,15–0,19 mm
-      hors du volume : juste sous le seuil, et au-delà sur une partie des
-      points (4042 points coupés sur le Benchy, 0,45 %). Chaque point coupé
-      laisse une interruption dans la paroi.
-    - **Correction mesurée** : `--cut-factor` (défaut 2,0 ; 0,5 = ancien
-      comportement). Points coupés : Benchy 4042 → 332, Squirtle 5775 → 279 ;
-      l_shape et dino sans effet notable. Peau à plus de 0,4 mm d'une
-      trajectoire : zone du trou 1,14 % → 0,00 % (à 3 w), Benchy entier
-      0,33 % → 0,18 % (à 2 w), Squirtle 2,53 → 2,44 %, dino 2,94 → 2,81 %,
-      l_shape identique. Matière à plus de 0,25 mm hors de la pièce :
-      0,000 % → 0,008 % (Benchy, 2 w), 0,042 % (Squirtle, 2 w). 3 w gagne un
-      peu plus de couverture mais fait monter la matière hors pièce (0,022 %
-      Benchy) : 2 w retenu.
-    - **Non résolu** : le dino (6,2 % de peau à > 0,3 mm, 1,4 % à > 0,6 mm) et
-      Squirtle (6,2 % / 0,65 %) ont d'autres défauts de couverture que ce seuil
-      ne corrige pas. Les trous du milieu et du bas de la première capture du
-      Benchy (zones non lissées, corps brut) ne sont pas expliqués non plus.
-    - **Conclusions FAUSSES retirées en cours de route** : (1) « le maillage
-      tétraédrique ne recouvre pas la peau » (test d'appartenance d'un point
-      décalé : faux positifs près des arêtes ; la mesure correcte donne 0 %) ;
-      (2) « les coupures du G-code sont des vides dans la paroi » (ce sont des
-      sauts d'un anneau fermé à l'autre) ; (3) à deux reprises, des distances
-      mesurées à des POINTS de trajectoire au lieu de segments densifiés ont
-      fait croire à des vides (points espacés de 0,3 à 1 mm). **Toujours
-      densifier avant de mesurer une couverture.**
-    - **Hypothèses écartées (ne pas rouvrir)** : dégénérescence des tétraèdres
-      (step5 correct sur 313 couches ; 4,8 % de tétraèdres à q < 0,05 après
-      déformation sans effet démontré) ; troncature du fichier à 1 M de
-      mouvements (la tête du prévisualiseur est à la FIN) ; sens du pivot
-      (`--tilt-sign=-1` donne des cordons dans tous les sens, le
-      prévisualiseur applique bien la compensation, au signe +1) ; référence de
-      Z (`--z-reference=pivot` ne change rien) ; mouvements courts ignorés ;
-      débit d'extrusion (0,0333 mm de filament par mm de pointe).
-    - **Outils ajoutés** : `core/tet_coverage.py` (distance surface → frontière
-      du maillage, rapport de volumes ; garde-fou, mesure 0,000 % sur les 4
-      modèles), `step1_ingest.run(check_surface_coverage=True)`,
-      `scripts/check_tet_coverage.py`, `tests/test_tet_coverage.py` (3).
-      Recherche (non versionnée) : `bird_slice_deformed.py --cut-factor= --output-tag=`.
-    - **Affichage de l'inspecteur du prévisualiseur** (à ne pas prendre pour
-      des défauts du fichier) : « vitesse 133 mm/s » et « débit 10,65 mm³/s »
-      lisent F comme une vitesse de pointe alors que F est en unités firmware
-      (Y compte en degrés ; près de l'axe, 1 mm de pointe = 7° de Y, donc
-      F ≈ 8000 pour 25 mm/s) ; « épaisseur de couche négative » vient du Z qui
-      descend entre deux points d'une couche courbe.
-    - **Hors sujet mais mesuré** : le G-code du Benchy contient 2199 sauts
-      sans extrusion de 0,5 à 2,5 mm SANS rétraction (sauts d'un anneau à
-      l'autre) ; 41 % des mouvements extrudés font moins de 0,05 mm
-      (découpage `max_tip_deviation`, fichier lourd : 1,07 M de mouvements).
-
 69. **Normale par point ACTIVÉE par défaut (2026-10-06, décision de
     l'utilisateur), réglable : `Step8Params.per_point_normal` (défaut `True`).**
     La cible de l'IK est le gradient LOCAL du champ en chaque point, et non la
@@ -2571,10 +1701,6 @@ pour affichage/validation avant export G-code.
     **SDK Vulkan 1.4.363.0 installé (2026-10-06)** via winget
     (`KhronosGroup.VulkanSDK`, hachage vérifié), `VULKAN_SDK=C:\VulkanSDK\1.4.363.0`,
     GPU vu : NVIDIA GeForce RTX 3090. Aucun code GPU écrit.
-70. **Trois chantiers du 2026-10-06 : collisions avec le filtre médian,
-    dégagements de trajet à vide, détection de collision de la chaîne Bird par
-    le step9 rapide d'Apex.**
-
     **Filtre médian de B et collisions** (`scripts/measure_step9.py --median=N`,
     step9 rapide natif, normale par point active, limite #69) : événements de
     collision `printed_part`, sans filtre → avec filtre de 9 points : l_shape 0 → 0,
@@ -2584,38 +1710,6 @@ pour affichage/validation avant export G-code.
     (`free_axis_median_window = 0`) : à activer sur décision de l'utilisateur
     (−19 à −31 % de temps d'impression, +0,2 à +0,4° d'écart médian, +8 à +16 %
     d'orientations inatteignables).
-
-    **Dégagements de trajet à vide** : `clearance_move(..., blocked=...)`
-    (`file_io/gcode_export.py`). Quand le contrôle de contact `travel_check` est
-    fourni, un dégagement en contact avec la matière déjà déposée est repris avec
-    l'autre axe, puis avec un pas double, jusqu'à
-    `travel_clearance * travel_clearance_max_factor` (4 par défaut) ; si tout est
-    bloqué, le premier candidat sûr est conservé (jamais pire qu'avant). Mesure
-    (G-code Bird régénérés) : dégagements en contact Benchy 3 → 0, dino 3 → 0 (le
-    fichier du dino en contenait 3 et non 1). Le chemin natif n'est pas concerné
-    (il n'est emprunté que sans `travel_check`). Test :
-    `test_clearance_avoids_blocked_points`.
-
-    **Chaîne Bird : détection par le step9 rapide d'Apex** (option
-    `full_step89.py --apex-detect`, désactivée par défaut). Le step9 rapide natif
-    détecte les points en collision en 9-10 s ; la boucle Python existante (paliers
-    45/90/181°) ne traite plus que ces points. Mesure sur le dino : étape 9 de la
-    chaîne **855 s → 74 s** (×11,6), mêmes résultats (195 points en collision au
-    tour 1, 195/195 résolus, paliers [95, 86, 14], 3 708 points modifiés, 0 au
-    tour 2) et trajectoire machine **identique au bit** à celle de la chaîne
-    Python actuelle (0 point différent sur 862 241). Sur le Benchy, mêmes 11
-    événements que la chaîne Bird, pénétration identique.
-
-    **Découverte : le plateau de step9 a sa surface à z = +0,5 mm.**
-    `_platform_mesh_at_angle` / `_check_platform_disc` modélisent un disque de
-    1 mm d'épaisseur CENTRÉ sur `platform_origin` : la surface du plateau est à
-    +0,5 mm, alors que les pièces (step3) et la chaîne Bird la placent à z = 0.
-    Step9 est donc 0,5 mm plus strict que la marge annoncée (Benchy : 62
-    événements « plateau » en plus ; dino : 38). L'option `--apex-detect`
-    compense en décalant l'origine de 0,5 mm vers le bas
-    (`PLATFORM_HALF_HEIGHT`) ; avec ce décalage les événements sont identiques à
-    ceux de la chaîne Bird (Benchy 11/11, dino 0/0). **Corrigé le même jour
-    dans step9** (limite #71) : surface à z = origine.
 
     **Écart avec l'ancien poste** : 94 points de corps (0,011 %) du dino ont un B
     différent (jusqu'à 10,8°) de la trajectoire produite sur l'autre poste ; la
@@ -2647,12 +1741,6 @@ pour affichage/validation avant export G-code.
 
 71. **Suite autonome du 2026-10-06 (hors UI) : sept points traités.**
 
-    - **`research/S4_Slicer/safe_io.py` restauré** (absent de la branche ; 7 scripts de
-      recherche l'importent : `bird_slice_deformed`, `export_gcode`, `full_step89`,
-      `skin_loop`, `skin_paths`, `skin_print`, `surface_skin`). Comportement reconstruit
-      d'après sa description : réessai de `open` en écriture pendant 5 s au plus.
-    - **`--apex-detect` activé dans `out/run_bird_chain.sh`** (chemin corrigé : le script
-      pointait vers `slicer_alg`, l'autre poste). Gain mesuré ×10, trajectoire identique au bit.
     - **Cumul de rotation de Y** : `GcodeReport.y_turns` (étendue de Y déroulé, en tours) et
       `GcodeParams.max_y_turns` (`None` = aucune limite) ; avec `strict`, un dépassement
       refuse d'écrire le fichier. Affiché par `export_gcode.py` et `export_model_gcode.py`.
@@ -2664,22 +1752,6 @@ pour affichage/validation avant export G-code.
     - **Filtre médian de B ACTIVÉ par défaut** (`Step8Params.free_axis_median_window = 9`) :
       mesuré sur les 4 modèles (limite #69/#70 : temps −19 à −31 %, collisions en baisse,
       matière sans appui inchangée, écart médian +0,2 à +0,4°). Réversible : valeur 0.
-    - **Plateau de step9 : surface à z = origine** (`PLATFORM_CENTER_OFFSET`). Le disque était
-      centré sur `platform_origin` (surface à +0,5 mm : step9 plus strict de 0,5 mm que la
-      marge annoncée). Corrigé dans `_check_platform_disc`, `_platform_disc_batch` et
-      `_platform_mesh_at_angle` (Python seul : le chemin natif n'en contient pas). Mesure :
-      événements du pipeline FEM identiques sur les 4 modèles (0, 0, 118, 1 406) ;
-      chaîne Bird : les 62 (Benchy) et 38 (dino) faux événements « plateau » disparaissent
-      (11/11 et 0/0, comme la chaîne Bird) sans le décalage de contournement, retiré de
-      `full_step89.py --apex-detect`. Test : `test_platform_surface_is_at_origin_z`.
-    - **Contours « invalides » des tranches Bird : pas de correction à faire.** Mesure en pièce
-      RÉELLE (`machine_toolpath`, cordons densifiés à 0,2 mm, doublon = autre cordon, non voisin
-      sur le trajet, à moins de 0,10 mm) : part de longueur extrudée en double 0,3 à 1,5 %
-      (death 0,72 %, Squirtle 1,46 %, Benchy 0,39 %, dino 0,32 %, l_shape 0,68 %, l-triple
-      0,42 %), SANS corrélation avec la part d'aire à contours invalides (death 53,5 %,
-      Squirtle 27 %, Benchy 4,6 %). Le remplissage supplémentaire des couches invalides
-      (13-27 %) ne se traduit donc pas par des cordons superposés : un pli recouvre deux endroits
-      réels distincts, c'est légitime. Lissage : 1 à 5 % de doublons (non analysé).
     - **Non traités (UI)** : config UI (`config/params.py`, `config/schema.py`, pont JSON),
       sélecteur graphique d'angle, conseil « ne pas centrer les modèles », rendu de l'aperçu
       (rétrécissements à B > 90°).
@@ -2701,21 +1773,6 @@ pour affichage/validation avant export G-code.
       `GcodeReport.print_time_fw_s` (`firmware_time_estimate`) ; mettre (1666.7, 600.0, 6.67, 1666.7)
       pour l'etat actuel. Outil : `scripts/estimate_gcode_time.py`. Test :
       `test_firmware_time_estimate_slows_on_z_limit`.
-    - **Doublons du lissage Bird** (cordons a moins de 0,10 mm d'un autre non voisin sur le trajet, part de
-      la longueur de lissage) : Benchy 1,0 %, dino 2,0 %, Squirtle 5,3 %. 43 a 60 % des voisins sont du
-      lissage, le reste du corps. Benchy : 62 % de la longueur en croisements de moins de 0,6 mm ;
-      Squirtle : courses jusqu'a 70 mm (0,02-0,03 mm de distance, ecart de rang ~17 000 points), soit 3 % de
-      la longueur de lissage dans des courses de plus de 5 mm. **Cause trouvee** (`skin_paths_pass8.pkl`) : des
-      ZONES VOISINES du lissage tracent chacune leur passe de bord le long de leur frontiere commune
-      (zones 7 et 10 : 373 paires de points a moins de 0,06 mm, ~75 mm ; zones 7 et 11 : 134 ; zones 0 et 14 :
-      100 ; seulement 31 paires au sein d'une meme zone). **Remede applique** (recherche,
-      `skin_paths.dedupe_shared_passes`, actif par defaut, `--no-dedupe` pour l'ancien comportement) : une
-      zone ne retrace pas une passe deja deposee par une zone imprimee avant elle (moins de w/2, meme
-      normale). Squirtle passe 8 rejoue (P4, P5 final, step8+9, export) : lissage 5 724 -> 5 641 mm
-      (-83 mm), paires entre zones 719 -> 0, **doublons 5,29 -> 2,28 %** (plus longue course 69,8 -> 2,0 mm ;
-      le reste est du croisement avec le corps) ; collisions non resolues 9 -> 10 (corps, z median 3,7 mm,
-      reference produite par l'ancien poste : ecart non isole). Benchy et dino : 9 et 7 points retires
-      (0,02 %), G-code non regeneres. Ancien etat : `H:/apex_untracked_backup_2026-10-06/squirtle_pass8_before_dedupe`.
     - **Couverture de la peau** (surface de l'original echantillonnee contre les cordons densifies a
       0,15 mm) : dino 0,69 % a plus de 0,3 mm et 0,11 % a plus de 0,6 mm (un amas de 3,5 mm pres de
       (-7, -16, 50)) ; Squirtle 3,3 % / 0,61 % (deux plaques de ~6 mm vers z = 31, a 0,7 mm,
@@ -2826,168 +1883,6 @@ pour affichage/validation avant export G-code.
       (interface) modifient les fichiers du moteur ; ne pas lancer de mesure ou de suite de
       tests pendant qu'une autre session édite.**
 
-75. **Voie Bird intégrée à Apex, phase 1 (2026-10-07) : déformation, boucle, juge des
-    replis et tranchage déformé portés dans `pipeline/bird/` (versionné, GPL-3.0, attribution
-    à Joshua Bird).** Demande de l'utilisateur : porter Bird et tous les modules R&D en C++
-    et les intégrer à l'algorithme principal. Plan : `~/.claude/plans/bird-into-apex-cpp.md`
-    (phase 0 mesure, phase 1 Python versionné = référence, phase 2 C++ guidé par le profil,
-    phase 3 mesure sur les 4 modèles et choix du défaut). La recherche reste la source ;
-    `research/` reste non versionné.
-
-    - **Phase 0** (journaux existants, Benchy passe 4 / dino passe 5) : boucle de déformation
-      ~12 min (7 essais de 80-110 s, `least_squares`) ; lissage P2→P5 384 / 285 s (P2 3-15 s,
-      P3 ~55 s : déjà accélérés depuis la feuille de route) ; étapes 8-9 259 / 363 s ; export
-      ~20 s. Total ~23 min par modèle. Premier poste : la déformation.
-    - **`pipeline/bird/deformation.py`** : `bird_core` SANS pyvista (l'environnement d'Apex
-      ne l'a pas). Topologie réécrite en numpy (voisins par sommet / arête / face par le
-      produit d'incidence, surface extérieure orientée sur la géométrie d'origine) ;
-      optimisations reprises à l'identique (résidus au CARRÉ, jacobiennes en float32 :
-      comportement validé par l'utilisateur, conservé). TetGen en sous-processus
-      (`_tetgen_worker.py`, jamais lié au noyau). Le lissage initial répétait 30 fois le même
-      calcul (variable réaffectée après la boucle) : un seul, résultat identique.
-      **Équivalence** (Benchy, 24 345 tétraèdres, passe 1, base figée, environnement de
-      recherche contre Apex) : topologie identique au bit (42 676 / 178 521 / 642 746 paires),
-      attributs à 3e-8 rad, déformation à 0,3 µm en médiane (12,6 µm max) pour 0,99 mm de
-      déplacement — solveur itératif et versions de numpy/scipy légèrement différentes ;
-      62,6 s contre 69,8 s.
-    - **`loop.py`** (boucle automatique, `BirdLoopParams`), **`fold_judge.py`** (le juge lit la
-      surface comme la recherche : coordonnées float32 du STL, sommets fusionnés).
-    - **`deformed_slicing.py`** (`bird_to_apex` + `bird_slice_deformed`, sans les contrôles
-      affichés) : **identique au bit** à la recherche sur le Benchy passe 4 (313 couches,
-      334 006 points), 28 s contre 31 s. Points d'entrée `carve` / `first_layer` pour le lissage.
-    - Piège Windows : `np.load` d'un `.npz` garde le fichier ouvert ; fermer explicitement
-      avant de supprimer un dossier temporaire.
-    - **Lissage non planaire porté** (`pipeline/bird/skin/`) : `surface_paths`, `surface_patterns`,
-      `skin_carve` copiés tels quels ; `zones.compute` (P2), `paths.trace` (P4),
-      `print_order.order_and_check` (P5) = les `main()` de la recherche en mémoire ; `chain.run`
-      = `skin_loop` + le `--skin`/`--first-layer` de `bird_slice_deformed`. **Benchy passe 4 :
-      P2, P3, P4 et P5 IDENTIQUES AU BIT à la recherche** (P2 24 s contre 28, P3 123 s contre
-      113, P4 8 s contre 10, P5 12,6 s contre 14).
-    - **Étape 8 Bird** (`pipeline/bird/machine_toolpath.py`) : direction = gradient normalisé
-      de φ sur le tétraèdre d'origine ; résolution par `step8.resolve_raw_points`, extraite de
-      `step8.run` sans changement (33 tests de step8 verts) ; lissage : angles de P5 tels quels.
-      La borne de B et la réorientation par paliers de `full_step89` existaient déjà dans Apex
-      (`clamp_head_height`, `reorient_coupled_tiers`) : réutilisées.
-    - **`main.py`** : `run_bird_pipeline(mesh, PipelineParams, BirdPipelineParams)` (voie
-      séparée, la voie FEM et `PipelineResult` sont inchangés) ; CLI `--method bird` et
-      `--output-gcode` (export contrôlé `export_gcode_checked`, aussi pour la voie FEM).
-      Défauts de `BirdPipelineParams` = chaîne de recherche (`out/run_bird_chain.sh`) : borne
-      de B, paliers 45/90/181 (4 tours), lissage actif (rectiligne, première couche
-      `concentric_conform`).
-    - **Essai de bout en bout, corps seul (Benchy)** : boucle identique à la recherche
-      (4 passes, mêmes déplacements et zones de repli à 1e-3 près), 313 couches, 333 837
-      points ; 64 % des points du corps à plus de 5° de la normale (recherche : 35 à 69 % selon
-      le modèle ; le filtre médian de B d'Apex, absent de la recherche, en ajoute) ;
-      20 collisions → 15 après paliers → 0 après l'étape 10.
-    - **Piège Windows** : `zones.compute` et le creusement lancent des processus ; un script
-      appelant SANS garde `if __name__ == "__main__"` se bloque (mesuré : 1,5 s de CPU en
-      10 min, aucun fils). `main.py` a la garde.
-    - **Phase 2, premier pas : moindres carrés de Bird en C++** (`apex/bird_lsq.hpp`,
-      `bird_lsq_deform`, `bird_lsq_rotation`). Profil d'une passe (Benchy, 73 s profilées) :
-      déformation 63 s, toujours au plafond de 1 000 itérations ; produits matrice-vecteur
-      23 s (déjà natifs), construction de la jacobienne en Python 16 s (structure FIXE,
-      reconstruite à chaque itération), surcoût Python de TRF/LSMR ~10 s. Transcription de
-      `trf_no_bounds` (lsmr, regularize) et de `lsmr` de scipy ; jacobienne en float32 et
-      échelle `jac` sommée en float32 comme scipy ; QR de Householder (Eigen) et racines
-      du quartique par valeurs propres du compagnon (comme `np.roots`). **Tolérance déclarée** :
-      écart à scipy médian 0,15 µm, max 25 µm pour 0,99 mm de déplacement (l'écart entre deux
-      versions de scipy est du même ordre : 0,3 / 12,6 µm) ; coût final à 5e-5 relatif.
-      **Passe Benchy 62,6 s → 9,9 s (×6,3).** Dispatch par `APEX_USE_CPP` ; variante
-      « normale atteignable » (non utilisée par défaut) restée en Python.
-    - **Boucle complète native (Benchy)** : mêmes 7 essais et mêmes décisions que la recherche
-      (4 passes acceptées, repli à 0 / 2,5 / 3,75°), déplacements et zones à quelques
-      centièmes ; **111,5 s contre ~12 min**.
-    - **Bout en bout avec lissage, `main.py --method bird --output-gcode`** (Benchy, avant le
-      solveur natif) : rognage en 5 tours jusqu'à zéro contact, 1 zone retirée au contrôle
-      sur le corps creusé ; étape 8 : 982 793 points ; étape 9 : 16 collisions → 13 après
-      paliers → 0 après l'étape 10 ; G-code de 1 036 228 mouvements, 1,78 h (Z recommandé),
-      Y cumulé 30,4 tours (référence `_v5` de la recherche : 1 070 769 mouvements, ~32 tours).
-    - **Profil de la voie Bird complète après le solveur natif** (Benchy, 632,8 s) : boucle
-      79,6 s ; **lissage 437,3 s (69 %)** ; étape 8 15,3 s ; borne + étape 9 10,7 s ; paliers
-      28,0 s ; étape 10 2,6 s ; export 59,4 s. Dans le lissage (profil 396 s) : P5 223 s,
-      tranchage creusé 79 s (dont `map_polyline` 76 s sur 126 s d'un P3), P4 57 s, P2 37 s.
-    - **`map_polyline` : Viterbi en C++** (`apex_core.viterbi_choice`, transcription terme à
-      terme, NaN et premier minimum comme numpy) + `densify` vectorisé : **P3 123 s → 61 s,
-      IDENTIQUE AU BIT** (313 couches, 930 876 points).
-    - **P5 en C++** (`apex/skin_check.hpp`, `SkinCheckIndex`) : la recherche reconstruisait un
-      arbre k-d du début de ligne À CHAQUE point testé ; grille incrémentale de pas reach + 1,
-      même distance bornée, même densification, même particularité des blocs de 256 points
-      (l'arbre du bloc contient le point courant quand il tombe sur un début de bloc).
-      **Mêmes zones exclues, mêmes points de collision, mêmes compteurs** que la boucle Python ;
-      pénétration à 6e-15 mm. 31,3 → 2,4 s (un point / 2 mm), 161 → 39 s (exhaustif).
-    - **Export G-code : découpage `max_tip_deviation` en natif** (pas 24 étendu). Le chemin
-      natif n'était emprunté que sans découpage, donc jamais par défaut : l'export du Benchy
-      Bird prenait 131,8 s en Python (conversion firmware 32 s, `emit` 49 s, bisection 31 s).
-      Bisection transcrite terme à terme (milieu firmware, retour vers la pointe, profondeur
-      10, extrusion au prorata) : **131,8 s → 7,1 s, texte identique ligne à ligne
-      (1 076 351 lignes) et rapport identique**. Test d'équivalence : variante `decoupage`.
-    - **Paliers de réorientation** (voies Bird et FEM) : arrêt dès qu'un tour ne résout aucun
-      point (trajectoire inchangée, tour suivant identique) ; Benchy : 3 tours inutiles sur 4.
-    - **Étape 8 Bird** : `locate` en un seul appel pour tous les points au lieu d'un par
-      polyligne (3 685) : 21,5 → 14,6 s, identique au bit.
-    - **P4 : cache par zone** dans la boucle de rognage (`paths.trace(cache=...)`), clé =
-      empreinte de tout ce que lit le calcul d'une zone ; résultat identique par construction.
-    - **Tranchage déformé : candidats calculés par lot de couche** (`map_polylines`), Viterbi
-      ensuite polyligne par polyligne : P3 identique au bit (gain à mesurer hors charge).
-    - **Chronométrage propre de la voie Bird (Benchy, seule sur la machine)** : 632,8 →
-      **381,7 s** (boucle 95 s, lissage 212 s, étape 8 21 s, borne + étape 9 18 s, paliers
-      24 s, étape 10 2,5 s, export 10 s). Chaîne de lissage seule (274 s) : P3 73 s
-      (creusement parallèle 22 s, sérialisation vers les processus 8 s, candidats
-      barycentriques 24 s, Viterbi 4 s), P2 62 s (5 tours), P4 54 s (cache : 5, 22, 27, 28
-      zones reprises aux tours 2 à 5), P5 exhaustif 50 s, P5 en boucle 18 s, tranchage non
-      creusé 16 s. Plus aucun poste dominant.
-    - **Maillage Bird trop grossier** (trouvé à la phase 3) : TetGen par défaut donne
-      **30 tétraèdres** sur l_shape (24 faces). Règle `BirdLoopParams.max_mean_tet_volume = 2`
-      mm³ : au-delà, retétraédrisation à `refine_tet_volume = 0,5` mm³ (valeur de la recherche
-      pour real_overhang) ; le Benchy (0,63 mm³ en moyenne) n'est pas touché. Même à 30
-      tétraèdres, Bird battait FEM sur l_shape : matière sans appui 2,74 → 1,01 %, Y 253 → 19
-      tours, impression 0,19 → 0,09 h, 0 collision des deux côtés.
-    - **Phase 3 lancée** (`scripts/measure_bird_vs_fem.py`, `out/bird/phase3.jsonl`) : step9b,
-      collisions, diagnostics, temps de calcul et d'impression, tours de Y, sur les 4 modèles.
-    - **Ingestion Bird robuste** (`deformation._tetrahedralize_repaired`) : APRÈS un refus de
-      TetGen seulement, cascade de step1 (nettoyage, union booléenne des coques qui se
-      traversent, résolution géométrique avec TetGen pour oracle, pymeshfix), avec un
-      garde-fou d'ÉTENDUE (pymeshfix gardait une seule de deux boîtes croisées : 12/24 faces,
-      exactement au seuil des 50 % de step1, qui a le MÊME défaut, non corrigé côté FEM).
-      death 93 417 tétraèdres (12 s), turkish 115 131 (19 s). Test
-      `test_self_intersecting_surface_is_repaired_before_tetgen`.
-    - **Creusement P3 par morceaux** au-delà de `MAX_REFINE_TRIANGLES` (pile de travail,
-      ordre inchangé sous la limite) au lieu de lever `MemoryError` (turkish : 547 304
-      triangles à la 1re couche). Insuffisant pour turkish : un processus de creusement a
-      ensuite manqué de mémoire (OpenBLAS) et le pool s'est bloqué.
-    - **PLACEMENT : les mesures FEM de death et turkish étaient hors plateau.** La voie FEM
-      garde les coordonnées du STL : death est centré à ~376 mm de l'axe, turkish à ~150 mm
-      (bord à 200 mm), pour un plateau de 150 mm de rayon. Les chiffres FEM de ces deux
-      modèles dans les limites #64 à #74 décrivent donc une pièce imprimable nulle part
-      (Y ≈ 0 tour, orientations quasi constantes). La voie Bird recentre. Copies recentrées :
-      `out/bird/centered/`.
-    - **Phase 3, à placement égal** (`out/bird/phase3_centered.jsonl` ; death Bird :
-      `out/bird/phase3.jsonl`), défauts actuels :
-
-      | modèle | voie | sans appui | collisions (= supports) | impression | Y | calcul |
-      |---|---|---:|---:|---:|---:|---:|
-      | l_shape | FEM | 2,74 % | 0 | 0,19 h | 253 | 3 s |
-      | l_shape | Bird (2 102 tét.) | 2,58 % | 77 | 0,09 h | 16 | 29 s |
-      | l-triple | FEM | 2,55 % | 0 | 0,23 h | 50 | 3 s |
-      | l-triple | Bird | 2,41 % | 102 | 0,13 h | 3 | 48 s |
-      | death | FEM centré | 0,54 % | 42 | 2,06 h | 124 | 34 s |
-      | death | Bird | **0,42 %** | **0** | **1,50 h** | 121 | 988 s |
-      | turkish | FEM centré | 1,10 % | **30 012** | 5,03 h | 78 | 112 s |
-      | turkish | Bird | — | — | — | — | non applicable |
-
-      Bird : impression 27 à 53 % plus rapide partout, sans appui légèrement meilleur sur les
-      3 modèles mesurés ; collisions pires sur les deux pièces fines (aucune réorientée par
-      l'étape 10), nulles sur death. Turkish : la boucle n'accepte AUCUNE passe (repli dès
-      30°), Bird n'y apporte rien. FEM turkish centré : 30 012 points en collision (~28 %,
-      cohérent avec #72) — **turkish n'est imprimable par aucune voie aujourd'hui**.
-      Règle du maillage grossier NON validée : à 30 tétraèdres, Bird l_shape faisait 1,01 %
-      et 0 collision. **Choix de la voie par défaut : à l'utilisateur.**
-    - Tests : `tests/test_bird.py` (9, dont l'équivalence native), `tests/test_bird_skin.py`
-      (6, dont l'index natif contre un calcul brut). **Reste** : export du
-      Benchy et du dino par `main.py --method bird` comparé aux G-code `_v5` du salon ;
-      phase 2 (C++, d'abord la déformation : ~12 min par modèle) ; phase 3 (Bird contre FEM
-      sur les 4 modèles).
-
 76. **Pose du modèle sur le plateau à l'ingestion (`place_on_platform`, 2026-10-13,
     ACTIVÉ par défaut) et régénération des G-code.**
 
@@ -2997,13 +1892,6 @@ pour affichage/validation avant export G-code.
       **30,3 mm**, `real_overhang.stl` à −15 mm (refusé par l'export). Les deux
       premiers flottaient au-dessus du plateau : collision plateau jamais exercée,
       et un G-code qui aurait démarré en l'air.
-    - **Mécanisme** : `step1_ingest.run(place_on_platform=True)` translate le
-      maillage nettoyé en z SEUL (min z → `platform_z`, ou 0 si `None`) ;
-      `IngestReport.placement_offset_z` rend le décalage. `PipelineParams.place_on_platform`
-      (défaut `True`) le transmet aux deux ingestions de `main.run_pipeline` (passe
-      légère des jonctions comprise) et de `scripts/export_slicing_preview.py`
-      (synchronisés d'emblée). La voie Bird pose déjà son plateau à z = 0.
-      `config/params.schema.json` et `params.hpp` régénérés.
     - **Mesure, 4 modèles** (`out/measure_placed_2026-10-13.jsonl`, résolution 0,8,
       variante `placed` de `scripts/measure_matrix.py`) : l_shape et l-triple, déjà
       à z = 0, **identiques au bit** ; death 0,22 → 0,21 % de matière sans appui,
@@ -3016,16 +1904,6 @@ pour affichage/validation avant export G-code.
     - **À savoir côté interface** : un modèle posé plus haut dans le STL est
       redescendu ; l'UI doit lire `placement_offset_z` pour ne pas désaligner son
       aperçu.
-    - **G-code régénérés** (même jour, code actuel) : pièces FEM du salon
-      (l-triple, l_shape) **identiques au bit** aux versions du 2026-10-07 ;
-      Benchy et dino par la chaîne Bird de recherche (`out/run_bird_chain.sh`,
-      `--apex-detect`) → `out/share/benchy_pass4_v6.zip`, `dino_pass5_v6.zip`.
-      Benchy : 1 082 707 mouvements, 31,3 tours de Y, 11 collisions non résolues
-      (comme avant, z médian 38,2 mm) ; dino : 969 146 mouvements, **620,5 tours**,
-      0 collision. Différents des `_v5` (coordonnées déplacées par la boucle et
-      les évolutions de code depuis ; lignes quasi toutes différentes, ±1 % de
-      longueur). Anciens fichiers sauvegardés sur
-      `H:/apex_backup_2026-10-13/gcode_before_regen`.
     - **Temps d'impression réestimés** (`scripts/estimate_gcode_time.py`, borne
       basse, accélérations ignorées) :
 
@@ -3037,195 +1915,6 @@ pour affichage/validation avant export G-code.
       | l_shape | 0,12 h | 0,20 h | 1,15 h |
     - **Suite complète : 495/495 dans les deux positions de `APEX_USE_CPP`**
       (243 s en Python, 226 s en natif). Test : `test_place_on_platform_translates_in_z_only`.
-
-77. **Chantier « Bird entier en C++, puis Vulkan » (plan
-    `~/.claude/plans/port-e-tout-bird-hidden-nygaard.md`, approuvé le 2026-10-13).
-    Étape −1 faite : la production des G-code Bird passe de la chaîne de recherche
-    à `main.py --method bird`.**
-
-    - **Contrôle des dégagements dans le moteur** :
-      - `file_io.gcode_export.material_travel_check` reprend le `travel_check` de
-        `research/S4_Slicer/export_gcode.py` (matière densifiée à 0,25 mm, axe de la
-        tête en 16 points de la pointe au pivot, rayon de buse) ;
-      - il porte ses données (`.native`), et l'export natif fait le même contrôle
-        sans rappel Python : `TravelCheck` dans `apex/gcode_export.hpp`,
-        `PastMaterialIndex::any_past_within`, capacité `apex_core.EXPORT_TRAVEL_CHECK` ;
-      - **texte identique ligne à ligne** au chemin Python (test
-        `test_gcode_export_native_travel_check_identical_text`, avec un cas construit
-        où les dégagements sont réellement bloqués) ;
-      - `main.export_gcode_checked(check_travel=True)` l'active par défaut.
-    - **Défaut hérité, NON corrigé** (la recherche sert d'oracle) : 16 points sur
-      46 mm d'axe (un tous les ~3 mm) pour un rayon de 0,2 mm. Un cordon qui passe
-      entre deux échantillons n'est pas vu. Le contrôle est donc grossier ; à
-      reprendre (capsule axe / matière) avec mesure.
-    - **Repartir d'une passe enregistrée** : `pipeline.bird.loop.from_saved_passes`,
-      argument `loop_result` de `run_bird_pipeline`, option `main.py --from-pass=<préfixe>,<k>`
-      (aussi dans `scripts/measure_bird_vs_fem.py` et `scripts/profile_bird.py`).
-    - **Comparaison à entrée identique** (passes 4 et 5 de la recherche,
-      `out/bird/compare_chains_fixed_2026-10-13.jsonl`) :
-
-      | | Benchy recherche | Benchy `main.py` | dino recherche | dino `main.py` |
-      |---|---:|---:|---:|---:|
-      | temps de calcul | 580 s | **250 s** | 1 067 s | **383 s** |
-      | points de collision par tour de lissage | 275/17/11/1/0 | 278/17/11/1/0 | 233/17/8/0 | 240/17/7/0 |
-      | zones exclues après vérification | — | — | [4] | [4] |
-      | collisions restantes (étape 9) | 11 | 11 | 0 | 0 |
-      | dégagements en contact | 0 | 0 | 0 | 0 |
-      | tours de Y / filament | 31,3 / 4,57 m | 31,3 / 4,57 m | 620,5 / 6,42 m | 620,5 / 6,42 m |
-      | mouvements | 1 082 707 | 1 043 039 | 969 146 | 916 024 |
-      | temps d'impression (Z recommandé) | 1,89 h | 1,78 h | 2,62 h | 2,45 h |
-
-      Écarts de mouvements et de temps : le **filtre médian de B** (actif par défaut
-      depuis la limite #71), que la chaîne de recherche n'applique pas (elle appelle
-      `_resolve_all_axis_angles_coupled` directement). Écart favorable, géométrie
-      identique. **G-code de production `_v7`** : `out/share/benchy_pass4_v7.zip`,
-      `dino_pass5_v7.zip` (fichiers sur `H:/apex_bird_compare_2026-10-13/fixed`).
-    - **Avec la boucle de `main.py`** (sans passe enregistrée) :
-      - Benchy : 4 passes acceptées comme la recherche, 339 s, mais 7 collisions au lieu
-        de 11 (la déformation native diffère de quelques dixièmes de micron, et le
-        lissage diverge dès le 2ᵉ tour) ;
-      - **dino : arrêté**. La règle du maillage grossier (`BirdLoopParams.max_mean_tet_volume
-        = 2`, active par défaut alors que la limite #75 la dit « non validée ») le
-        retétraédrise de 4 263 à **151 695** tétraèdres. Ce n'est plus comparable, et le
-        risque mémoire est celui de turkish. **Tranché (utilisateur, 2026-10-13) :
-        règle désactivée par défaut** (`max_mean_tet_volume = None`).
-    - **Profil par phase** : `scripts/profile_bird.py` (chronométrage en temps réel par
-      enveloppe des fonctions de chaque phase, compteurs natifs du solveur LSQ via
-      `apex_core.bird_lsq_last_profile`, option `--gcode=` pour le contrôle d'identité).
-    - **Phase 0, profil de référence** (`out/bird/profile_bird_2026-10-13.jsonl`, CPU
-      seul, `main.py --method bird`) : l_shape 29 s, l-triple ~40 s, **Benchy 300,6 s**,
-      **dino 373 s** (depuis la passe 5), **death 714 s**. Postes dominants :
-
-      | poste | Benchy | dino | death |
-      |---|---:|---:|---:|
-      | contrôle P5 natif (un seul cœur) | 47,7 s | 113 s | 93 s |
-      | LSQ déformation (J·x + Jᵀ·u : 53-55 %) | 44,6 s | — | 206 s |
-      | LSQ rotations (dont champ initial Python ~9 s / 27 s) | 19,2 s | — | 106 s |
-      | tranchage déformé (dont candidats barycentriques) | 61 s (21 s) | 128 s (52 s) | 108 s (30 s) |
-      | P2 dernier moment accessible | 20,7 s | 20,4 s | 55 s |
-      | étape 8 Bird (dont boucle d'objets Python) | 23,5 s | 16,9 s | 15,3 s |
-      | Dijkstra ×2 + topologie | 17 s | — | 63 s |
-
-    - **Premiers gains, tous IDENTIQUES AU BIT** (G-code complet du Benchy comparé
-      octet par octet, avec et sans boucle de déformation) :
-      - **P5 en parallèle** (`SkinCheckIndex.check_zone_parallel`) : la matière visible
-        depuis un point testé est un PRÉFIXE de la zone dans l'ordre d'insertion
-        (bizarrerie des blocs de 256 points comprise) ; chaque point de la zone porte son
-        rang, les points testés se répartissent sur les cœurs. Benchy **47,7 → 8,4 s**.
-        Test `test_native_skin_check_parallel_identical_to_sequential` (1, 3, tous les fils) ;
-      - **solveur LSQ parallèle** (pool persistant `apex/internal/parallel_pool.hpp`) :
-        J·x par lignes, Jᵀ·u par colonnes sommées dans l'ordre croissant des lignes
-        (transposée construite une fois), résidus et jacobienne par tétraèdre ;
-        réductions séquentielles. Déformation Benchy **44,6 → 25,8 s**.
-        `apex_core.bird_lsq_set_threads(threads, min_parallel)` ; test
-        `test_native_least_squares_threads_bit_identical` (seuil 1 : chemin parallèle exercé) ;
-      - densification du contrôle des dégagements vectorisée : **9,7 → 0,5 s** ;
-      - candidats barycentriques : k-NN sur tous les cœurs (`workers=-1`), lots de
-        ~200 000 points toutes couches confondues, barycentriques par fils :
-        **20,3 → 16,4 s seulement**. La résolution 3×3 de numpy se partage mal entre fils.
-      - **Benchy complet : 300,6 → 226,8 s** ; depuis la passe 4 : 166,9 s.
-    - **Barycentriques en natif (accord de l'utilisateur, TOLÉRANCE DÉCLARÉE)** :
-      `apex_core.tet_barycentric_candidates` (`apex/bird_locate.hpp`, LU à pivot partiel,
-      pool persistant). Le k-NN reste scipy (0,11 s pour 200 000 points, indices au bit) ;
-      le temps était dans la résolution 3×3 (1,74 s). **×20** (1,80 → 0,09 s). Pas le bit :
-      une LU transcrite ne coïncide avec LAPACK/OpenBLAS que sur 53 % des cas (15 % avec
-      FMA) ; écart mesuré (Benchy passe 4, 200 000 × 24) score ≤ 4,5e-9, point ramené
-      ≤ 1,2e-10 mm, 0 décision changée aux seuils ±1e-6. Sert les trois appelants :
-      candidats du tranchage déformé, `machine_toolpath.locate`, `PrintedSolid.phi_at` (P2).
-      `APEX_NATIVE_BARY=0` garde LAPACK (mesure dos à dos, lu aussi par les sous-processus).
-    - **Ex aequo de `locate` : règle explicite** (`machine_toolpath.LOCATE_TIE = 1e-9`,
-      changement de comportement des DEUX chemins). Un point de paroi est sur la frontière
-      de plusieurs tétraèdres (scores ~0 à quelques ULP) : le premier maximum strict
-      dépendait de l'arrondi, donc la normale, donc B. Natif contre LAPACK SANS la règle :
-      0,055 % des points du Benchy à |ΔB| > 0,5°, jusqu'à 20°. Règle : premier candidat
-      dans l'ordre k-NN parmi ceux à moins de 1e-9 du meilleur. AVEC la règle, natif contre
-      LAPACK : 846 lignes sur 1 048 653, 3 points à |ΔB| > 0,5° (max 3,1°), pointe ≤ 5,5 µm,
-      même nombre de mouvements. Effet de la règle elle-même contre `_v7` : 0,23 % des
-      points à |ΔB| > 0,5° (max 21°), collisions (11), longueur extrudée et temps identiques.
-    - **Bout en bout, depuis les passes enregistrées** : Benchy, collisions par tour
-      278/17/11/1/0 et 11 à l'étape 9, comme la référence ; dino, 240/17/7/0, zone [4]
-      exclue, étape 9 157 → 158 collisions toutes résolues par les paliers (0 restante).
-    - **Raffinement du retour par lots** (`deformed_slicing.run`, `refine_all`) : les
-      polylignes à raffiner d'un même tour sont ramenées en un appel (4 383 appels → 34 sur
-      le dino). G-code **identique à l'octet** (Benchy et dino). Candidats : Benchy
-      16,4 → 1,2 s, dino 15,2 → 3,4 s ; localisation de l'étape 8 5,5 → 1,3 s ; dernier
-      moment accessible (P2) 22 → 15 s. Benchy depuis la passe 4 : 166,9 → ~150 s
-      (variance ~10 %) ; dino depuis la passe 5 : 373 → 256 s (P5 parallèle compris).
-      Reste dans le tranchage déformé du dino ~70 s non attribuées par le profil (99,6 s
-      au total) : à instrumenter (creusement P3 probable).
-    - **Socle Vulkan (phase 1)** : `cpp/CMakeLists.txt` option `APEX_WITH_VULKAN`
-      (`scripts/build_cpp.py --vulkan`), volk `vulkan-sdk-1.4.363.0` et VMA v3.3.0
-      vendorés (MIT, `cpp/third_party/volk|vma`, fichiers `VERSION.txt` : un fichier
-      `VERSION` sans extension est pris pour l'en-tête standard `<version>` par MSVC,
-      Windows ignorant la casse). Shaders `cpp/shaders/*.comp` → SPIR-V par `glslc`.
-      Runtime `apex/gpu/vk_context.hpp` + `vk_internal.hpp` (contexte paresseux, buffers
-      VMA, noyaux en cache, dispatch chronométré par timestamps). `core._cpp.gpu_status()`,
-      `gpu_enabled()` (`APEX_USE_GPU`, désactivé par défaut), `set_gpu_enabled()`.
-      **RTX 3090 détectée, float64 actif, `saxpy` identique au bit au CPU en float32 et
-      float64** (`tests/test_gpu_runtime.py`). Aucun noyau métier encore : la phase 3
-      n'écrit un noyau que si le C++ multithread laisse plus de 1 s par appel.
-
-78. **Champ scalaire MULTIBRANCHE (`pipeline/step4b_multibranch.py`, 2026-10-19, opt-in
-    `FieldSolverParams.multibranch`) : résultat MITIGÉ — divise par ~2 la matière sans appui sur
-    death et benchy, dégrade fig et deer. Pas d'activation par défaut.**
-
-    - **Mécanisme.** Branches = (région de step3 × composante connexe par faces), petites branches
-      fondues dans leur voisine (`multibranch_min_branch_tets`, 40) ; arbre BFS depuis les branches
-      au contact du plateau ; chaque branche résout son propre système (lissage + « le gradient suit
-      la direction ») avec pour Dirichlet DUR les nœuds déjà valorisés par ses parents. φ est continu
-      aux interfaces ; les racines sont ancrées au plateau. `ScalarField.branch_labels/branch_depths`
-      servent d'ordre à l'étape 5 (rang de branche), sans effet mesuré. Les `Constraint[]` ne sont pas
-      honorées ; `enforce_upward_growth` n'est pas appliqué (le signe « up » de `mode="up"` fait la
-      même chose branche par branche) ; la projection radiale atteignable l'est.
-    - **Sondes** (`scripts/measure_matrix.py`, variantes `mb*`, `mbo*`, `mbr*` ; résultats
-      `D:/apex_multibranch/results.jsonl`, copie à archiver) : matière sans appui (step9b) et fraction
-      de collisions de la tête, contre la référence FEM actuelle.
-    - **Quatre familles de partition/direction ÉCARTÉES** (toutes pires que la référence sur ≥ 3
-      modèles sur 4) : directions de région « loin de l'attache » (`mb`, benchy ×8,6), directions
-      géodésiques par branche (`mb_geo`, ×2 à ×19), partition par flux géodésique quantifié sur la
-      sphère, flux par tétraèdre ou moyen par branche (`flow`/`flowmean`, ×2 à ×9 ; échec de
-      convergence CG sur fig). Même schéma que #52/#54 : une croissance « en tube » donne des couches
-      transversales, mal vues par le test de support VERTICAL de step9b.
-    - **Ce qui a marché** : `mbr_up` = partition par régions, directions de région retournées vers le
-      haut (isosurfaces identiques à `enforce_upward_growth`), poids de risque de surplomb (omis dans la
-      première version : c'était la cause de benchy ×5, ajouter `multibranch_use_risk_weights`), solveur
-      hiérarchique à Dirichlet dur :
-
-      | modèle | matière sans appui (réf → mbr_up) | collisions tête |
-      |---|---|---|
-      | death | 0,58 → 0,26 % (×0,44) | +0,2 pt |
-      | benchy incliné | 0,07 → 0,03 % (×0,47) | 0 |
-      | real_overhang | ×1,02 | +0,1 pt |
-      | dino | ×0,97 | 0 |
-      | l_shape / l-triple | identiques au bit | 0 |
-      | deer | 0,164 → 0,201 % (×1,23) | +0,3 pt |
-      | fig | 0,30 → 0,35 % (×1,17) | +2,1 pts (16 → 18 %) |
-      | turkish | non mesurable : l'ingestion FEM échoue (l'autodocteur n'existe que côté Bird) | |
-
-      Sensibilité NON monotone au seuil de fusion (t10 : death ×0,83 ; t200 : benchy ×1,02) et le
-      lissage des directions (`_s20`) aide death (×0,39) mais dégrade benchy (×2,3) : réglages à ne pas
-      figer sur un modèle (erreur déjà payée en #51). Mélange des directions (`_blend`) : death ×0,30,
-      mais dino ×1,31, benchy ×1,32, deer ×1,27.
-    - **`multibranch_vertical_if_safe`** (trancher à la verticale une branche sans risque de surplomb) :
-      sans effet, aucune branche ne passe sous le seuil de 2 % (le risque est non nul presque partout).
-    - **Constats annexes importants** :
-      1. **`true_overhang_count = 0` sur tous les modèles, référence comprise** : il n'y a plus de
-         surplomb réel à supprimer. `unsupported_fraction` compte aussi les points « résolus par
-         inclinaison » et surtout des DÉFAUTS D'ORDRE (≈ 94 % sur death, 100 % sur benchy/deer/fig).
-      2. **Ces défauts d'ordre sont LOCAUX** : écart médian entre un point et son support futur de 2 à
-         20 points de trajectoire (death), 22 à 59 % dans le MÊME cordon continu. Aucune amélioration du
-         champ ne les touche ; c'est l'ordre des cordons/anneaux à l'intérieur d'une couche inclinée
-         (bas avant haut) qui est en cause. Piste non mesurée avec l'état actuel du code (#50 l'avait
-         écartée dans un état antérieur).
-      3. Le feedback global (`support_feedback_iterations=3`) mesuré sur ce jeu : death ×0,54 mais
-         real_overhang ×2,0, dino ×2,5, benchy ×3,3 : opt-in confirmé.
-      4. La direction de région de step3 est dégénérée (#51) : le même vecteur (−0,26, 0,08, −0,96)
-         est élu pour la plus grande région de death, benchy et deer. Le gain de `mbr_up` vient donc en
-         partie d'un tirage arbitraire.
-    - **Tests** : `tests/test_step4b_multibranch.py` (2).
-    - **Autodocteur Bird** (même session) : voir `pipeline/bird/deformation.py` (`diagnose_surface`,
-      TetGen `Y`, `base_min_height`) : fait passer le Fighter jet F18 et deer, jamais appliqué à
-      l'ingestion FEM (`step1_ingest`), d'où l'échec de turkish.
 
 79. **Champ = DISTANCE AU PLATEAU par la méthode de la chaleur (`use_heat_geodesic_field`),
     couches = ses isosurfaces (2026-10-21/22). Premier champ dont l'ORDRE est correct sur une
@@ -3547,18 +2236,6 @@ Aucune logique de calcul dans ce fichier — uniquement des contrats de données
   step9). ~15× plus rapide sur ce chemin scalaire, correction du principal
   goulot de performance mesuré sur step8.
 
-## Détail de `core/constraints.py`
-
-Point d'extension pour tout nouveau type de contrainte utilisateur — ajouter un
-type ne nécessite jamais de modifier `step4_field_solver.py` :
-
-- `ConstraintAssemblyContext` — données partagées (TetMesh, MeshData, kdtree,
-  gradients de forme précalculés), sans logique.
-- `CONSTRAINT_ASSEMBLERS: dict[ConstraintType, ConstraintAssembler]` — registre ;
-  ajouter un type = une fonction d'assemblage + une entrée ici.
-- `assemble_all_constraints(constraints, ctx) -> (csr_matrix, ndarray)` — point
-  d'entrée unique appelé par step4.
-
 ## Détail de `core/spatial.py`
 
 Enveloppe `KDTree` autour du sous-ensemble de `scipy.spatial.cKDTree` que le
@@ -3581,24 +2258,22 @@ step4/5/6), step3, step4, step5, step7.
 
 ## Détail de `pipeline/step4_field_solver.py`
 
-- Système `A·φ = b` symétrique défini positif, assemblé en trois fonctions
-  pures pour permettre une re-résolution rapide après édition d'un point
-  d'attache (jamais besoin de relancer step1/2/3, ni de réassembler la partie
-  structurelle) :
-  - `build_static_system(...) -> FieldSolverStaticSystem` — tout ce qui NE
-    dépend PAS des `Constraint[]` (rigidité, direction de gradient, ancrage
-    plateau). À appeler une seule fois après step3, résultat à mettre en cache.
-  - `solve_with_constraints(static_system, constraints, params) -> ScalarField`
-    — chemin rapide, appelé à chaque édition de contrainte.
-  - `run(...)` — enveloppe des deux, pour un slicing complet en une passe.
-- Solveur : direct (`spsolve`) sous `direct_solve_node_threshold` (défaut 30000
-  nœuds), sinon itératif (`cg`, préconditionné) — jamais `gmres` (système
-  toujours symétrique par construction).
-- `_blend_tet_directions` : mélange spatial des directions de gradient
-  (plateau + régions comme sources d'influence, pondération inverse-
-  distance, fenêtrage lisse) — remplace le plus-proche-voisin strict
-  historique, opt-in via `FieldSolverParams.direction_blend_radius`
-  (défaut `0.0` = désactivé). Voir limites #32/#33/#34.
+Voie unique (décision de l'utilisateur, 2026-10-27) : le champ EST la distance au plateau à
+travers la matière, par la méthode de la chaleur (Crane, Weischedel, Wardetzky). `run(tet_mesh,
+mesh_data, overhang_map, region_dependency_graph, params) -> ScalarField`.
+- Matrices FEM P1 (rigidité, masse concentrée) : `_assemble_stiffness_matrix`, `_FemPattern`
+  (motif CSR partagé), `_assemble_lumped_mass_matrix`.
+- `_heat_method_distance` : diffusion `(M + t L) u = source` avec `t = heat_method_time_factor ·
+  h²` (h = arête médiane), flux normalisé `X = −∇u/‖∇u‖`, projeté sur le demi-plan atteignable
+  (`_project_to_reachable_radial_tilt`) quand `radial_tilt_origin` est renseigné, puis
+  `L φ = div X` et recalage à 0 sur le plateau. Natif : `apex_core.heat_method_distance`.
+- Sources = nœuds du plateau (`_identify_platform_nodes`, depuis
+  `RegionDependencyGraph.platform_contact_faces` de step3, seule étape qui connaît le plateau).
+- `_solve_linear_system` : direct (`spsolve`) sous `direct_solve_node_threshold`, sinon CG de
+  Jacobi (ILU en option) ; repli unique à 10× plus d'itérations pour la diffusion.
+- Retirés le 2026-10-27 : le champ FEM directionnel (terme de surplomb, mélange de directions,
+  rétroaction, directions géodésiques, ancrage), le champ multibranche, les parties planes et les
+  contraintes utilisateur (`Constraint[]`, points d'attache — à refaire sur la voie chaleur).
 
 ## Détail de `pipeline/step1_ingest.py`
 
@@ -3944,151 +2619,6 @@ rien s'ils sont respectés au fil de l'eau, et coûteraient une refonte s'ils
 
 Aucune de ces quatre disciplines ne demande d'écrire du code aujourd'hui :
 ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon.
-
-55. **Bug de performance réel corrigé dans la segmentation par branche
-    (`step3_segmentation.py`) : sur un mesh dense (`death.stl`), la fusion
-    des micro-composantes ne terminait JAMAIS — corrigé, blocage infini →
-    11,5s. Et : `FieldSolverParams.geodesic_smoothing_iterations`, un
-    lissage VECTORIEL ITÉRATIF du champ géodésique, mesuré cohérent sur 3
-    modèles (jamais pire que la référence), mais PAS encore activé par
-    défaut — le 4ᵉ modèle (`turkish.stl`) reste à mesurer avant toute
-    décision, exactement la discipline qui avait invalidé
-    `anchor_growth_weight` après 3 mesures favorables (limite #51).**
-
-    ### Le bug de performance (`_merge_tiny_branch_components`)
-
-    La segmentation par branche (`branch_cut_threshold`, limite #51/#52)
-    avait été mise au point sur `real_overhang.stl`, un modèle synthétique
-    où la coupure ne produit que 3-4 composantes significatives (le reste,
-    des artefacts de bord filtrés par une taille minimale). Sur
-    `death.stl` (mesh dense, 2418 faces de surface réelles), le même
-    seuil (0.05) fragmente le modèle en **318 239 micro-composantes**.
-    L'ancienne implémentation traitait chaque micro-composante dans une
-    boucle Python, reconstruisant un `scipy.spatial.cKDTree` par candidat
-    voisin À L'INTÉRIEUR de cette boucle — avec 318k composantes, ce
-    n'était tout simplement jamais fini (processus tué après plusieurs
-    minutes sans terminer, même à résolution grossière 1.0).
-
-    **Fix** : `_merge_tiny_branch_components`, entièrement vectorisée. Un
-    seul passage par ITÉRATION (pas par composante) sur toutes les arêtes
-    du graphe tétraèdre-tétraèdre reliant un tétraèdre "petit" à un
-    tétraèdre "grand" : distance euclidienne calculée en un seul appel
-    numpy sur toutes les arêtes candidates à la fois, chaque petite
-    composante adoptant le label du grand voisin connecté par l'arête de
-    distance minimale. Répété jusqu'à stabilisation (borné par le nombre
-    de petites composantes, converge en pratique en très peu de passes).
-    Résultat mesuré : **blocage infini → 11,5s** sur `death.stl`
-    (résolution 1.0). 305/305 tests passants, comportement identique sur
-    tous les modèles déjà testés (aucune régression, seule la performance
-    change).
-
-    Coût réel restant, résolution comprise : **145s (résolution 0.8) à
-    734s/12min (résolution 0.4)** pour step1→8 complet sur `death.stl`.
-    Ce n'est pas la finesse du mesh de surface qui coûte cher (2418 faces,
-    léger) — c'est la densité de tétraédrisation à la résolution demandée,
-    un coût structurel du solveur FEM, pas un bug isolé.
-
-    ### Lissage vectoriel itératif du champ géodésique (`geodesic_smoothing_iterations`)
-
-    Idée apportée par l'utilisateur (méthode externe : maillage
-    tétraédrique → Dijkstra depuis le plateau → gradient par tétraèdre →
-    **lissage non-linéaire itératif des vecteurs**, avec renormalisation à
-    chaque passe). Ressemble à `use_geodesic_directions` (limite #52,
-    mesuré ×2,2 pire sur `death.stl`), mais avec une différence de méthode
-    clé : `_diffuse_tet_directions` (le lissage déjà existant pour
-    `transition_distance_mm`) résout un système linéaire **en une seule
-    passe, composante par composante** — à un point de selle (deux voisins
-    à ~180°), ça moyenne deux vecteurs quasi opposés en un vecteur proche
-    de zéro, renormalisé ensuite n'importe comment. C'est exactement ce qui
-    laissait le lissage à 8 sauts topologiques (limite #52) bloqué à
-    ~170° de max quel que soit le rayon.
-
-    `_iterative_vector_smoothing` (nouvelle fonction, step4) : à CHAQUE
-    itération, chaque tétraèdre se déplace d'une fraction `step` vers la
-    moyenne de ses voisins PUIS renormalise — jamais un seul calcul suivi
-    d'une renormalisation finale. Le champ se débloque progressivement
-    parce qu'à chaque passe, la moyenne locale est déjà légèrement
-    influencée par les voisins plus loin du point de selle. Mesuré sur
-    `death.stl` (fraction de paires de voisins à plus de 100° d'écart) :
-    brut 3,79% → 10 itérations 0,03% → 50 itérations 0,00%, max ramené de
-    179,8° à 88,0°.
-
-    `FieldSolverParams.geodesic_smoothing_iterations` (défaut 0, opt-in) et
-    `geodesic_smoothing_step` (défaut 0.5) — s'applique uniquement quand
-    `use_geodesic_directions=True`, lisse le champ géodésique juste avant
-    qu'il ne remplace les directions cibles.
-
-    ### Mesures step9b, épaisseur de couche RÉELLEMENT égalisée
-
-    Piège rencontré et corrigé en cours de mesure : comparer à
-    `layer_height_base` nominal identique ne suffit PAS ici — à valeur
-    nominale égale, le champ géodésique brut produit des couches
-    2,4-2,6× PLUS ÉPAISSES que la référence (mesuré sur `death.stl` :
-    0,439mm réf contre 1,154mm géodésique brut, à `layer_height_base=0.2`
-    identique pour les deux). Sans correction, ceci aurait fait paraître le
-    géodésique artificiellement meilleur (moins de couches = moins de
-    transitions = moins de défauts mécaniquement). Facteur d'égalisation
-    recalculé par modèle à partir de l'épaisseur réelle mesurée, jamais
-    supposé transférable d'un modèle à l'autre.
-
-    | modèle (résolution) | référence | geodesic brut (égalisé) | geodesic + lissage(50, 0.5) (égalisé) |
-    |---|---:|---:|---:|
-    | `death.stl` (0.8) | 11,02% | 1,63% | **1,61%** |
-    | `real_overhang.stl` (0.4) | 2,74% | 3,46% (dégrade) | **2,80%** (récupère) |
-    | `l_shape_overhang.stl` (0.4) | 3,59% | 4,76% (dégrade) | **3,66%** (récupère) |
-    | `turkish.stl` | — | — | **NON MESURÉ** |
-
-    Motif cohérent sur les 3 modèles mesurés : le géodésique brut seul est
-    tantôt bien meilleur (`death.stl`), tantôt légèrement pire
-    (`real_overhang.stl`, `l_shape_overhang.stl`) que la référence — mais
-    le lissage vectoriel n'est JAMAIS pire que la référence, et corrige
-    systématiquement la dégradation du géodésique brut quand elle existe.
-    Sur les défauts d'ordre, le lissage améliore aussi
-    systématiquement : `death.stl` 6803→3667 (-46%), `real_overhang.stl`
-    84→77, `l_shape_overhang.stl` 5→2.
-
-    Ce résultat CONTREDIT en partie la limite #52 (`use_geodesic_directions`
-    seul mesuré ×2,2 pire sur `death.stl`) — la mesure de la limite #52
-    avait été faite à résolution 0.4 sans le fix de performance ci-dessus
-    ni `transition_distance_mm`/segmentation par branche dans le même état ;
-    les deux mesures ne sont donc pas strictement comparables. Ne pas
-    effacer la limite #52 pour autant : elle reste la mesure de référence
-    pour le géodésique BRUT seul, que ce nouveau mécanisme ne remplace pas
-    mais complète.
-
-    ### NON ENCORE ACTIVÉ PAR DÉFAUT — turkish.stl manquant
-
-    `turkish.stl` (10180 faces, 100×100×60mm — nettement plus gros que les
-    3 autres modèles de `res/test_models/`) n'a pas pu être mesuré cette
-    session : à résolution 0.8, le calcul n'a montré aucun signe
-    d'achèvement après 16 minutes (même le premier des 5 runs de mesure).
-    Interrompu sans conclusion.
-
-    **Trois mesures concordantes ne font pas une généralité** — c'est
-    exactement ce qui avait fait activer puis retirer
-    `anchor_growth_weight` (limite #51, invalidé par son 4ᵉ modèle après 3
-    succès). `geodesic_smoothing_iterations` reste **opt-in, désactivé par
-    défaut**, tant que `turkish.stl` n'a pas été mesuré — à refaire à une
-    résolution plus grossière pour ce modèle spécifiquement (10180 faces
-    justifient un coût de calcul plus long que les autres, indépendamment
-    de tout bug).
-
-    ### Segmentation par branche jugée trop fragile sur death.stl (décision non exécutée)
-
-    Sur `death.stl`, `branch_cut_threshold=0.05` (calibré sur
-    `real_overhang.stl`) produit 108-131 régions selon la résolution
-    (contre 3-4 significatives attendues), avec une longue traîne de
-    dizaines de micro-régions à 1-3 faces — et 37% des couches déposées à
-    contre-sens. Jugé "un bazar total" en session. **Le retrait de
-    `branch_cut_threshold` et de sa mécanique associée
-    (`_branch_labels_from_tet_mesh`, `_merge_tiny_branch_components`,
-    `_majority_branch_label_per_face`, le câblage dans `_region_growing` et
-    `_anchor_growth_directions`) a été discuté mais N'A PAS ÉTÉ EXÉCUTÉ** —
-    la session a bifurqué vers le chantier de lissage géodésique
-    ci-dessus avant que ce retrait soit fait. Point ouvert pour la
-    prochaine session : soit retirer ce mécanisme comme prévu, soit
-    recalibrer `branch_cut_threshold` par modèle avant de le juger
-    définitivement inutilisable.
 
 56. **PORTAGE C++ — pas 0 (socle de build) et pas 1 (index spatial) FAITS,
     MESURÉS et validés à métrique strictement identique. step9b divisé par
@@ -5543,14 +4073,6 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
     > portage — sinon un bug de portage et un effet du mailleur seront
     > indiscernables.
 
-57. **Trois défauts de l'étape 6 corrigés (2026-09-26), présents depuis
-    l'origine dans TOUT Apex — trouvés en faisant passer les couches de la
-    méthode Bird par l'étape 6 (`research/S4_Slicer/bird_slice_deformed.py`,
-    hors dépôt). La
-    métrique step9b de référence (0,466578 % sur `death.stl`, limite #56)
-    est donc OBSOLÈTE : les trajectoires de tous les modèles ont changé.
-    À remesurer avant toute comparaison.**
-
     1. **Espacement du remplissage dérivé de la taille de la couche.**
        `_generate_infill` calculait `diagonal / density * 0,05` au lieu de
        `nozzle_width / density` : une couche de 35 mm à 20 % recevait une
@@ -5564,21 +4086,6 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
        l'entourent n'existaient. Le remplissage butait contre un bord jamais
        déposé. Le test existant vérifiait « rien DANS la cavité », jamais
        « des parois AUTOUR ».
-    3. **Morceaux secondaires abandonnés.** Quand un offset coupait une zone
-       en plusieurs morceaux, `_largest_polygon` ne gardait que le plus
-       grand : les autres perdaient parois intérieures et remplissage
-       (99 couches du Benchy Bird, 561 mm²). `_largest_polygon` est
-       supprimée ; chaque morceau non dégénéré garde ses parois, et la
-       frontière du remplissage est l'union des morceaux du niveau le plus
-       profond.
-
-    Vérifié sur les couches Bird du Benchy : remplissage mesuré / attendu
-    0,27 → 1,26 en médiane, 153/153 morceaux avec trajectoire, 149/149 trous
-    bordés. 5 tests ajoutés (`tests/test_step6_toolpath2d.py`), dont les deux
-    tests de parois contrôlés comme ÉCHOUANT avec l'ancien code. Le test des
-    cavités vérifie désormais « strictement à l'intérieur » (le contour d'un
-    trou est tracé SUR son bord).
-
     **Suite, même jour — motifs de remplissage.** Deux défauts de plus :
     `infill_pattern` était reçu et **jamais lu** (GRID donnait des lignes
     simples), et l'angle de balayage valait 0 à TOUTES les couches (lignes
@@ -5586,10 +4093,6 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
     l'utilisateur : `InfillPattern.CROSSED_ZIGZAG` — lignes croisées-alternées,
     un zigzag continu par zone, selon l'axe u une couche sur deux et selon v
     l'autre. Trois points de conception, chacun mesuré ou testé :
-    - **parité sur le RANG de l'isovaleur**, pas sur la position dans la
-      liste : ce sont les couches EMPILÉES (isovaleurs consécutives) qui
-      doivent se croiser, et l'ordre en arbre peut intercaler d'autres
-      branches. Vérifié sur le Benchy Bird : 199/199 couches conformes ;
     - **raccords qui SUIVENT LE BORD** (`_boundary_connector`) : un raccord
       droit sortait légèrement des bords irréguliers issus du maillage et
       était refusé presque à chaque ligne (médiane : 1 ligne par zigzag).
@@ -5631,62 +4134,6 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
     ÉCHOUANT sans la correction.
 
 ## Prochaine étape
-
-### État du chantier « dépôt sans support » (à lire avant de le rouvrir)
-
-Le défaut visible — sur `death.stl`, la coque en porte-à-faux apparaît
-déposée avant ce qui la porte — **n'est pas résolu**, et la session qui s'y
-est consacrée a surtout produit des résultats NÉGATIFS, tous mesurés (voir
-limite #51 pour le détail chiffré) :
-
-| mécanisme | état | mesure (matière déposée sans appui, step9b) |
-|---|---|---|
-| `LayerParams.support_driven_order` | existe enfin, opt-in **désactivé** | +15 % sur `death.stl` |
-| `SegmentationParams.anchor_growth_weight` | opt-in **désactivé** | -11 % `death`, **+76 % `turkish`** |
-| départage par marge angulaire | **retiré** (aucun cas d'usage) | dégrade sur 4 modèles / 4 |
-| `FieldSolverParams.use_geodesic_directions` | opt-in **désactivé** | −56 % / −42 % sur les 2 modèles fins, **×2,2 sur `death`**, `turkish` non mesuré |
-| **`step5b` ordre contraint par la tête + appui** (limite #67) | **ACTIVÉ** | death 0,227 → 0,222 %, turkish 0,70 → 0,198 %, 2 modèles fins inchangés ; collisions de la tête death 41,6 → 0,13 %, turkish 53,6 → 0,21 % |
-
-Quatre enseignements à ne pas repayer :
-1. **« Ancré au plateau » est le bon critère pour SIGNALER un risque et le
-   mauvais pour ORDONNER** : l'ordre par isovaleur donne aux couches
-   suspendues une continuité de proche en proche qui constitue un appui
-   local réel, que le réordonnancement détruit.
-2. **Le critère de choix de direction est DÉGÉNÉRÉ** : le risque résiduel de
-   la direction élue vaut exactement 0 pour toutes les régions des modèles
-   testés, donc `argmin` tranche par ordre d'indice — au hasard. C'est un
-   vrai problème de fond, non résolu ; « prendre la direction la plus
-   robuste » a été mesuré comme n'en étant PAS la sortie.
-3. **Trois mesures concordantes ne font pas une généralité** : activer un
-   mécanisme par défaut après 3 modèles favorables a été invalidé par le
-   4ᵉ. Mesurer sur les QUATRE modèles de `res/test_models/` avant toute
-   activation par défaut.
-4. **Aucun indicateur INTERMÉDIAIRE ne prédit la métrique de référence.**
-   Direction de dépôt, ancrage, ordre des couches : les quatre mécanismes
-   ci-dessus améliorent tous un indicateur intermédiaire, aucun n'améliore
-   step9b partout. La géodésique (limite #52) est le cas le plus net — elle
-   corrige un défaut de direction réel et mesuré (0 % → 28 % de tétraèdres
-   du dôme pointant vers le bas) tout en dégradant death.stl d'un facteur
-   2,2. Mesurer step9b, ou ne rien conclure.
-
-Le vrai point ouvert reste en amont, dans **step4** : un champ scalaire
-UNIQUE ne peut pas à la fois croître depuis le plateau et décroître
-localement sous un plafond suspendu. `enforce_upward_growth` masque ce
-conflit sans le résoudre (le désactiver aligne le champ sur la cible de
-step3 — 158,5° → 29,4° d'écart — mais fait perdre le contact plateau à
-TOUTES les couches). Pistes jamais mesurées : rendre ce flip conditionnel à
-la plage angulaire réelle de la tête (0-185°, elle PEUT déposer vers le
-bas), pondérer le terme de direction par région, ou un champ à plusieurs
-branches.
-
-**Mesuré le 2026-10-01 (`measure_matrix.py ... noflip`, radial actif, parois
-continues)** : sans `enforce_upward_growth`, l_shape et l-triple sont
-identiques au bit (le redressement ne s'y déclenche jamais), mais **death
-0,227 → 11,4 %** de matière sans appui (défauts d'ordre 717 → 33 153) et
-**turkish 0,70 → 3,55 %**. Avec C imposé et B dans le seul demi-plan radial,
-« la tête peut déposer vers le bas » ne suffit pas : le redressement reste
-indispensable. La piste « flip conditionnel à la plage de B » est donc close
-sous cette forme ; restent le poids par région et le champ à branches.
 
 **Les 10 étapes du cœur algorithmique sont écrites, stables et testées
 (272/272 tests).** `MachineProfile` décrit une cinématique générique à N
@@ -5792,16 +4239,6 @@ Ce qui reste, hors cœur algorithmique :
   champ unique (surplombs qui doivent croître vers le bas, limites #51 à #54) ; le
   « flip conditionnel » est clos. Aucune mesure encore.
 
-- **Lier Bird à l'algorithme C++ et inclure la citation** (demande de l'utilisateur,
-  rétablie le 2026-10-07 après avoir été perdue des documents). La voie Bird
-  (`research/S4_Slicer`, local) contourne le défaut de fond du champ FEM unique (voir
-  « État du chantier dépôt sans support ») : elle est la voie d'impression des pièces
-  suspendues (limite #64). La porter dans le cœur C++, accélérée (P2/P3, voir la feuille
-  de route). **S4 Slicer (Joshua Bird) est sous GPL-3.0** (compatible avec la décision de
-  licence, limite #56) et demande à être cité (`CITATION.cff`) : notice de licence et
-  attribution conservées dans tout code dérivé, citation dans le README et l'interface.
-  Préalable : comparer Bird et FEM sur les 4 modèles (step9b et collisions).
-- **Voies hors champ scalaire** (décision de l'utilisateur, 2026-10-19, après le verdict mitigé du multibranche, #78) : (2) **parties à couches planes** : chaque partie de step3 tranchée en plans dans sa propre orientation, ordre d'impression entre parties — essai EN COURS, opt-in, à mesurer sur les 8 modèles ; (3) **balayage le long d'un squelette** (sections perpendiculaires, pour les parties fines) — ROADMAP, non commencé. Alternatives écartées pour l'instant : optimisation directe par voxels (coût), réordonnancement des cordons (essai B, après la voie 2).
 - **Un `resegmentation_hook` réel pour l'étape 10** — `main.py` le laisse
   à `None` pour l'instant (voir détail ci-dessus). L'implémenter
   demanderait de re-jouer step3→step8 avec une contrainte d'angle
@@ -5856,8 +4293,6 @@ Ce qui reste, hors cœur algorithmique :
   - une **contrainte dans l'auto-organiseur de plateau**, qui place les
     modèles en conséquence.
 
-  Effet à MESURER avant d'en faire une règle : paramètre de décalage en
-  recherche (`bird_loop.py --offset=dx,dy`). Plateau : 300 mm de diamètre.
 - **Refuser dès l'entrée un modèle trop grand pour la machine** (demande de
   l'utilisateur, 2026-09-27). Le pré-calcul de collision tête-plateau du
   lissage non-planaire (recherche, `surface_skin.py`) traite le plateau
@@ -5891,15 +4326,7 @@ prérequis du salon. Deux choses le sont :
    (tête retournée jusqu'au 2026-09-27 : toutes les collisions antérieures
    sont suspectes).
 
-À repousser APRÈS le salon si le temps manque : les 10 motifs sur surfaces
-(P4 complet), la validation sur tous les modèles, le portage C++ de la voie
-Bird, l'ironing.
-
 #### Temps de calcul : 10 minutes pour une étape est COMMERCIALEMENT INACCEPTABLE
-
-Constat de l'utilisateur sur la voie Bird (recherche, `research/S4_Slicer/`),
-mesuré sur `tilted benchy undertriangulated_repaired` (24 345 tétraèdres,
-313 couches, 22 474 faces de surface) :
 
 | phase | durée mesurée | cause |
 |---|---:|---|
@@ -5967,8 +4394,3 @@ Réserves à peser avant le choix d'API :
 - les GPU grand public sont rapides en **simple précision** seulement, ce
   qui casse l'équivalence au bit près sur laquelle repose le portage (limite
   #56 : porter d'abord, paralléliser ensuite) ;
-- une fois P2 et P3 à quelques secondes, **le goulot sera ailleurs** : la
-  boucle Bird (~100 s par passe) et l'étape 9. C'est là que le GPU
-  rapporterait le plus. La contrainte à respecter dès maintenant est de
-  FORME : des calculs indépendants par nœud, tétraèdre, face ou couche, sans
-  état partagé, pour que le passage au GPU ne demande pas de tout réécrire.

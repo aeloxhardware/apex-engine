@@ -1,7 +1,7 @@
 """
-STL/3MF -> G-code pour la machine actuelle, par le pipeline FEM d'Apex
+STL/3MF -> G-code pour la machine actuelle, par le pipeline d'Apex
 (step1 -> step8, trajectoire machine, export). Voie d'essai rapide : un petit
-modele, sans la chaine Bird de recherche.
+modele.
 
 Controles avant d'ecrire : refus d'un fichier dont la pointe passe sous le
 plateau (`strict`) et collisions de la VRAIE tete (step9 rapide) ; les collisions

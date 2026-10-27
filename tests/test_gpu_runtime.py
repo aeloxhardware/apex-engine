@@ -1,5 +1,5 @@
 """
-Socle Vulkan (phase 1 du plan « Bird entier en C++, puis Vulkan », 2026-10-13).
+Socle Vulkan (phase 1 du plan « portage C++, puis Vulkan », 2026-10-13).
 
 - l'absence de GPU (module construit sans Vulkan, pas de pilote) n'est jamais une
   erreur : `gpu_status()` rend ok = False et une RAISON ;

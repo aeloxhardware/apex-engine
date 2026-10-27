@@ -61,7 +61,7 @@ def _pipeline_through_step6(
         overhang_map,
         SegmentationParams(platform_z=platform_z, platform_contact_tolerance=0.5),
     )
-    field = field_run(tet_mesh, mesh_data, overhang_map, regions, [], FieldSolverParams())
+    field = field_run(tet_mesh, mesh_data, overhang_map, regions, FieldSolverParams())
     layers = layers_run(
         tet_mesh, mesh_data, field, regions, LayerParams(layer_height_base=layer_height_base)
     )

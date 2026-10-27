@@ -10,7 +10,7 @@ Usage (venv d'Apex, APEX_USE_CPP=1 conseille) :
   .venv/Scripts/python.exe -u scripts/measure_matrix.py <modele.stl> <variante> [--resolution=0.8]
       [--layer-height=0.2] [--out=out/measure_matrix.jsonl]
 
-Variantes : ref, median9, feedback3, feedback_dyn, geo_smooth50, branch005, radial, radial_median9, ppn, ppn_radial, ppn_radial_median9.
+Variantes : voir apply_variant (ref, median9, ppn, corder, nocorder, heat_t1, noreach, split3, ...).
 """
 from __future__ import annotations
 
@@ -41,126 +41,33 @@ def apply_variant(params: PipelineParams, name: str) -> None:
     if name == "ref_noradial":      # reference historique (avant l'activation par defaut, limite #64)
         params.reachable_tilt_from_machine = False
         return
-    if name == "median9":
+    elif name == "median9":
         params.machine_toolpath.free_axis_median_window = 9
-    elif name == "feedback3":
-        params.field_solver.support_feedback_iterations = 3
-    elif name.startswith("fbair"):      # retroaction restreinte aux tetraedres « en l'air » (Bird) : fbair3, fbair3_t2
-        fs = params.field_solver
-        fs.support_feedback_iterations = int(name[5:].split("_")[0] or 3)
-        fs.support_feedback_require_in_air = True
-        if "_t" in name:
-            fs.support_feedback_in_air_threshold_mm = float(name.split("_t")[1].split("_")[0])
-    elif name == "feedback_dyn":
-        params.field_solver.support_feedback_iterations = 50
-    elif name == "geo_smooth50":
-        params.field_solver.use_geodesic_directions = True
-        params.field_solver.geodesic_smoothing_iterations = 50
-    elif name == "radial":
-        params.field_solver.radial_tilt_origin = np.asarray(params.machine_profile.platform_origin, dtype=float)
-    elif name == "radial_median9":
-        params.field_solver.radial_tilt_origin = np.asarray(params.machine_profile.platform_origin, dtype=float)
-        params.machine_toolpath.free_axis_median_window = 9
-    elif name.startswith("ppn"):
+    elif name == "ppn":
         params.machine_toolpath.per_point_normal = True
-        if "radial" in name:
-            params.field_solver.radial_tilt_origin = np.asarray(params.machine_profile.platform_origin, dtype=float)
-        if "median9" in name:
-            params.machine_toolpath.free_axis_median_window = 9
-        if "nodal" in name:
-            params.machine_toolpath.per_point_normal_nodal = True
+    elif name == "ppn_nodal":
+        params.machine_toolpath.per_point_normal = True
+        params.machine_toolpath.per_point_normal_nodal = True
     elif name == "continuous":      # parois continues, Step6Params.continuous_rings (2026-10-01)
         params.toolpath2d.continuous_rings = True
-    elif name in ("native_fill", "continuous_native"):   # pas 15 : parois/remplissage Clipper2 (parois continues = defaut)
+    elif name in ("native_fill", "continuous_native"):   # pas 15 : parois/remplissage Clipper2
         from pipeline import step6_toolpath2d
         step6_toolpath2d._NATIVE_FILL = True
-        params.toolpath2d.continuous_rings = True    # defaut depuis la limite #65
-    elif name == "noflip":          # piste 5.5 : sans redressement force vers le haut (radial actif)
-        params.field_solver.enforce_upward_growth = False
+        params.toolpath2d.continuous_rings = True
     elif name == "corder":          # step5b : ordre contraint par la tete
         from pipeline.step5b_collision_order import CollisionOrderParams
         params.collision_order = CollisionOrderParams()
     elif name == "corder_support":  # step5b + contraintes d'appui
         from pipeline.step5b_collision_order import CollisionOrderParams
         params.collision_order = CollisionOrderParams(support_depth=0.3)
-    elif name == "stable3":         # step3 : tri STABLE des aretes (ex-aequo dans l'ordre (ligne, colonne))
-        from pipeline import step3_segmentation
-        _orig = step3_segmentation.np.argsort
-        class _NP:
-            def __getattr__(self, k):
-                return getattr(np, k)
-            @staticmethod
-            def argsort(x, *a, **kw):
-                kw.setdefault("kind", "stable")
-                return _orig(x, *a, **kw)
-        step3_segmentation.np = _NP()
-    elif name in ("heat_t1", "heat_noppn", "heat_split"):
-        # correctifs du champ de la chaleur (tous avec l'ordre contraint step5b)
-        apply_variant(params, "heat_corder")
-        if name == "heat_t1":                # temps de diffusion de Crane (h^2) au lieu de 100 h^2
-            params.field_solver.heat_method_time_factor = 1.0
-        elif name == "heat_noppn":           # orientation : normale du plan moyen de la couche, pas le gradient local
-            params.machine_toolpath.per_point_normal = False
-        else:                                # ordre : couches scindees en morceaux disjoints (granularite de step5b)
-            params.layers.split_disjoint_clusters = 3.0
-    elif name == "heat_iso_reach":           # heat_iso + flux projete sur les inclinaisons atteignables (#64)
-        apply_variant(params, "heat_iso")
-        params.field_solver.heat_project_reachable = True
-    elif name in ("heat_iso", "heat_iso_corder", "heat_frontier", "heat_frontier_corder"):
-        # ordre des couches du champ de la chaleur : isovaleur seule, ou croissance de front (step5)
-        apply_variant(params, "heat_corder" if name.endswith("_corder") else "heat")
-        if "_iso" in name:
-            params.layers.isovalue_order = True
-        else:
-            params.layers.frontier_order = True
-    elif name == "heat_corder":              # idem + ordre contraint par l'appui et la tete (step5b)
-        params.field_solver.use_heat_geodesic_field = True
-        params.field_solver.enforce_upward_growth = False
-        from pipeline.step5b_collision_order import CollisionOrderParams
-        params.collision_order = CollisionOrderParams(support_depth=0.3)
-    elif name == "heat":                     # champ = distance au plateau (methode de la chaleur), couches = isosurfaces
-        params.field_solver.use_heat_geodesic_field = True
-        params.field_solver.enforce_upward_growth = False
+    elif name == "nocorder":        # sans l'ordre contraint par la tete
         params.collision_order = None
-    elif name.startswith("planar"):          # parties a couches planes (2026-10-19) ; planar_a<DEG> : angle de fusion
-        params.field_solver.planar_parts = True
-        params.collision_order = None      # l'ordre est celui des parties (step5b le brouille)
-        if "reeb" in name:                 # planar_reeb[_b<mm>] : squelette (graphe de Reeb geodesique)
-            params.field_solver.planar_parts_partition = "reeb"
-            if "_b" in name:
-                params.field_solver.planar_reeb_band_mm = float(name.split("_b")[1])
-        elif "_a" in name:
-            params.segmentation.max_region_merge_angle_deg = float(name.split("_a")[1])
-    elif name.startswith("mb"):     # champ multibranche (2026-10-19) : mb, mb_geo, mb_s<N>
-        fs = params.field_solver
-        fs.multibranch = True
-        if "geo" in name:
-            fs.multibranch_direction_mode = "geodesic"
-        if "up" in name.split("_"):
-            fs.multibranch_direction_mode = "up"
-        if "flowmean" in name:
-            fs.multibranch_partition = "flow"
-            fs.multibranch_direction_mode = "flow_mean"
-        elif "flow" in name:
-            fs.multibranch_partition = "flow"
-            fs.multibranch_direction_mode = "flow"
-        if "_a" in name:
-            fs.multibranch_flow_angle_deg = float(name.split("_a")[1].split("_")[0])
-        if "_s" in name:
-            fs.multibranch_smoothing_iterations = int(name.split("_s")[1].split("_")[0])
-        if "vert" in name.split("_"):
-            fs.multibranch_vertical_if_safe = 0.02
-        if "blend" in name:
-            fs.multibranch_blend_directions = True
-        if "noorder" in name:
-            fs.multibranch_order_by_branch = False
-        if "norisk" in name:
-            fs.multibranch_use_risk_weights = False
-        if "_t" in name:
-            fs.multibranch_min_branch_tets = int(name.split("_t")[1].split("_")[0])
-        params.field_solver.enforce_upward_growth = False
-    elif name == "branch005":
-        params.segmentation.branch_cut_threshold = 0.05
+    elif name == "heat_t1":         # temps de diffusion de Crane (h^2) au lieu de 100 h^2
+        params.field_solver.heat_method_time_factor = 1.0
+    elif name == "noreach":         # flux de la chaleur non projete sur les inclinaisons atteignables
+        params.field_solver.heat_project_reachable = False
+    elif name == "split3":          # couches scindees en morceaux disjoints
+        params.layers.split_disjoint_clusters = 3.0
     else:
         raise SystemExit(f"variante inconnue : {name}")
 

@@ -91,7 +91,7 @@ def set_enabled(value: Optional[bool]) -> Optional[bool]:
     return previous
 
 
-# --- Backend GPU (Vulkan), phase 1 du plan « Bird entier en C++, puis Vulkan » ---
+# --- Backend GPU (Vulkan), phase 1 du plan « portage C++, puis Vulkan » ---
 # Meme discipline que le natif : DESACTIVE par defaut (`APEX_USE_GPU`), jamais
 # une erreur s'il manque (module construit sans Vulkan, pas de pilote, pas de
 # GPU) : `gpu_status()` dit pourquoi, et chaque site d'appel retombe sur le CPU.

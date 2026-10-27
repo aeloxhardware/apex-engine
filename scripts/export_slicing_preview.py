@@ -118,17 +118,11 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
         if params.segmentation.platform_z is None
         else params.segmentation
     )
-    region_graph = segmentation_run(mesh_data, overhang_map, segmentation_params, tet_mesh)
+    region_graph = segmentation_run(mesh_data, overhang_map, segmentation_params)
 
     print("[preview] Etape 4/8 - resolution du champ scalaire")
     _fs_params = _effective_field_solver_params(params)
-    if _fs_params.planar_parts:
-        from pipeline.step4c_planar_parts import build_planar_parts
-        tet_mesh, scalar_field = build_planar_parts(tet_mesh, mesh_data, region_graph, _fs_params, overhang_map)
-    else:
-        scalar_field = field_solver_run(
-            tet_mesh, mesh_data, overhang_map, region_graph, params.constraints, _fs_params,
-        )
+    scalar_field = field_solver_run(tet_mesh, mesh_data, overhang_map, region_graph, _fs_params)
 
     print("[preview] Etape 5/8 - extraction des couches courbes")
     layers = layers_run(tet_mesh, mesh_data, scalar_field, region_graph, params.layers)
@@ -236,20 +230,11 @@ def main(argv: list[str] | None = None) -> int:
         "--show-toolpath", action="store_true",
         help="Reaffiche la trajectoire dans le GLB (desactivee par defaut).",
     )
-    parser.add_argument(
-        "--support-driven-order", type=float, default=None, metavar="FRACTION",
-        help="Ordonne les couches par SUPPORT REEL au lieu de l'isovaleur croissante "
-             "(ex: 0.9 = 90%% des points de contour doivent etre supportes). "
-             "Desactive par defaut : non universel, voir LayerParams.support_driven_order.",
-    )
     args = parser.parse_args(argv)
 
     params = PipelineParams()
     if args.resolution is not None:
         params.resolution = args.resolution
-    if args.support_driven_order is not None:
-        params.layers.support_driven_order = args.support_driven_order
-        params.layers.nozzle_width = params.machine_profile.nozzle_diameter
 
     result = run_slicing_only(args.mesh_path, params)
 

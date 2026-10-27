@@ -123,71 +123,9 @@
    ],
    "type": "object"
   },
-  "Constraint": {
-   "additionalProperties": false,
-   "description": "Contrainte injectée dans le solveur de champ scalaire (étape 4). Envoyée dynamiquement depuis l'UI TypeScript, une par point d'attache ou par zone esthétique/structurelle.",
-   "properties": {
-    "falloff": {
-     "enum": [
-      "linear",
-      "gaussian",
-      "cubic"
-     ],
-     "type": "string"
-    },
-    "influence_radius": {
-     "type": "number"
-    },
-    "position": {
-     "items": {
-      "type": "number"
-     },
-     "type": "array"
-    },
-    "target_field_value": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ]
-    },
-    "target_normal": {
-     "anyOf": [
-      {
-       "items": {
-        "type": "number"
-       },
-       "type": "array"
-      },
-      {
-       "type": "null"
-      }
-     ]
-    },
-    "type": {
-     "enum": [
-      "attach_point",
-      "aesthetic",
-      "structural"
-     ],
-     "type": "string"
-    },
-    "weight": {
-     "type": "number"
-    }
-   },
-   "required": [
-    "type",
-    "position"
-   ],
-   "type": "object"
-  },
   "FieldSolverParams": {
    "additionalProperties": false,
-   "description": "FieldSolverParams(laplacian_smoothness_weight: 'float' = 1.0, gradient_overhang_weight: 'float' = 5.0, resolution: 'float' = 1.5, max_solver_iterations: 'int' = 2000, convergence_tolerance: 'float' = 1e-08, gradient_baseline_weight: 'float' = 1.0, overhang_influence_depth: 'int' = 1, enable_platform_anchor: 'bool' = True, platform_anchor_weight: 'float' = 1000000.0, platform_anchor_value: 'float' = 0.0, up_vector: 'Optional[np.ndarray]' = None, direct_solve_node_threshold: 'int' = 30000, use_ilu",
+   "description": "FieldSolverParams(resolution: 'float' = 1.5, max_solver_iterations: 'int' = 2000, convergence_tolerance: 'float' = 1e-08, direct_solve_node_threshold: 'int' = 30000, use_ilu_preconditioner: 'bool' = False, platform_anchor_weight: 'float' = 1000000.0, up_vector: 'Optional[np.ndarray]' = None, heat_method_time_factor: 'float' = 100.0, radial_tilt_origin: 'Optional[np.ndarray]' = None, heat_project_reachable: 'bool' = True)",
    "properties": {
     "convergence_tolerance": {
      "default": 1e-08,
@@ -197,143 +135,17 @@
      "default": 30000,
      "type": "integer"
     },
-    "direction_blend_min_norm": {
-     "default": 0.1,
-     "type": "number"
-    },
-    "direction_blend_power": {
-     "default": 2.0,
-     "type": "number"
-    },
-    "direction_blend_radius": {
-     "default": 0.0,
-     "type": "number"
-    },
-    "enable_platform_anchor": {
-     "default": true,
-     "type": "boolean"
-    },
-    "enforce_upward_growth": {
-     "default": false,
-     "type": "boolean"
-    },
-    "geodesic_saddle_threshold_deg": {
-     "default": 100.0,
-     "type": "number"
-    },
-    "geodesic_smoothing_iterations": {
-     "default": 0,
-     "type": "integer"
-    },
-    "geodesic_smoothing_step": {
-     "default": 0.5,
-     "type": "number"
-    },
-    "geodesic_source_weight": {
-     "default": 0.0,
-     "type": "number"
-    },
-    "gradient_baseline_weight": {
-     "default": 1.0,
-     "type": "number"
-    },
-    "gradient_overhang_weight": {
-     "default": 5.0,
-     "type": "number"
-    },
     "heat_method_time_factor": {
      "default": 100.0,
      "type": "number"
     },
     "heat_project_reachable": {
-     "default": false,
+     "default": true,
      "type": "boolean"
-    },
-    "laplacian_smoothness_weight": {
-     "default": 1.0,
-     "type": "number"
-    },
-    "max_downward_growth_angle_deg": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null
     },
     "max_solver_iterations": {
      "default": 2000,
      "type": "integer"
-    },
-    "multibranch": {
-     "default": false,
-     "type": "boolean"
-    },
-    "multibranch_blend_directions": {
-     "default": false,
-     "type": "boolean"
-    },
-    "multibranch_direction_mode": {
-     "default": "region",
-     "type": "string"
-    },
-    "multibranch_flow_angle_deg": {
-     "default": 30.0,
-     "type": "number"
-    },
-    "multibranch_min_branch_tets": {
-     "default": 40,
-     "type": "integer"
-    },
-    "multibranch_order_by_branch": {
-     "default": true,
-     "type": "boolean"
-    },
-    "multibranch_partition": {
-     "default": "region",
-     "type": "string"
-    },
-    "multibranch_smoothing_iterations": {
-     "default": 0,
-     "type": "integer"
-    },
-    "multibranch_use_risk_weights": {
-     "default": true,
-     "type": "boolean"
-    },
-    "multibranch_vertical_if_safe": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null
-    },
-    "overhang_influence_depth": {
-     "default": 1,
-     "type": "integer"
-    },
-    "planar_parts": {
-     "default": false,
-     "type": "boolean"
-    },
-    "planar_parts_partition": {
-     "default": "region",
-     "type": "string"
-    },
-    "planar_reeb_band_mm": {
-     "default": 4.0,
-     "type": "number"
-    },
-    "platform_anchor_value": {
-     "default": 0.0,
-     "type": "number"
     },
     "platform_anchor_weight": {
      "default": 1000000.0,
@@ -357,53 +169,6 @@
      "default": 1.5,
      "type": "number"
     },
-    "smoothness_modulation_floor": {
-     "default": 0.02,
-     "type": "number"
-    },
-    "smoothness_modulation_strength": {
-     "default": 0.0,
-     "type": "number"
-    },
-    "support_feedback_in_air_threshold_mm": {
-     "default": 1.0,
-     "type": "number"
-    },
-    "support_feedback_iterations": {
-     "default": 0,
-     "type": "integer"
-    },
-    "support_feedback_min_improvement": {
-     "default": 0.02,
-     "type": "number"
-    },
-    "support_feedback_require_in_air": {
-     "default": false,
-     "type": "boolean"
-    },
-    "support_feedback_threshold_deg": {
-     "default": 45.0,
-     "type": "number"
-    },
-    "support_feedback_use_geodesic_target": {
-     "default": false,
-     "type": "boolean"
-    },
-    "support_feedback_weight": {
-     "default": 4.0,
-     "type": "number"
-    },
-    "transition_distance_mm": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null
-    },
     "up_vector": {
      "anyOf": [
       {
@@ -421,18 +186,6 @@
       0.0,
       1.0
      ]
-    },
-    "upward_growth_epsilon": {
-     "default": 1e-09,
-     "type": "number"
-    },
-    "use_geodesic_directions": {
-     "default": false,
-     "type": "boolean"
-    },
-    "use_heat_geodesic_field": {
-     "default": false,
-     "type": "boolean"
     },
     "use_ilu_preconditioner": {
      "default": false,
@@ -600,37 +353,14 @@
   },
   "LayerParams": {
    "additionalProperties": false,
-   "description": "LayerParams(layer_height_base: 'float' = 0.2, weld_tolerance_factor: 'float' = 1e-06, split_disjoint_clusters: 'Optional[float]' = None, support_driven_order: 'Optional[float]' = None, geodesic_order: 'bool' = False, frontier_order: 'bool' = False, isovalue_order: 'bool' = False, nozzle_width: 'Optional[float]' = None, support_horizontal_radius_factor: 'float' = 2.5, support_vertical_height_factor: 'float' = 7.5, platform_contact_tolerance_factor: 'float' = 2.5, support_rotation_axes: 'Optional[",
+   "description": "LayerParams(layer_height_base: 'float' = 0.2, weld_tolerance_factor: 'float' = 1e-06, split_disjoint_clusters: 'Optional[float]' = None, isovalue_order: 'bool' = True)",
    "properties": {
-    "frontier_order": {
-     "default": false,
-     "type": "boolean"
-    },
-    "geodesic_order": {
-     "default": false,
-     "type": "boolean"
-    },
     "isovalue_order": {
-     "default": false,
+     "default": true,
      "type": "boolean"
     },
     "layer_height_base": {
      "default": 0.2,
-     "type": "number"
-    },
-    "nozzle_width": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null
-    },
-    "platform_contact_tolerance_factor": {
-     "default": 2.5,
      "type": "number"
     },
     "split_disjoint_clusters": {
@@ -643,43 +373,6 @@
       }
      ],
      "default": null
-    },
-    "support_direction_candidate_count": {
-     "default": 26,
-     "type": "integer"
-    },
-    "support_driven_order": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null
-    },
-    "support_horizontal_radius_factor": {
-     "default": 2.5,
-     "type": "number"
-    },
-    "support_rotation_axes": {
-     "anyOf": [
-      {
-       "items": {
-        "$ref": "#/$defs/RotationAxisSpec"
-       },
-       "type": "array"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null
-    },
-    "support_vertical_height_factor": {
-     "default": 7.5,
-     "type": "number"
     },
     "weld_tolerance_factor": {
      "default": 1e-06,
@@ -863,20 +556,6 @@
      ],
      "default": null
     },
-    "constraints": {
-     "anyOf": [
-      {
-       "items": {
-        "$ref": "#/$defs/Constraint"
-       },
-       "type": "array"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null
-    },
     "coupled_reorientation_rounds": {
      "default": 3,
      "type": "integer"
@@ -897,58 +576,17 @@
      "default": {
       "convergence_tolerance": 1e-08,
       "direct_solve_node_threshold": 30000,
-      "direction_blend_min_norm": 0.1,
-      "direction_blend_power": 2.0,
-      "direction_blend_radius": 10.0,
-      "enable_platform_anchor": true,
-      "enforce_upward_growth": false,
-      "geodesic_saddle_threshold_deg": 100.0,
-      "geodesic_smoothing_iterations": 0,
-      "geodesic_smoothing_step": 0.5,
-      "geodesic_source_weight": 0.0,
-      "gradient_baseline_weight": 1.0,
-      "gradient_overhang_weight": 5.0,
       "heat_method_time_factor": 100.0,
       "heat_project_reachable": true,
-      "laplacian_smoothness_weight": 1.0,
-      "max_downward_growth_angle_deg": null,
       "max_solver_iterations": 2000,
-      "multibranch": false,
-      "multibranch_blend_directions": false,
-      "multibranch_direction_mode": "region",
-      "multibranch_flow_angle_deg": 30.0,
-      "multibranch_min_branch_tets": 40,
-      "multibranch_order_by_branch": true,
-      "multibranch_partition": "region",
-      "multibranch_smoothing_iterations": 0,
-      "multibranch_use_risk_weights": true,
-      "multibranch_vertical_if_safe": null,
-      "overhang_influence_depth": 1,
-      "planar_parts": false,
-      "planar_parts_partition": "region",
-      "planar_reeb_band_mm": 4.0,
-      "platform_anchor_value": 0.0,
       "platform_anchor_weight": 1000000.0,
       "radial_tilt_origin": null,
       "resolution": 1.5,
-      "smoothness_modulation_floor": 0.02,
-      "smoothness_modulation_strength": 0.0,
-      "support_feedback_in_air_threshold_mm": 1.0,
-      "support_feedback_iterations": 0,
-      "support_feedback_min_improvement": 0.02,
-      "support_feedback_require_in_air": false,
-      "support_feedback_threshold_deg": 45.0,
-      "support_feedback_use_geodesic_target": false,
-      "support_feedback_weight": 4.0,
-      "transition_distance_mm": null,
       "up_vector": [
        0.0,
        0.0,
        1.0
       ],
-      "upward_growth_epsilon": 1e-09,
-      "use_geodesic_directions": false,
-      "use_heat_geodesic_field": true,
       "use_ilu_preconditioner": false
      }
     },
@@ -978,18 +616,9 @@
     "layers": {
      "$ref": "#/$defs/LayerParams",
      "default": {
-      "frontier_order": false,
-      "geodesic_order": false,
       "isovalue_order": true,
       "layer_height_base": 0.2,
-      "nozzle_width": null,
-      "platform_contact_tolerance_factor": 2.5,
       "split_disjoint_clusters": null,
-      "support_direction_candidate_count": 26,
-      "support_driven_order": null,
-      "support_horizontal_radius_factor": 2.5,
-      "support_rotation_axes": null,
-      "support_vertical_height_factor": 7.5,
       "weld_tolerance_factor": 1e-06
      }
     },
@@ -1124,8 +753,6 @@
     "segmentation": {
      "$ref": "#/$defs/SegmentationParams",
      "default": {
-      "anchor_growth_weight": null,
-      "branch_cut_threshold": null,
       "direction_candidate_count": 26,
       "max_angle_from_direction_deg": 45.0,
       "max_region_merge_angle_deg": null,
@@ -1238,30 +865,8 @@
   },
   "SegmentationParams": {
    "additionalProperties": false,
-   "description": "SegmentationParams(direction_candidate_count: 'int' = 26, max_angle_from_direction_deg: 'float' = 45.0, max_region_merge_angle_deg: 'Optional[float]' = None, platform_z: 'Optional[float]' = None, platform_contact_tolerance: 'float' = 0.5, rotation_axes: 'Optional[list[RotationAxisSpec]]' = None, up_vector: 'np.ndarray' = None, anchor_growth_weight: 'Optional[float]' = None, branch_cut_threshold: 'Optional[float]' = None)",
+   "description": "SegmentationParams(direction_candidate_count: 'int' = 26, max_angle_from_direction_deg: 'float' = 45.0, max_region_merge_angle_deg: 'Optional[float]' = None, platform_z: 'Optional[float]' = None, platform_contact_tolerance: 'float' = 0.5, rotation_axes: 'Optional[list[RotationAxisSpec]]' = None, up_vector: 'np.ndarray' = None)",
    "properties": {
-    "anchor_growth_weight": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null
-    },
-    "branch_cut_threshold": {
-     "anyOf": [
-      {
-       "type": "number"
-      },
-      {
-       "type": "null"
-      }
-     ],
-     "default": null
-    },
     "direction_candidate_count": {
      "default": 26,
      "type": "integer"
@@ -1666,5 +1271,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 1
+ "x-apex-contract": 2
 }

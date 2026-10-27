@@ -28,11 +28,9 @@ from pipeline.step5_layers import (
     LayerParams,
     _extract_closed_contours,
     _extract_isosurface_triangles,
-    _frontier_order,
     _march_tetrahedra_batch,
     _march_tetrahedron,
     _spatial_dfs_order,
-    _support_driven_order,
     _weld_vertices,
     run as layers_run,
 )
@@ -55,7 +53,7 @@ def _pipeline_data_from_trimesh_default(mesh: trimesh.Trimesh, resolution: float
     regions = segmentation_run(
         mesh_data, overhang_map, SegmentationParams(platform_z=platform_z, platform_contact_tolerance=0.5)
     )
-    field = field_run(tet_mesh, mesh_data, overhang_map, regions, [], FieldSolverParams())
+    field = field_run(tet_mesh, mesh_data, overhang_map, regions, FieldSolverParams())
     return mesh_data, tet_mesh, overhang_map, regions, field
 
 
@@ -83,7 +81,7 @@ def _pipeline_data_from_trimesh(
         overhang_map,
         SegmentationParams(platform_z=platform_z, platform_contact_tolerance=0.5),
     )
-    field = field_run(tet_mesh, mesh_data, overhang_map, regions, [], FieldSolverParams())
+    field = field_run(tet_mesh, mesh_data, overhang_map, regions, FieldSolverParams())
     return mesh_data, tet_mesh, overhang_map, regions, field
 
 
@@ -478,7 +476,7 @@ def test_isovalue_outside_range_produces_no_triangles():
 
 def test_node_within_weld_tolerance_of_plane_keeps_whole_contour():
     """
-    Regression (Benchy Bird, couche entiere perdue) : un noeud a moins de la
+    Regression (Benchy, couche entiere perdue) : un noeud a moins de la
     tolerance de soudure du plan fait fusionner les points de coupe de ses
     aretes -> triangles degeneres -> aretes repetees -> boucle ouverte, jetee.
     Boite 2x2x2 en tetraedres de Kuhn, z des noeuds legerement decale (la
@@ -697,83 +695,6 @@ def test_march_tetrahedra_batch_empty_input_returns_empty():
 
 
 # ---------------------------------------------------------------------------
-# Cas 6 - CLAUDE.md : melange spatial des directions resout la fragmentation
-# de contour a une jonction multi-region (tripode a 3 branches non
-# coplanaires + plateau)
-# ---------------------------------------------------------------------------
-
-def _peak_loop_count(layers) -> int:
-    """
-    Nombre maximal de boucles de contour (len(contour_3d)) atteint sur
-    l'ensemble des couches - la METRIQUE PERTINENTE pour la fragmentation
-    de jonction n'est PAS le plus grand saut entre 2 couches CONSECUTIVES
-    (une fragmentation progressive 1->2->3->4, chaque pas valant 1, aurait
-    un "max jump consecutif" de 1 alors qu'elle est bien le probleme
-    mesure - piege reel rencontre en ecrivant ce test, corrige avant de
-    livrer : le premier jet de cette metrique masquait completement
-    l'ameloriation du fix). Le pic atteint (4 boucles simultanees avant
-    fix, cf. CLAUDE.md) est le signal direct de la fragmentation.
-    """
-    if not layers:
-        return 0
-    return max(len(layer.contour_3d) for layer in layers)
-
-
-def test_tripod_without_blend_shows_loop_fragmentation_peak(tripod_data):
-    """
-    Non-regression du DIAGNOSTIC (pas du fix) : sans melange spatial
-    (direction_blend_radius=0.0, defaut historique), reproduit le pic de
-    fragmentation de contour mesure pendant l'investigation de CLAUDE.md
-    (n_loops atteint 4 dans la zone de jonction des 3 bras). Sert de
-    temoin pour le test suivant.
-    """
-    mesh_data, tet_mesh, overhang_map, region_graph = tripod_data
-    params = FieldSolverParams(direction_blend_radius=0.0)
-
-    field = field_run(tet_mesh, mesh_data, overhang_map, region_graph, [], params)
-    layers = layers_run(tet_mesh, mesh_data, field, region_graph, LayerParams(layer_height_base=0.2))
-
-    assert _peak_loop_count(layers) >= 4, (
-        "Fixture invalide : le tripode sans melange devrait reproduire le pic de "
-        "fragmentation (4 boucles simultanees) mesure pendant le diagnostic, "
-        "cf. CLAUDE.md"
-    )
-
-
-def test_tripod_with_blend_reduces_loop_fragmentation_peak(tripod_data):
-    """
-    Avec le melange spatial active, le pic du nombre de boucles de contour
-    a la jonction doit etre STRICTEMENT REDUIT par rapport au comportement
-    sans melange (test precedent) - la transition doit devenir plus
-    progressive, pas necessairement parfaitement lisse (le champ reste un
-    scalaire unique, cf. limite documentee dans CLAUDE.md).
-    """
-    mesh_data, tet_mesh, overhang_map, region_graph = tripod_data
-
-    baseline_params = FieldSolverParams(direction_blend_radius=0.0)
-    baseline_field = field_run(tet_mesh, mesh_data, overhang_map, region_graph, [], baseline_params)
-    baseline_layers = layers_run(
-        tet_mesh, mesh_data, baseline_field, region_graph, LayerParams(layer_height_base=0.2)
-    )
-    baseline_peak = _peak_loop_count(baseline_layers)
-
-    blended_params = FieldSolverParams(
-        direction_blend_radius=20.0, direction_blend_power=2.0, direction_blend_min_norm=0.1
-    )
-    blended_field = field_run(tet_mesh, mesh_data, overhang_map, region_graph, [], blended_params)
-    blended_layers = layers_run(
-        tet_mesh, mesh_data, blended_field, region_graph, LayerParams(layer_height_base=0.2)
-    )
-    blended_peak = _peak_loop_count(blended_layers)
-
-    assert np.all(np.isfinite(blended_field.values)), "Le champ resolu avec melange doit rester fini"
-    assert blended_peak < baseline_peak, (
-        f"Le melange spatial devrait reduire le pic de fragmentation du nombre de "
-        f"boucles a la jonction (avant: {baseline_peak}, apres: {blended_peak})"
-    )
-
-
-# ---------------------------------------------------------------------------
 # Clustering spatial des boucles disjointes (split_disjoint_clusters, CLAUDE.md)
 # ---------------------------------------------------------------------------
 
@@ -833,8 +754,8 @@ def test_tripod_split_disjoint_clusters_produces_distinct_local_frames(tripod_da
     """
     mesh_data, tet_mesh, overhang_map, region_graph = tripod_data
     field = field_run(
-        tet_mesh, mesh_data, overhang_map, region_graph, [],
-        FieldSolverParams(direction_blend_radius=20.0, direction_blend_power=2.0, direction_blend_min_norm=0.1),
+        tet_mesh, mesh_data, overhang_map, region_graph,
+        FieldSolverParams(),
     )
     params = LayerParams(layer_height_base=0.2, split_disjoint_clusters=3.0)
 
@@ -875,8 +796,8 @@ def test_tripod_split_disjoint_clusters_region_ids_are_distinct_subsets(tripod_d
     """
     mesh_data, tet_mesh, overhang_map, region_graph = tripod_data
     field = field_run(
-        tet_mesh, mesh_data, overhang_map, region_graph, [],
-        FieldSolverParams(direction_blend_radius=20.0, direction_blend_power=2.0, direction_blend_min_norm=0.1),
+        tet_mesh, mesh_data, overhang_map, region_graph,
+        FieldSolverParams(),
     )
     params = LayerParams(layer_height_base=0.2, split_disjoint_clusters=3.0)
 
@@ -1036,8 +957,8 @@ def test_tripod_spatial_order_never_violates_region_rank(tripod_data):
     """
     mesh_data, tet_mesh, overhang_map, region_graph = tripod_data
     field = field_run(
-        tet_mesh, mesh_data, overhang_map, region_graph, [],
-        FieldSolverParams(direction_blend_radius=20.0, direction_blend_power=2.0, direction_blend_min_norm=0.1),
+        tet_mesh, mesh_data, overhang_map, region_graph,
+        FieldSolverParams(),
     )
     params = LayerParams(layer_height_base=0.2, split_disjoint_clusters=3.0)
 
@@ -1057,8 +978,8 @@ def test_tripod_spatial_order_deterministic(tripod_data):
     l'absence de dependance a un ordre d'iteration non deterministe de networkx."""
     mesh_data, tet_mesh, overhang_map, region_graph = tripod_data
     field = field_run(
-        tet_mesh, mesh_data, overhang_map, region_graph, [],
-        FieldSolverParams(direction_blend_radius=20.0, direction_blend_power=2.0, direction_blend_min_norm=0.1),
+        tet_mesh, mesh_data, overhang_map, region_graph,
+        FieldSolverParams(),
     )
     params = LayerParams(layer_height_base=0.2, split_disjoint_clusters=3.0)
 
@@ -1092,12 +1013,13 @@ def test_hollow_box_spatial_order_keeps_nested_contours_single_layer(hollow_box_
     )
 
 
-def test_portal_merge_produces_single_layer_above_beam(portal_data):
+def test_portal_fronts_stay_split_until_they_meet(portal_data):
     """
-    Cas MERGE : sous la traverse, 2 clusters disjoints par isovaleur (un par
-    montant) ; au niveau/au-dessus de la traverse, un seul cluster (les 2
-    montants se rejoignent). Preuve directe que le clustering ET le graphe
-    de continuite gerent la recombinaison sans erreur ni duplication.
+    Le champ est une distance au plateau a travers la matiere : les deux montants
+    sont deux fronts qui montent en parallele, traversent la traverse chacun de
+    leur cote et ne se rejoignent qu'a la fin. Le clustering doit donc scinder
+    chaque isovaleur en 2 Layer (un par front) presque partout, sans erreur ni
+    duplication.
     """
     mesh_data, tet_mesh, overhang_map, regions, field = portal_data
     params = LayerParams(layer_height_base=1.0, split_disjoint_clusters=1.0)
@@ -1106,22 +1028,11 @@ def test_portal_merge_produces_single_layer_above_beam(portal_data):
 
     by_isovalue: dict[float, list] = {}
     for layer in layers:
-        key = round(layer.isovalue, 6)
-        by_isovalue.setdefault(key, []).append(layer)
+        by_isovalue.setdefault(round(layer.isovalue, 6), []).append(layer)
 
-    below_beam = [g for iv, g in by_isovalue.items() if iv < sorted(by_isovalue)[len(by_isovalue) // 3]]
-    split_below = [g for g in below_beam if len(g) >= 2]
-    assert split_below, (
-        "Au moins une isovaleur sous la traverse devrait etre scindee en 2 "
-        "Layer (un par montant) - verifier la geometrie/calibration si ceci "
-        "echoue"
-    )
-
-    above_beam_groups = [g for g in by_isovalue.values() if len(g) == 1]
-    assert above_beam_groups, (
-        "Au moins une isovaleur (typiquement au niveau de la traverse ou "
-        "au-dessus) devrait produire un seul Layer - preuve de la "
-        "recombinaison des 2 montants"
+    split = [g for g in by_isovalue.values() if len(g) >= 2]
+    assert len(split) >= 0.9 * len(by_isovalue), (
+        "Les deux fronts devraient rester scindes en 2 Layer a presque toutes les isovaleurs"
     )
 
 
@@ -1234,314 +1145,6 @@ def test_spatial_order_is_a_permutation():
 
 
 # ---------------------------------------------------------------------------
-# LayerParams.support_driven_order - ordre pilote par le support reel
-# ---------------------------------------------------------------------------
-
-def _ring(z: float, cx: float = 0.0, radius: float = 2.0, count: int = 24) -> list:
-    """Une boucle de contour circulaire fermee a l'altitude z."""
-    angles = np.linspace(0.0, 2.0 * np.pi, count)
-    return [
-        np.stack(
-            [cx + radius * np.cos(angles), radius * np.sin(angles), np.full(count, z)],
-            axis=1,
-        )
-    ]
-
-
-def test_support_order_prefers_supported_over_lower():
-    """
-    Le SUPPORT est la cle primaire, l'altitude ne departage que des couches
-    deja imprimables : une couche BASSE mais sans rien sous elle ne doit
-    jamais passer avant une couche PLUS HAUTE mais bien supportee.
-
-    C'est l'invariant qui protege les surplombs par construction - une piece
-    pendante est plus basse que son porteur, mais tant que le porteur n'existe
-    pas elle n'est pas supportee, donc jamais choisie.
-    """
-    # Pile posee au sol en x=0, plus une coque isolee et PLUS BASSE en x=20 -
-    # mais assez au-dessus de z=0 pour ne jamais tomber dans la tolerance de
-    # contact plateau (platform_contact_tolerance_factor * nozzle_width).
-    raw_layers = [
-        (0.0, _ring(0.0), [0], None),                # 0 - au sol
-        (0.1, _ring(0.2), [0], None),                # 1 - portee par 0
-        (0.2, _ring(0.4), [0], None),                # 2 - portee par 1
-        (0.3, _ring(3.0, cx=20.0), [0], None),       # 3 - isolee, sans support
-    ]
-    params = LayerParams(
-        layer_height_base=0.2, support_driven_order=0.9, nozzle_width=0.4
-    )
-
-    order, unresolved = _support_driven_order(raw_layers, params, np.array([0.0, 0.0, 1.0]))
-
-    assert sorted(order) == list(range(len(raw_layers)))
-    # La pile supportee s'imprime de bas en haut, dans l'ordre...
-    assert order.index(0) < order.index(1) < order.index(2)
-    # ...et la coque isolee (pourtant plus basse que la couche 2) passe apres,
-    # faute de support - jamais avant sur le seul critere d'altitude.
-    assert order.index(3) > order.index(2)
-    # Elle est signalee explicitement, jamais placee en silence.
-    assert 3 in unresolved
-
-
-def test_support_order_rejects_shell_only_locally_supported():
-    """
-    Verrouille le fix de connectivite (bug reel trouve sur death.stl) : une
-    coque en surplomb, imprimee couche par couche de BAS EN HAUT et RATTACHEE
-    A RIEN, ne doit jamais devenir eligible juste parce que chacune de ses
-    couches est bien au-dessus de la precedente.
-
-    Une premiere version du mecanisme testait seulement "y a-t-il de la
-    matiere DEJA PLACEE en dessous", sans verifier qu'elle est elle-meme
-    reliee au plateau - une coque batie ainsi passait le test a CHAQUE etape
-    (chaque couche est bien supportee par celle du dessous), degenerant vers
-    un simple tri par hauteur alors que l'ENSEMBLE de la coque ne touche le
-    reste du modele nulle part.
-    """
-    # Pile posee au sol en x=0 (z=0..0.4), et une coque ENTIEREMENT ISOLEE en
-    # x=20, batie du bas vers le haut sur 5 couches (z=5.0..5.8) - aucune
-    # d'elles n'est au contact du plateau ni d'aucune matiere ancree.
-    raw_layers = [
-        (0.0, _ring(0.0), [0], None),
-        (0.1, _ring(0.2), [0], None),
-        (0.2, _ring(0.4), [0], None),
-    ]
-    for i in range(5):
-        raw_layers.append((1.0 + i * 0.1, _ring(5.0 + i * 0.2, cx=20.0), [0], None))
-
-    params = LayerParams(layer_height_base=0.2, support_driven_order=0.9, nozzle_width=0.4)
-    order, unresolved = _support_driven_order(raw_layers, params, np.array([0.0, 0.0, 1.0]))
-
-    shell_indices = set(range(3, 8))
-    # AUCUNE couche de la coque isolee ne doit etre ancree : toutes doivent
-    # etre signalees non resolues, y compris celles du haut de la coque
-    # (qui, avec un test purement local, se seraient trouvees "supportees"
-    # par la couche juste en dessous d'elles dans la meme coque).
-    assert shell_indices <= unresolved
-    # La pile posee au sol, elle, reste correctement resolue.
-    assert unresolved.isdisjoint({0, 1, 2})
-
-
-def test_support_order_unresolved_fallback_prefers_proximity_over_height():
-    """
-    Parmi des couches deja toutes reconnues UNRESOLVED (aucune ancree), le
-    departage doit privilegier la PROXIMITE a la couche precedente plutot
-    que la seule altitude - reduit les sauts a vide entre couches suspendues
-    qui se recouvrent geometriquement (ex: un dome qui se referme
-    progressivement sur lui-meme), sans jamais changer le statut
-    `unresolved` lui-meme (qui reste base uniquement sur l'ancrage reel).
-    """
-    # Deux coques ISOLEES (rattachees a rien), a la MEME hauteur (z=5.0) mais
-    # a des positions x tres differentes - si le departage se faisait par
-    # hauteur seule, l'ordre entre elles serait indetermine (egalite exacte,
-    # tranchee par l'index croissant). Une troisieme couche, PROCHE en x de
-    # la premiere coque mais plus haute, doit passer AVANT la deuxieme coque
-    # si le departage suit bien la proximite.
-    raw_layers = [
-        (0.0, _ring(0.0), [0], None),  # 0 - pose au sol, ancree (amorce previous_centroid)
-        (1.0, _ring(5.0, cx=0.0), [0], None),   # 1 - coque isolee A, x=0
-        (1.0, _ring(5.0, cx=50.0), [0], None),  # 2 - coque isolee B, tres loin en x=50
-        (1.1, _ring(5.2, cx=0.5), [0], None),   # 3 - proche de A (x=0.5), plus haute que A et B
-    ]
-    params = LayerParams(layer_height_base=0.2, support_driven_order=0.9, nozzle_width=0.4)
-    order, unresolved = _support_driven_order(raw_layers, params, np.array([0.0, 0.0, 1.0]))
-
-    assert unresolved == {1, 2, 3}
-    # Apres la couche 0 (ancree, definit previous_centroid), la couche 3
-    # (proche de 0 en x, x=0.5) doit passer AVANT la couche 2 (x=50, tres
-    # loin) - alors que 2 est a la MEME hauteur que 1 et plus basse que 3,
-    # un tri par altitude seule aurait pu la faire passer avant.
-    assert order.index(3) < order.index(2)
-
-
-def test_support_order_requires_nozzle_width():
-    """
-    `nozzle_width` n'a pas de defaut arbitraire : l'omettre doit lever, pas
-    deviner une valeur qui divergerait en silence de
-    MachineProfile.nozzle_diameter (meme discipline que platform_z).
-    """
-    params = LayerParams(layer_height_base=0.2, support_driven_order=0.9, nozzle_width=None)
-
-    with pytest.raises(LayerExtractionError, match="nozzle_width"):
-        _support_driven_order([(0.0, _ring(0.0), [0], None)], params, np.array([0.0, 0.0, 1.0]))
-
-
-def test_support_order_disabled_by_default_leaves_isovalue_sort(flat_box_data):
-    """
-    `support_driven_order=None` (defaut) = comportement historique strictement
-    inchange, et aucune couche marquee `support_unresolved`.
-    """
-    mesh_data, tet_mesh, _overhang_map, region_graph, field = flat_box_data
-
-    layers = layers_run(
-        tet_mesh, mesh_data, field, region_graph, LayerParams(layer_height_base=0.5)
-    )
-
-    assert layers
-    assert all(not layer.support_unresolved for layer in layers)
-
-
-def test_support_order_partially_grounded_layer_anchors_its_grounded_part():
-    """
-    Verrouille le fix du 4e defaut (ancrage a la granularite de l'ARETE) :
-    une couche seulement PARTIELLEMENT posee sur le plateau doit ancrer la
-    part qui y repose, meme si elle reste globalement `unresolved`.
-
-    Sans ce comportement, la cascade se bloque des la premiere couche non
-    integralement posee : plus rien ne s'ancre ensuite et TOUTES les couches
-    sont signalees non resolues (mesure sur death.stl : 100%), alors meme que
-    la geometrie est imprimable. L'inverse - ancrer la couche en bloc -
-    reintroduirait le faux support du 1er defaut.
-    """
-    # Couche 0 : 5 points POSES au sol (z=0) puis 5 points EN L'AIR (z=1.5,
-    # au-dela de la tolerance de contact plateau de 2.5 x 0.4 = 1.0 mm).
-    grounded = np.array([[float(x), 0.0, 0.0] for x in range(5)])
-    airborne = np.array([[float(x), 0.0, 1.5] for x in range(5, 10)])
-    mixed_layer = [np.vstack([grounded, airborne])]
-
-    # Couche 1 : contour AU-DESSUS de la part posee, hors bande plateau
-    # (z=1.2 > 1.0) mais dans la portee de recherche verticale (7.5 x 0.2 =
-    # 1.5 mm) - il ne peut donc etre ancre QUE par les aretes posees de la
-    # couche 0, ce qui est precisement l'invariant teste.
-    above_grounded = [np.array([[1.0, 0.0, 1.2], [2.0, 0.0, 1.2], [3.0, 0.0, 1.2]])]
-
-    raw_layers = [
-        (0.0, mixed_layer, [0], None),
-        (0.1, above_grounded, [0], None),
-    ]
-    params = LayerParams(layer_height_base=0.2, support_driven_order=0.9, nozzle_width=0.4)
-
-    order, unresolved = _support_driven_order(raw_layers, params, np.array([0.0, 0.0, 1.0]))
-
-    # La couche mixte est bien signalee (5/10 points ancres, sous le seuil)...
-    assert 0 in unresolved
-    # ...mais elle a ANCRE sa part posee : la couche au-dessus de cette part
-    # y trouve un appui et n'est donc PAS signalee.
-    assert 1 not in unresolved
-    assert order.index(0) < order.index(1)
-
-
-# ---------------------------------------------------------------------------
-# Ordre par croissance de front (LayerParams.frontier_order)
-# ---------------------------------------------------------------------------
-
-def _square_loop(centre: np.ndarray, half: float = 1.0) -> np.ndarray:
-    """Petite boucle carree horizontale centree sur `centre`."""
-    offsets = np.array([
-        [-half, -half, 0.0], [half, -half, 0.0],
-        [half, half, 0.0], [-half, half, 0.0], [-half, -half, 0.0],
-    ])
-    return centre[None, :] + offsets
-
-
-def _frame_at(origin: np.ndarray):
-    """
-    Repere local horizontal, au format rendu par `_compute_local_frame` :
-    (origine, axe_u, axe_v). La normale n'y figure PAS - elle se deduit du
-    produit vectoriel des deux axes.
-    """
-    return (
-        np.asarray(origin, dtype=float),
-        np.array([1.0, 0.0, 0.0]),
-        np.array([0.0, 1.0, 0.0]),
-    )
-
-
-def _stacked_raw_layers(count: int, spacing: float = 1.0) -> list[tuple]:
-    """
-    Pile verticale de `count` couches, isovaleur croissante avec l'altitude.
-    Chaque couche ne touche que ses voisines immediates.
-    """
-    layers = []
-    for i in range(count):
-        centre = np.array([0.0, 0.0, i * spacing])
-        layers.append((float(i), [_square_loop(centre)], [0], _frame_at(centre)))
-    return layers
-
-
-def test_frontier_order_is_a_permutation_of_every_layer():
-    """
-    Aucune couche ne doit etre perdue ni dupliquee : c'est un ORDRE, pas un
-    filtre. Verrouille aussi que le reamorcage (front epuise alors qu'il reste
-    des couches) n'oublie personne.
-    """
-    raw_layers = _stacked_raw_layers(8)
-    progress = np.arange(8, dtype=float)
-
-    order, _reversed = _frontier_order(raw_layers, progress, gap_threshold=2.0)
-
-    assert sorted(order) == list(range(8))
-    assert len(order) == len(set(order))
-
-
-def test_frontier_order_never_jumps_across_a_disconnected_gap():
-    """
-    La connexite du front est une contrainte DURE, pas une preference : une
-    couche n'est imprimable que si elle touche du deja-imprime. C'est ce qui
-    distingue ce parcours d'un tri global par progression, mesure comme
-    degradant d'un facteur 3,7.
-
-    Deux piles franchement separees, avec une progression qui les ENTRELACE
-    exprès : un tri par progression alternerait entre les deux piles, le
-    parcours de front doit terminer la premiere avant d'amorcer la seconde.
-    """
-    far = np.array([0.0, 100.0, 0.0])
-    stack_a = _stacked_raw_layers(4)
-    stack_b = [
-        (iso, [loops[0] + far], regions, _frame_at(frame[0] + far))
-        for iso, loops, regions, frame in _stacked_raw_layers(4)
-    ]
-    raw_layers = stack_a + stack_b
-    # Progression volontairement entrelacee : 0,2,4,6 / 1,3,5,7.
-    progress = np.array([0.0, 2.0, 4.0, 6.0, 1.0, 3.0, 5.0, 7.0])
-
-    order, _reversed = _frontier_order(raw_layers, progress, gap_threshold=2.0)
-
-    first_group = {0, 1, 2, 3}
-    switch = next(i for i, n in enumerate(order) if n not in first_group)
-    assert set(order[:switch]) == first_group, (
-        "le front doit epuiser la premiere pile avant d'amorcer la seconde"
-    )
-
-
-def test_frontier_order_marks_layers_reached_from_above_as_reversed():
-    """
-    Une couche atteinte depuis un voisin d'isovaleur SUPERIEURE est deposee en
-    DESCENDANT le champ : la tete doit y pointer a l'oppose. Seul le parcours
-    connait cette information - il sait par quel voisin chaque couche a ete
-    atteinte, ce qu'aucun tri a posteriori ne peut retrouver.
-
-    Ici la progression est l'INVERSE de l'isovaleur : le parcours doit donc
-    partir du sommet et descendre, en marquant tout ce qu'il atteint.
-    """
-    raw_layers = _stacked_raw_layers(6)
-    progress = np.arange(6, dtype=float)[::-1].copy()
-
-    order, reversed_layers = _frontier_order(raw_layers, progress, gap_threshold=2.0)
-
-    assert order[0] == 5, "l'amorce est la plus petite progression, soit le sommet"
-    # Tout le reste est atteint en descendant l'isovaleur.
-    assert reversed_layers == {0, 1, 2, 3, 4}
-    # L'amorce n'a aucun voisin anterieur, donc aucun sens impose.
-    assert 5 not in reversed_layers
-
-
-def test_frontier_order_marks_nothing_when_progress_follows_the_isovalue():
-    """Cas nominal : on monte le champ, rien n'est depose a contre-sens."""
-    raw_layers = _stacked_raw_layers(6)
-    progress = np.arange(6, dtype=float)
-
-    order, reversed_layers = _frontier_order(raw_layers, progress, gap_threshold=2.0)
-
-    assert order == list(range(6))
-    assert reversed_layers == set()
-
-
-def test_frontier_order_disabled_by_default():
-    """Opt-in : le defaut ne doit jamais emprunter ce chemin de code."""
-    assert LayerParams().frontier_order is False
-
-
-# ---------------------------------------------------------------------------
 # Tri par isovaleur seule (LayerParams.isovalue_order)
 # ---------------------------------------------------------------------------
 
@@ -1554,8 +1157,8 @@ def test_isovalue_order_ignores_region_rank(tripod_data):
     """
     mesh_data, tet_mesh, overhang_map, region_graph = tripod_data
     field = field_run(
-        tet_mesh, mesh_data, overhang_map, region_graph, [],
-        FieldSolverParams(direction_blend_radius=20.0, direction_blend_power=2.0, direction_blend_min_norm=0.1),
+        tet_mesh, mesh_data, overhang_map, region_graph,
+        FieldSolverParams(),
     )
     inverted = RegionDependencyGraph(
         regions=region_graph.regions,
@@ -1563,7 +1166,8 @@ def test_isovalue_order_ignores_region_rank(tripod_data):
         platform_contact_faces=region_graph.platform_contact_faces,
     )
 
-    historic = layers_run(tet_mesh, mesh_data, field, inverted, LayerParams(layer_height_base=0.5))
+    historic = layers_run(tet_mesh, mesh_data, field, inverted,
+                          LayerParams(layer_height_base=0.5, isovalue_order=False))
     iso_historic = [layer.isovalue for layer in historic]
     assert iso_historic != sorted(iso_historic), "le tri par rang doit ici contredire l'isovaleur"
 
@@ -1575,6 +1179,6 @@ def test_isovalue_order_ignores_region_rank(tripod_data):
     assert sorted(iso_ordered) == sorted(iso_historic), "meme ensemble de couches, seul l'ordre change"
 
 
-def test_isovalue_order_disabled_by_default():
-    """Opt-in : le defaut garde le tri historique (rang, isovaleur)."""
-    assert LayerParams().isovalue_order is False
+def test_isovalue_order_is_the_default():
+    """Le champ est une distance au plateau : le tri par isovaleur est le defaut."""
+    assert LayerParams().isovalue_order is True

@@ -1,5 +1,5 @@
 // Pool de fils PERSISTANT pour des boucles paralleles tres frequentes (produits
-// matrice-vecteur du solveur LSQ de Bird : des dizaines de milliers d'appels de
+// matrice-vecteur d'un solveur iteratif : des dizaines de milliers d'appels de
 // l'ordre de la milliseconde, ou creer des fils a chaque appel couterait plus que
 // le gain). Structure interne, sans contrat d'equivalence propre : chaque appelant
 // garantit que le resultat ne depend pas du decoupage (iterations independantes,

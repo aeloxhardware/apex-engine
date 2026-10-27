@@ -36,7 +36,7 @@ SCHEMA_DIALECT = "https://json-schema.org/draft/2020-12/schema"
 # change, defaut qui change le G-code produit, format de fichier modifie) et a consigner
 # dans CONTRACT_CHANGES.md. Ecrit dans le schema (`x-apex-contract`) et exige par la
 # requete de tranchage (`slice_cli`).
-APEX_CONTRACT_VERSION = 1
+APEX_CONTRACT_VERSION = 2
 
 
 def _is_optional(t) -> tuple[bool, Any]:

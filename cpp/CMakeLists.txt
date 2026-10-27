@@ -61,7 +61,7 @@ target_include_directories(apex_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_p
 # step6 (pas 15), a la place de shapely/GEOS.
 target_include_directories(apex_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/clipper2/include)
 
-# Backend Vulkan compute (phase 1 du plan « Bird entier en C++, puis Vulkan »,
+# Backend Vulkan compute (phase 1 du plan « portage C++, puis Vulkan »,
 # 2026-10-13). OPTIONNEL : sans lui, src/gpu/vk_context.cpp rend un statut
 # « non construit » et tout reste sur CPU. Aucun lien avec vulkan-1.lib : volk
 # (MIT) charge vulkan-1.dll a l'execution, le module s'importe donc sur une

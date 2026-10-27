@@ -34,7 +34,6 @@ import numpy as np
 
 from core.mesh_types import (
     CollisionReport,
-    Constraint,
     ColorMap,
     Layer,
     MachineProfile,
@@ -222,75 +221,11 @@ class PipelineParams:
     mesher: str = "tetgen"
     tetranet_refuse_ratio: float = 0.05   # points ambigus / sommets de la bande : au-dela, modele refuse
     overhang: OverhangParams = field(default_factory=OverhangParams)
-    # anchor_growth_weight VOLONTAIREMENT NON ACTIVE ici (defaut de la
-    # dataclass = None). Il l'a ete brievement, puis retire APRES MESURE sur
-    # un 4e modele - le detail vaut d'etre garde, c'est une erreur de methode
-    # facile a refaire :
-    #   - death.stl                      : 0.53% -> 0.47% de matiere sans
-    #                                      appui (-11% relatif) ;
-    #   - l_shape_overhang.stl           : strictement neutre ;
-    #   - l-triple-axis-overhanged-shape : strictement neutre ;
-    #   - turkish.stl                    : 2.78% -> 4.89% (**+76%**),
-    #                                      defauts d'ordre 5475 -> 7715.
-    # Trois modeles sur quatre disaient "ameliorant ou neutre" : c'est ce
-    # qui a fait croire a un reglage universel. Le quatrieme montre que non.
-    # Le mecanisme reste donc OPT-IN, a mesurer modele par modele - meme
-    # discipline que `support_driven_order`, et exactement la mise en garde
-    # de la limite #50 ("l'activer partout repeterait l'erreur des cinq
-    # tentatives precedentes"). Voir limite #51 pour ce qu'il corrige
-    # reellement et pourquoi il n'est pas generalisable.
     segmentation: SegmentationParams = field(default_factory=SegmentationParams)
-    # direction_blend_radius/power calibres sur res/test_models/l_shape_overhang.stl
-    # (CLAUDE.md) : sans melange (0.0), l'angle du plan local d'une couche
-    # proche du plateau atteignait 33 deg en moyenne (jusqu'a 42.7 deg) -
-    # avec radius=10.0/power=2.0, le GRADIENT REEL du champ (pas
-    # l'approximation de plan local de step5) est mesure parfaitement
-    # vertical (0.0 deg) sur les tetraedres les plus proches du plateau ;
-    # l'angle residuel mesure sur le plan local de step5 (~10 deg) est un
-    # artefact de sa propre moyenne sur toute une couche, pas du melange
-    # lui-meme (voir CLAUDE.md, hors perimetre de ce fix).
-    # enforce_upward_growth active ici (defaut de la dataclass = False), meme
-    # precedent que direction_blend_radius : une direction de croissance
-    # descendante empile les couches du haut vers le bas et chaque couche
-    # atterrit dans le vide. Mesure sur death.stl : 67.6% -> 0.06% du volume
-    # dont le gradient descend, a cout de calcul quasi inchange.
-    #
-    # DESACTIVATION TENTEE PUIS ANNULEE (session de debug de l'ordre des
-    # couches), sur l'argument - correct en soi - que la tete de la machine
-    # reelle couvre 0-185 deg et PEUT donc deposer vers le bas, rendant
-    # caduque la justification d'origine ("physiquement irrealisable").
-    # Mesure du desactiver sur death.stl, qui invalide la tentative :
-    #   - le gradient suit alors bien la cible de step3 (ecart 158.5 -> 29.4
-    #     deg) : le solveur n'a jamais eu de bug, il obeissait au flip ;
-    #   - MAIS la couche la plus basse remonte de z=51.49 a z=53.19 pour un
-    #     plateau a z=51.40 : plus AUCUNE couche ne touche le plateau, et
-    #     100% d'entre elles (contre 86.8%) sont `support_unresolved`.
-    # Cause identifiee : la cible descendante que step3 assigne au dome
-    # (region 3, [-0.26, 0.08, -0.96]) est elle-meme physiquement absurde
-    # POUR CE MODELE - la suivre voudrait dire commencer a imprimer en l'air
-    # au sommet du capot (z~100) puis descendre, alors que le capot ne tient
-    # au pilier que par sa BASE (z~59, couches 34-36 mesurees a 0.12-0.36 mm
-    # du pilier, toutes les suivantes s'en ecartant jusqu'a 36 mm). Sa
-    # direction de croissance correcte pointe vers l'EXTERIEUR depuis cette
-    # jonction, pas vers le bas. `enforce_upward_growth` reste donc actif
-    # comme garde-fou contre une cible de region mal choisie ; le vrai fix
-    # est dans step3 (choix de direction tenant compte de l'ancrage, pas
-    # seulement du surplomb local) - chantier distinct, non traite ici.
-    field_solver: FieldSolverParams = field(
-        default_factory=lambda: FieldSolverParams(
-            direction_blend_radius=10.0,
-            direction_blend_power=2.0,
-            # VOIE PRINCIPALE (decision de l'utilisateur, 2026-10-25) : champ = distance au
-            # plateau par la methode de la chaleur (limite #79), flux projete sur les
-            # inclinaisons atteignables, couches ordonnees par isovaleur (variante
-            # `heat_iso_reach` de scripts/measure_matrix.py). FEM directionnel et Bird retires.
-            enforce_upward_growth=False,
-            use_heat_geodesic_field=True,
-            heat_project_reachable=True,
-        )
-    )
-    constraints: Optional[list[Constraint]] = None
-    layers: LayerParams = field(default_factory=lambda: LayerParams(isovalue_order=True))
+    # Voie unique : champ = distance au plateau par la methode de la chaleur, flux
+    # projete sur les inclinaisons atteignables, couches ordonnees par isovaleur.
+    field_solver: FieldSolverParams = field(default_factory=FieldSolverParams)
+    layers: LayerParams = field(default_factory=lambda: LayerParams())
     # out_of_plane_interpolation_power active par defaut ici (defaut de la
     # dataclass = None/desactive), meme precedent que field_solver ci-dessus
     # qui force direction_blend_radius=10.0 : sans lui, les points generes par
@@ -563,20 +498,13 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
         if params.segmentation.platform_z is None
         else params.segmentation
     )
-    region_dependency_graph = segmentation_run(mesh_data, overhang_map, segmentation_params, tet_mesh)
+    region_dependency_graph = segmentation_run(mesh_data, overhang_map, segmentation_params)
     print(f"[main]   {len(region_dependency_graph.regions)} region(s)")
 
     _stage("field")
     print("[main] Etape 4/10 - resolution du champ scalaire")
     _fs_params = _effective_field_solver_params(params)
-    if _fs_params.planar_parts:
-        from pipeline.step4c_planar_parts import build_planar_parts
-        tet_mesh, scalar_field = build_planar_parts(tet_mesh, mesh_data, region_dependency_graph, _fs_params,
-                                                    overhang_map)
-    else:
-        scalar_field = field_solver_run(
-            tet_mesh, mesh_data, overhang_map, region_dependency_graph, params.constraints, _fs_params
-        )
+    scalar_field = field_solver_run(tet_mesh, mesh_data, overhang_map, region_dependency_graph, _fs_params)
 
     _stage("layers")
     print("[main] Etape 5/10 - extraction des couches courbes")

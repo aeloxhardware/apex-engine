@@ -435,44 +435,6 @@ def _random_tetrahedra(tet_count: int, node_count: int, seed: int) -> np.ndarray
     return tets[valid]
 
 
-def test_tet_face_topology_matches_python(restore_switch):
-    """
-    L'ORDRE des faces frontiere doit etre celui d'INSERTION, pas l'ordre trie.
-
-    Ce n'est pas cosmetique : `_map_boundary_faces_to_surface` interroge
-    ensuite le kdtree avec ces faces dans cet ordre, et l'ordre du resultat
-    s'y propage. Une permutation produirait des tableaux decales en aval, sans
-    qu'aucune exception ne soit levee.
-    """
-    from pipeline.step4_field_solver import _tet_face_table
-
-    class _FakeTetMesh:
-        def __init__(self, tetrahedra):
-            self.tetrahedra = tetrahedra
-            self.tet_count = len(tetrahedra)
-
-    tetrahedra = _random_tetrahedra(4000, 220, seed=91)
-    tet_mesh = _FakeTetMesh(tetrahedra)
-
-    face_to_tets = _tet_face_table(tet_mesh)
-    expected_nodes = [key for key, owners in face_to_tets.items() if len(owners) == 1]
-    expected_tets = [owners[0] for owners in face_to_tets.values() if len(owners) == 1]
-    expected_pairs = sorted(
-        tuple(sorted(owners)) for owners in face_to_tets.values() if len(owners) == 2
-    )
-
-    nodes, owners, pairs = _cpp.module().tet_face_topology(tetrahedra)
-
-    assert [tuple(row) for row in nodes.tolist()] == expected_nodes
-    assert owners.tolist() == expected_tets
-    assert sorted(tuple(sorted(p)) for p in pairs.tolist()) == expected_pairs
-
-    # Gardes : sans elles, un jeu degenere (aucune face interne, ou aucune
-    # frontiere) rendrait le test vert sans rien exercer.
-    assert len(expected_nodes) > 50
-    assert len(expected_pairs) > 50
-
-
 def test_tet_unique_edges_matches_python(restore_switch):
     """Memes aretes uniques que la boucle a `set` de `_build_tet_adjacency`."""
     tetrahedra = _random_tetrahedra(3000, 180, seed=97)
@@ -997,114 +959,6 @@ def test_shape_gradients_match_numpy_to_machine_precision(restore_switch):
     assert volumes_py.sum() > 0.0
 
 
-def test_blend_tet_directions_matches_python(restore_switch):
-    """
-    Le chemin natif ECARTE par AABB les sources hors rayon, que le Python
-    calcule puis annule par la fenetre de Hann. L'elagage est exact - une
-    source ecartee a un poids strictement nul - donc les directions doivent
-    coincider a la precision machine, pas seulement "a peu pres".
-    """
-    from pipeline.step4_field_solver import FieldSolverParams, _blend_tet_directions
-
-    mesh_data, tet_mesh, _overhang, regions = _step4_inputs()
-    params = FieldSolverParams(direction_blend_radius=8.0, direction_blend_power=2.0)
-
-    _cpp.set_enabled(False)
-    expected = _blend_tet_directions(tet_mesh, mesh_data, regions, params.up_vector, params)
-    _cpp.set_enabled(True)
-    actual = _blend_tet_directions(tet_mesh, mesh_data, regions, params.up_vector, params)
-
-    assert expected.shape == actual.shape
-    assert np.abs(expected - actual).max() < 1e-12
-
-    # Les directions doivent rester unitaires des deux cotes.
-    assert np.allclose(np.linalg.norm(actual, axis=1), 1.0, atol=1e-9)
-
-    # Garde anti-faux-vert, sur ce qui compte VRAIMENT : le melange doit
-    # produire des directions variees. Compter les regions ne suffirait pas -
-    # le plateau est lui aussi une source, et une seule region melangee avec
-    # lui exerce deja pleinement la ponderation.
-    assert float(np.ptp(actual, axis=0).max()) > 1e-3, (
-        "le melange rend une direction quasi constante : il n'est pas exerce"
-    )
-
-
-def test_blend_pruning_agrees_on_a_radius_that_excludes_almost_everything(restore_switch):
-    """
-    Cas limite de l'elagage : un rayon minuscule ecarte presque toutes les
-    paires, si bien que la quasi-totalite des tetraedres empruntent le REPLI
-    `nearest_source`. C'est precisement le chemin que la seconde passe sans
-    elagage doit rattraper - un elagage naif y divergerait.
-    """
-    from pipeline.step4_field_solver import FieldSolverParams, _blend_tet_directions
-
-    mesh_data, tet_mesh, _overhang, regions = _step4_inputs()
-    params = FieldSolverParams(direction_blend_radius=1e-3, direction_blend_power=2.0)
-
-    _cpp.set_enabled(False)
-    expected = _blend_tet_directions(tet_mesh, mesh_data, regions, params.up_vector, params)
-    _cpp.set_enabled(True)
-    actual = _blend_tet_directions(tet_mesh, mesh_data, regions, params.up_vector, params)
-
-    assert np.abs(expected - actual).max() < 1e-12
-
-
-def test_eigen_solver_agrees_with_scipy_within_solver_tolerance(restore_switch):
-    """
-    Eigen et scipy resolvent le MEME systeme au MEME critere d'arret relatif,
-    par le meme algorithme et le meme preconditionneur - mais pas dans le meme
-    ordre d'accumulation. On verifie donc ce qui a un sens : les deux champs
-    concordent a l'echelle de la tolerance du solveur, et surtout leurs
-    RESIDUS sont tous deux sous cette tolerance. Comparer les vecteurs entre
-    eux sans regarder le residu ne dirait pas lequel resout reellement.
-    """
-    import scipy.sparse as sp
-
-    from pipeline.step4_field_solver import (
-        FieldSolverParams,
-        _solve_linear_system,
-        build_static_system,
-    )
-
-    mesh_data, tet_mesh, overhang, regions = _step4_inputs()
-    params = FieldSolverParams(direction_blend_radius=8.0)
-
-    _cpp.set_enabled(False)
-    system = build_static_system(tet_mesh, mesh_data, overhang, regions, params)
-    A = system.A_structural.tocsr()
-    A.sort_indices()
-    b = system.b_structural
-
-    reference = _solve_linear_system(A, b, params)
-
-    _cpp.set_enabled(True)
-    direct = A.shape[0] < params.direct_solve_node_threshold
-    values, info = _cpp.module().solve_linear_system(
-        np.ascontiguousarray(A.indptr, dtype=np.int32),
-        np.ascontiguousarray(A.indices, dtype=np.int32),
-        np.ascontiguousarray(A.data),
-        np.ascontiguousarray(b),
-        direct,
-        params.convergence_tolerance,
-        params.max_solver_iterations,
-        None,
-    )
-    assert info["converged"], "le solveur natif doit converger sur ce systeme"
-
-    norm_b = np.linalg.norm(b)
-    assert norm_b > 0.0, "un second membre nul rendrait le test vide de sens"
-    residual_native = np.linalg.norm(A @ values - b) / norm_b
-    residual_reference = np.linalg.norm(A @ reference - b) / norm_b
-
-    # Le critere qui compte : les deux resolvent reellement le systeme.
-    assert residual_native <= max(params.convergence_tolerance * 10.0, 1e-7)
-    assert residual_reference <= max(params.convergence_tolerance * 10.0, 1e-7)
-
-    # Et les deux solutions decrivent bien le meme champ.
-    scale = max(float(np.abs(reference).max()), 1e-30)
-    assert np.abs(reference - values).max() / scale < 1e-5
-
-
 def test_fem_assembly_matches_scipy_coo_path(restore_switch):
     """
     Assemblage DIRECT en CSR contre le chemin `coo_matrix(...).tocsr()`.
@@ -1139,85 +993,6 @@ def test_fem_assembly_matches_scipy_coo_path(restore_switch):
     assert abs(expected - actual).max() / scale < 1e-13
 
     assert expected.nnz > 400, f"jeu de test trop pauvre ({expected.nnz} entrees)"
-
-
-def test_gradient_direction_term_matches_python(restore_switch):
-    """
-    Terme de direction : la matrice ET le second membre. Le second membre est
-    le plus revelateur - c'est lui la force motrice du champ, et une erreur
-    d'indexation entre tetraedres actifs et globaux y serait invisible sur la
-    seule matrice.
-    """
-    from pipeline.step4_field_solver import (
-        _assemble_gradient_direction_term,
-        _compute_shape_gradients,
-    )
-
-    _mesh_data, tet_mesh, _overhang, _regions = _step4_inputs()
-
-    _cpp.set_enabled(False)
-    gradients, volumes = _compute_shape_gradients(tet_mesh)
-
-    rng = np.random.default_rng(4201)
-    directions = rng.normal(size=(tet_mesh.tet_count, 3))
-    directions /= np.linalg.norm(directions, axis=1, keepdims=True)
-    weights = rng.uniform(0.5, 3.0, size=tet_mesh.tet_count)
-    # Un sous-ensemble ACTIF strict : le chemin natif indexe alors
-    # `shape_gradients` et `scale` par rang dans `active`, pas par tetraedre.
-    active = np.zeros(tet_mesh.tet_count, dtype=bool)
-    active[::3] = True
-
-    expected_A, expected_b = _assemble_gradient_direction_term(
-        tet_mesh, gradients, volumes, active, directions, weights
-    )
-    _cpp.set_enabled(True)
-    actual_A, actual_b = _assemble_gradient_direction_term(
-        tet_mesh, gradients, volumes, active, directions, weights
-    )
-
-    # Le motif natif est un SUR-ENSEMBLE assume : il couvre tous les
-    # tetraedres du maillage, la ou le chemin scipy ne cree d'entrees que
-    # pour les tetraedres ACTIFS. Les entrees surnumeraires valent exactement
-    # zero, et elles ne coutent rien en pratique : `build_static_system`
-    # additionne ce terme a la matrice de rigidite, dont le motif est deja
-    # complet. Ce qui doit etre verifie est donc l'egalite MATHEMATIQUE, pas
-    # l'egalite des motifs.
-    assert actual_A.nnz >= expected_A.nnz
-    difference = (actual_A - expected_A).tocoo()
-    scale_A = max(float(abs(expected_A).max()), 1e-30)
-    assert (np.abs(difference.data).max() if difference.nnz else 0.0) / scale_A < 1e-13
-
-    scale_b = max(float(np.abs(expected_b).max()), 1e-30)
-    assert np.abs(expected_b - actual_b).max() / scale_b < 1e-13
-
-    assert int(active.sum()) < tet_mesh.tet_count, "le masque actif doit etre strict"
-    assert scale_b > 0.0, "un second membre nul ne testerait rien"
-
-
-def test_shared_face_topology_matches_separate_computation(restore_switch):
-    """
-    `_build_tet_tet_adjacency` accepte desormais les paires de faces deja
-    calculees par `_map_boundary_faces_to_surface`, pour ne pas refaire la
-    meme passe topologique. La matrice produite doit etre identique a celle
-    du calcul separe - sinon l'optimisation changerait la propagation du
-    risque de surplomb en aval.
-    """
-    from pipeline.step4_field_solver import (
-        _build_tet_tet_adjacency,
-        _map_boundary_faces_to_surface,
-    )
-
-    mesh_data, tet_mesh, _overhang, _regions = _step4_inputs()
-
-    _cpp.set_enabled(True)
-    *_head, face_pairs = _map_boundary_faces_to_surface(tet_mesh, mesh_data)
-    assert face_pairs is not None, "le chemin natif doit fournir les paires internes"
-
-    shared = _build_tet_tet_adjacency(tet_mesh, face_pairs)
-    separate = _build_tet_tet_adjacency(tet_mesh)
-
-    assert (shared != separate).nnz == 0
-    assert shared.nnz > 100, "un maillage sans face interne ne testerait rien"
 
 
 # ---------------------------------------------------------------------------
@@ -2534,7 +2309,7 @@ def test_step6_native_layers_match_per_layer_path(restore_switch):
 
     _cpp.set_enabled(True)       # le kd-tree de mesh_data doit etre natif pour le chemin par couches entieres
     mesh_data, tet_mesh, overhang, regions = _step4_inputs(resolution=2.0)
-    field = field_run(tet_mesh, mesh_data, overhang, regions, None, FieldSolverParams())
+    field = field_run(tet_mesh, mesh_data, overhang, regions, FieldSolverParams())
     layers = layers_run(tet_mesh, mesh_data, field, regions, LayerParams(layer_height_base=1.0))
     base = s6.Step6Params(out_of_plane_interpolation_power=2.0, split_rings_into_runs=True,
                           continuous_rings=True, run_split_min_amplitude=0.05)

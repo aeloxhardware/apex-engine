@@ -466,7 +466,7 @@ def _offset_walls(
 
     Chaque niveau trace TOUS les bords de TOUS les morceaux de l'offset :
     exterieur ET trous. Correction (2026-09-26) de deux defauts mesures sur
-    les couches Bird du Benchy :
+    les couches du Benchy :
       - seul le bord exterieur etait trace (`polygon.exterior`), et seul le
         contour exterieur d'origine etait ajoute a la fin : les trous ne
         recevaient AUCUNE paroi, ni leur contour, ni les parois autour ;
@@ -550,7 +550,7 @@ def _generate_infill(
     couche (`diagonal / density * 0.05`), jamais de la buse - si bien qu'une
     couche de 35 mm a 20 % recevait une ligne tous les 8,75 mm au lieu de
     2 mm, et que plus une couche etait grande, plus elle etait creuse.
-    Mesure sur les couches Bird du Benchy (43 mm de remplissage au lieu
+    Mesure sur les couches du Benchy (43 mm de remplissage au lieu
     d'environ 160 sur une couche de 424 mm2). Et `pattern` etait recu sans
     jamais etre lu : GRID produisait des lignes simples.
 

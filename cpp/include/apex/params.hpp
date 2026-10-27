@@ -12,26 +12,6 @@
 
 namespace apex::params {
 
-enum class ConstraintFalloff { LINEAR, GAUSSIAN, CUBIC };
-inline const char* to_string(ConstraintFalloff v) {
-    switch (v) {
-        case ConstraintFalloff::LINEAR: return "linear";
-        case ConstraintFalloff::GAUSSIAN: return "gaussian";
-        case ConstraintFalloff::CUBIC: return "cubic";
-    }
-    return "";
-}
-
-enum class ConstraintType { ATTACH_POINT, AESTHETIC, STRUCTURAL };
-inline const char* to_string(ConstraintType v) {
-    switch (v) {
-        case ConstraintType::ATTACH_POINT: return "attach_point";
-        case ConstraintType::AESTHETIC: return "aesthetic";
-        case ConstraintType::STRUCTURAL: return "structural";
-    }
-    return "";
-}
-
 enum class InfillPattern { LINES, GRID, CROSSED_ZIGZAG, OSCILLATING_SPIRAL };
 inline const char* to_string(InfillPattern v) {
     switch (v) {
@@ -65,88 +45,26 @@ struct SegmentationParams {
     double platform_contact_tolerance{0.5};
     std::optional<std::vector<RotationAxisSpec>> rotation_axes{std::nullopt};
     std::vector<double> up_vector{std::vector<double>{0.0, 0.0, 1.0}};
-    std::optional<double> anchor_growth_weight{std::nullopt};
-    std::optional<double> branch_cut_threshold{std::nullopt};
 };
 
 struct FieldSolverParams {
-    double laplacian_smoothness_weight{1.0};
-    double gradient_overhang_weight{5.0};
     double resolution{1.5};
     int max_solver_iterations{2000};
     double convergence_tolerance{1e-08};
-    double gradient_baseline_weight{1.0};
-    int overhang_influence_depth{1};
-    bool enable_platform_anchor{true};
-    double platform_anchor_weight{1000000.0};
-    double platform_anchor_value{0.0};
-    std::optional<std::vector<double>> up_vector{std::vector<double>{0.0, 0.0, 1.0}};
     int direct_solve_node_threshold{30000};
     bool use_ilu_preconditioner{false};
-    double direction_blend_radius{0.0};
-    double direction_blend_power{2.0};
-    double direction_blend_min_norm{0.1};
-    bool enforce_upward_growth{false};
-    double upward_growth_epsilon{1e-09};
-    std::optional<double> max_downward_growth_angle_deg{std::nullopt};
-    bool use_geodesic_directions{false};
-    double geodesic_source_weight{0.0};
-    double geodesic_saddle_threshold_deg{100.0};
-    int geodesic_smoothing_iterations{0};
-    double geodesic_smoothing_step{0.5};
-    int support_feedback_iterations{0};
-    std::optional<std::vector<double>> radial_tilt_origin{std::nullopt};
-    double support_feedback_min_improvement{0.02};
-    double support_feedback_threshold_deg{45.0};
-    double support_feedback_weight{4.0};
-    bool support_feedback_use_geodesic_target{false};
-    double smoothness_modulation_strength{0.0};
-    double smoothness_modulation_floor{0.02};
-    std::optional<double> transition_distance_mm{std::nullopt};
+    double platform_anchor_weight{1000000.0};
+    std::optional<std::vector<double>> up_vector{std::vector<double>{0.0, 0.0, 1.0}};
     double heat_method_time_factor{100.0};
-    bool use_heat_geodesic_field{false};
-    bool heat_project_reachable{false};
-    bool multibranch{false};
-    bool planar_parts{false};
-    std::string planar_parts_partition{"region"};
-    double planar_reeb_band_mm{4.0};
-    int multibranch_min_branch_tets{40};
-    std::string multibranch_direction_mode{"region"};
-    int multibranch_smoothing_iterations{0};
-    std::string multibranch_partition{"region"};
-    double multibranch_flow_angle_deg{30.0};
-    bool multibranch_use_risk_weights{true};
-    bool multibranch_order_by_branch{true};
-    bool multibranch_blend_directions{false};
-    std::optional<double> multibranch_vertical_if_safe{std::nullopt};
-    bool support_feedback_require_in_air{false};
-    double support_feedback_in_air_threshold_mm{1.0};
-};
-
-struct Constraint {
-    ConstraintType type{};
-    std::vector<double> position{};
-    std::optional<double> target_field_value{};
-    std::optional<std::vector<double>> target_normal{};
-    double influence_radius{};
-    ConstraintFalloff falloff{};
-    double weight{};
+    std::optional<std::vector<double>> radial_tilt_origin{std::nullopt};
+    bool heat_project_reachable{true};
 };
 
 struct LayerParams {
     double layer_height_base{0.2};
     double weld_tolerance_factor{1e-06};
     std::optional<double> split_disjoint_clusters{std::nullopt};
-    std::optional<double> support_driven_order{std::nullopt};
-    bool geodesic_order{false};
-    bool frontier_order{false};
-    bool isovalue_order{false};
-    std::optional<double> nozzle_width{std::nullopt};
-    double support_horizontal_radius_factor{2.5};
-    double support_vertical_height_factor{7.5};
-    double platform_contact_tolerance_factor{2.5};
-    std::optional<std::vector<RotationAxisSpec>> support_rotation_axes{std::nullopt};
-    int support_direction_candidate_count{26};
+    bool isovalue_order{true};
 };
 
 struct Step6Params {
@@ -289,10 +207,9 @@ struct PipelineParams {
     std::string mesher{"tetgen"};
     double tetranet_refuse_ratio{0.05};
     OverhangParams overhang{OverhangParams{.overhang_angle_threshold_deg = 45.0, .bridge_detection_ray_density = 4, .bridge_support_ratio_threshold = 0.7, .bridge_max_gap_distance = 2.0, .bridge_horizontal_angle_tolerance_deg = 10.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
-    SegmentationParams segmentation{SegmentationParams{.direction_candidate_count = 26, .max_angle_from_direction_deg = 45.0, .max_region_merge_angle_deg = std::nullopt, .platform_z = std::nullopt, .platform_contact_tolerance = 0.5, .rotation_axes = std::nullopt, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .anchor_growth_weight = std::nullopt, .branch_cut_threshold = std::nullopt}};
-    FieldSolverParams field_solver{FieldSolverParams{.laplacian_smoothness_weight = 1.0, .gradient_overhang_weight = 5.0, .resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .gradient_baseline_weight = 1.0, .overhang_influence_depth = 1, .enable_platform_anchor = true, .platform_anchor_weight = 1000000.0, .platform_anchor_value = 0.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .direction_blend_radius = 10.0, .direction_blend_power = 2.0, .direction_blend_min_norm = 0.1, .enforce_upward_growth = false, .upward_growth_epsilon = 1e-09, .max_downward_growth_angle_deg = std::nullopt, .use_geodesic_directions = false, .geodesic_source_weight = 0.0, .geodesic_saddle_threshold_deg = 100.0, .geodesic_smoothing_iterations = 0, .geodesic_smoothing_step = 0.5, .support_feedback_iterations = 0, .radial_tilt_origin = std::nullopt, .support_feedback_min_improvement = 0.02, .support_feedback_threshold_deg = 45.0, .support_feedback_weight = 4.0, .support_feedback_use_geodesic_target = false, .smoothness_modulation_strength = 0.0, .smoothness_modulation_floor = 0.02, .transition_distance_mm = std::nullopt, .heat_method_time_factor = 100.0, .use_heat_geodesic_field = true, .heat_project_reachable = true, .multibranch = false, .planar_parts = false, .planar_parts_partition = "region", .planar_reeb_band_mm = 4.0, .multibranch_min_branch_tets = 40, .multibranch_direction_mode = "region", .multibranch_smoothing_iterations = 0, .multibranch_partition = "region", .multibranch_flow_angle_deg = 30.0, .multibranch_use_risk_weights = true, .multibranch_order_by_branch = true, .multibranch_blend_directions = false, .multibranch_vertical_if_safe = std::nullopt, .support_feedback_require_in_air = false, .support_feedback_in_air_threshold_mm = 1.0}};
-    std::optional<std::vector<Constraint>> constraints{std::nullopt};
-    LayerParams layers{LayerParams{.layer_height_base = 0.2, .weld_tolerance_factor = 1e-06, .split_disjoint_clusters = std::nullopt, .support_driven_order = std::nullopt, .geodesic_order = false, .frontier_order = false, .isovalue_order = true, .nozzle_width = std::nullopt, .support_horizontal_radius_factor = 2.5, .support_vertical_height_factor = 7.5, .platform_contact_tolerance_factor = 2.5, .support_rotation_axes = std::nullopt, .support_direction_candidate_count = 26}};
+    SegmentationParams segmentation{SegmentationParams{.direction_candidate_count = 26, .max_angle_from_direction_deg = 45.0, .max_region_merge_angle_deg = std::nullopt, .platform_z = std::nullopt, .platform_contact_tolerance = 0.5, .rotation_axes = std::nullopt, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
+    FieldSolverParams field_solver{FieldSolverParams{.resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .platform_anchor_weight = 1000000.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .heat_method_time_factor = 100.0, .radial_tilt_origin = std::nullopt, .heat_project_reachable = true}};
+    LayerParams layers{LayerParams{.layer_height_base = 0.2, .weld_tolerance_factor = 1e-06, .split_disjoint_clusters = std::nullopt, .isovalue_order = true}};
     Step6Params toolpath2d{Step6Params{.nozzle_width = 0.4, .wall_count = 2, .infill_density = 0.2, .infill_pattern = InfillPattern::CROSSED_ZIGZAG, .bridge_contour_ratio_threshold = 0.05, .bridge_anchor_extra_walls = 2, .degenerate_area_ratio = 1e-06, .out_of_plane_interpolation_power = 2.0, .split_rings_into_runs = true, .split_open_polylines = false, .continuous_rings = true, .run_split_min_amplitude = 0.05, .spiral_axis_origin = std::nullopt, .spiral_alternation_threshold = std::nullopt, .spiral_peak_spacing = std::nullopt, .spiral_randomization_threshold = 0.5, .spiral_seed = 0}};
     Step7Params scheduling{Step7Params{.surface_color_distance = 0.5, .hole_cost_model = HoleCostModel{.reheat_penalty = 1.0, .adhesion_risk_weight = 1.0}, .purge_cost_model = PurgeCostModel{.volume_per_purge = 1.0, .time_per_purge = 1.0}, .max_open_holes = 4, .escape_direction_count = 16, .rotation_axes = std::nullopt, .deadline_ray_samples = 24}};
     std::optional<ColorMap> color_map{std::nullopt};

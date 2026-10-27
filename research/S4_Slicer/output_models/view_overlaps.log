@@ -1,7 +1,0 @@
-benchy upsidedown tilted : 32971 tetraedres, passes disponibles [0, 1, 2, 3, 4, 5]
-  passe 0 : rang>=3      0 tetraedres (0 paires, penetration max 0.000 mm) | rang 2 inclus      0 tetraedres
-  passe 1 : rang>=3     13 tetraedres (17 paires, penetration max 0.017 mm) | rang 2 inclus    103 tetraedres
-  passe 2 : rang>=3      8 tetraedres (8 paires, penetration max 0.015 mm) | rang 2 inclus    267 tetraedres
-  passe 3 : rang>=3    148 tetraedres (241 paires, penetration max 0.203 mm) | rang 2 inclus    765 tetraedres
-  passe 4 : rang>=3    988 tetraedres (4712 paires, penetration max 0.504 mm) | rang 2 inclus   2759 tetraedres
-  passe 5 : rang>=3    997 tetraedres (4860 paires, penetration max 0.513 mm) | rang 2 inclus   2773 tetraedres

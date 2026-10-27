@@ -587,7 +587,7 @@ def _check_static_obstacle(
 PLATFORM_RADIUS = 150.0      # mm, ordre de grandeur d'un plateau, faute de mieux fourni
 PLATFORM_HALF_HEIGHT = 0.5   # mm, moitie de l'epaisseur du disque (cylinder(height=1.0))
 # SURFACE du plateau a z = platform_origin.z (corrige le 2026-10-06) : les pieces posent a
-# z = platform_z (step3) et l'export G-code / la chaine Bird comptent le plateau en z = 0. Le disque
+# z = platform_z (step3) et l'export G-code compte le plateau en z = 0. Le disque
 # etait jusque-la CENTRE sur l'origine, donc sa surface etait a +0,5 mm et step9 etait 0,5 mm plus
 # strict que la marge annoncee (limite #70). Le centre du disque est desormais a origine - 0,5 mm.
 PLATFORM_CENTER_OFFSET = -PLATFORM_HALF_HEIGHT

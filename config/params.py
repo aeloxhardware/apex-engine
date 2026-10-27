@@ -7,7 +7,7 @@ deplacer casserait les imports existants, ce que CLAUDE.md interdit
 et `ROOTS` designe les racines du contrat, parcourues pour le schema JSON et l'en-tete C++
 (`scripts/gen_params_hpp.py`).
 """
-from core.mesh_types import AABB, ColorMap, Constraint, MachineProfile, RotationAxisSpec  # noqa: F401
+from core.mesh_types import AABB, ColorMap, MachineProfile, RotationAxisSpec  # noqa: F401
 from file_io.gcode_export import GcodeParams  # noqa: F401
 from main import PipelineParams  # noqa: F401
 from pipeline.step2_overhang import OverhangParams  # noqa: F401
