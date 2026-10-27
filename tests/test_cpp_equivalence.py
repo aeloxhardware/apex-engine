@@ -1936,9 +1936,9 @@ def test_segmentation_native_matches_python(restore_switch, merge):
     om = s2.run(mesh_data, s2.OverhangParams())
     params = replace(s3.SegmentationParams(), platform_z=report.platform_z_used, max_region_merge_angle_deg=merge)
     _cpp.set_enabled(False)
-    a = s3.run(mesh_data, om, params, tet_mesh)
+    a = s3.run(mesh_data, om, params)
     _cpp.set_enabled(True)
-    b = s3.run(mesh_data, om, params, tet_mesh)
+    b = s3.run(mesh_data, om, params)
     if merge is not None:
         assert len(a.regions) > 1, "la fixture doit produire plusieurs regions"
     assert a.regions.keys() == b.regions.keys()
