@@ -1,0 +1,548 @@
+{
+ "format": "apex-kinematics-vectors-1",
+ "note": "Genere par scripts/gen_kinematics_vectors.py depuis file_io/gcode_export.py. NE PAS EDITER. Unites : mm et degres. B d'Apex : 0 = tete vers le bas, jamais negatif. Y firmware = atan2(y, x) deroule contre previous_y. Au centre (R < singularity_radius) Y est herite.",
+ "singularity_radius": 1e-06,
+ "tolerance_mm": 1e-06,
+ "vectors": [
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "tip",
+   "tip": [
+    30.0,
+    0.0,
+    5.0
+   ],
+   "b_apex": 0.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 30.0,
+    "Y": 0.0,
+    "Z": 5.0,
+    "B": 0.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "tip",
+   "tip": [
+    30.0,
+    0.0,
+    5.0
+   ],
+   "b_apex": 45.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 62.526911935,
+    "Y": 0.0,
+    "Z": -8.473088065,
+    "B": 45.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "tip",
+   "tip": [
+    30.0,
+    0.0,
+    5.0
+   ],
+   "b_apex": 90.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 76.0,
+    "Y": 0.0,
+    "Z": -41.0,
+    "B": 90.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "tip",
+   "tip": [
+    0.0,
+    25.0,
+    12.5
+   ],
+   "b_apex": 135.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 57.526911935,
+    "Y": 90.0,
+    "Z": -66.026911935,
+    "B": 135.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "tip",
+   "tip": [
+    -20.0,
+    0.0,
+    0.2
+   ],
+   "b_apex": 185.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 15.990835834,
+    "Y": 180.0,
+    "Z": -91.624956112,
+    "B": 185.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "tip",
+   "tip": [
+    -10.0,
+    -10.0,
+    3.0
+   ],
+   "b_apex": 60.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 53.979304198,
+    "Y": -135.0,
+    "Z": -20.0,
+    "B": 60.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "tip",
+   "tip": [
+    12.0,
+    9.0,
+    7.0
+   ],
+   "b_apex": 30.0,
+   "previous_y": 700.0,
+   "firmware": {
+    "X": 38.0,
+    "Y": 756.869897646,
+    "Z": 0.837168574,
+    "B": 30.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "tip",
+   "tip": [
+    12.0,
+    -9.0,
+    7.0
+   ],
+   "b_apex": 30.0,
+   "previous_y": -350.0,
+   "firmware": {
+    "X": 38.0,
+    "Y": -396.869897646,
+    "Z": 0.837168574,
+    "B": 30.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "tip",
+   "tip": [
+    0.0,
+    0.0,
+    4.0
+   ],
+   "b_apex": 20.0,
+   "previous_y": 123.5,
+   "firmware": {
+    "X": 15.732926593,
+    "Y": 123.5,
+    "Z": 1.225860556,
+    "B": 20.0
+   },
+   "inverse_exact": false
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "pivot",
+   "tip": [
+    30.0,
+    0.0,
+    5.0
+   ],
+   "b_apex": 0.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 30.0,
+    "Y": 0.0,
+    "Z": 51.0,
+    "B": 0.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "pivot",
+   "tip": [
+    30.0,
+    0.0,
+    5.0
+   ],
+   "b_apex": 45.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 62.526911935,
+    "Y": 0.0,
+    "Z": 37.526911935,
+    "B": 45.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "pivot",
+   "tip": [
+    30.0,
+    0.0,
+    5.0
+   ],
+   "b_apex": 90.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 76.0,
+    "Y": 0.0,
+    "Z": 5.0,
+    "B": 90.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "pivot",
+   "tip": [
+    0.0,
+    25.0,
+    12.5
+   ],
+   "b_apex": 135.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 57.526911935,
+    "Y": 90.0,
+    "Z": -20.026911935,
+    "B": 135.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "pivot",
+   "tip": [
+    -20.0,
+    0.0,
+    0.2
+   ],
+   "b_apex": 185.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 15.990835834,
+    "Y": 180.0,
+    "Z": -45.624956112,
+    "B": 185.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "pivot",
+   "tip": [
+    -10.0,
+    -10.0,
+    3.0
+   ],
+   "b_apex": 60.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 53.979304198,
+    "Y": -135.0,
+    "Z": 26.0,
+    "B": 60.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "pivot",
+   "tip": [
+    12.0,
+    9.0,
+    7.0
+   ],
+   "b_apex": 30.0,
+   "previous_y": 700.0,
+   "firmware": {
+    "X": 38.0,
+    "Y": 756.869897646,
+    "Z": 46.837168574,
+    "B": 30.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "pivot",
+   "tip": [
+    12.0,
+    -9.0,
+    7.0
+   ],
+   "b_apex": 30.0,
+   "previous_y": -350.0,
+   "firmware": {
+    "X": 38.0,
+    "Y": -396.869897646,
+    "Z": 46.837168574,
+    "B": 30.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 46.0,
+   "b_sign": 1.0,
+   "tilt_sign": 1.0,
+   "z_reference": "pivot",
+   "tip": [
+    0.0,
+    0.0,
+    4.0
+   ],
+   "b_apex": 20.0,
+   "previous_y": 123.5,
+   "firmware": {
+    "X": 15.732926593,
+    "Y": 123.5,
+    "Z": 47.225860556,
+    "B": 20.0
+   },
+   "inverse_exact": false
+  },
+  {
+   "pivot_to_tip": 45.0,
+   "b_sign": -1.0,
+   "tilt_sign": -1.0,
+   "z_reference": "tip",
+   "tip": [
+    30.0,
+    0.0,
+    5.0
+   ],
+   "b_apex": 0.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 30.0,
+    "Y": 0.0,
+    "Z": 5.0,
+    "B": -0.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 45.0,
+   "b_sign": -1.0,
+   "tilt_sign": -1.0,
+   "z_reference": "tip",
+   "tip": [
+    30.0,
+    0.0,
+    5.0
+   ],
+   "b_apex": 45.0,
+   "previous_y": null,
+   "firmware": {
+    "X": -1.819805153,
+    "Y": 0.0,
+    "Z": -8.180194847,
+    "B": -45.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 45.0,
+   "b_sign": -1.0,
+   "tilt_sign": -1.0,
+   "z_reference": "tip",
+   "tip": [
+    30.0,
+    0.0,
+    5.0
+   ],
+   "b_apex": 90.0,
+   "previous_y": null,
+   "firmware": {
+    "X": -15.0,
+    "Y": 0.0,
+    "Z": -40.0,
+    "B": -90.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 45.0,
+   "b_sign": -1.0,
+   "tilt_sign": -1.0,
+   "z_reference": "tip",
+   "tip": [
+    0.0,
+    25.0,
+    12.5
+   ],
+   "b_apex": 135.0,
+   "previous_y": null,
+   "firmware": {
+    "X": -6.819805153,
+    "Y": 90.0,
+    "Z": -64.319805153,
+    "B": -135.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 45.0,
+   "b_sign": -1.0,
+   "tilt_sign": -1.0,
+   "z_reference": "tip",
+   "tip": [
+    -20.0,
+    0.0,
+    0.2
+   ],
+   "b_apex": 185.0,
+   "previous_y": null,
+   "firmware": {
+    "X": 23.922008424,
+    "Y": 180.0,
+    "Z": -89.628761414,
+    "B": -185.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 45.0,
+   "b_sign": -1.0,
+   "tilt_sign": -1.0,
+   "z_reference": "tip",
+   "tip": [
+    -10.0,
+    -10.0,
+    3.0
+   ],
+   "b_apex": 60.0,
+   "previous_y": null,
+   "firmware": {
+    "X": -24.829007547,
+    "Y": -135.0,
+    "Z": -19.5,
+    "B": -60.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 45.0,
+   "b_sign": -1.0,
+   "tilt_sign": -1.0,
+   "z_reference": "tip",
+   "tip": [
+    12.0,
+    9.0,
+    7.0
+   ],
+   "b_apex": 30.0,
+   "previous_y": 700.0,
+   "firmware": {
+    "X": -7.5,
+    "Y": 756.869897646,
+    "Z": 0.97114317,
+    "B": -30.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 45.0,
+   "b_sign": -1.0,
+   "tilt_sign": -1.0,
+   "z_reference": "tip",
+   "tip": [
+    12.0,
+    -9.0,
+    7.0
+   ],
+   "b_apex": 30.0,
+   "previous_y": -350.0,
+   "firmware": {
+    "X": -7.5,
+    "Y": -396.869897646,
+    "Z": 0.97114317,
+    "B": -30.0
+   },
+   "inverse_exact": true
+  },
+  {
+   "pivot_to_tip": 45.0,
+   "b_sign": -1.0,
+   "tilt_sign": -1.0,
+   "z_reference": "tip",
+   "tip": [
+    0.0,
+    0.0,
+    4.0
+   ],
+   "b_apex": 20.0,
+   "previous_y": 123.5,
+   "firmware": {
+    "X": -15.39090645,
+    "Y": 123.5,
+    "Z": 1.286167935,
+    "B": -20.0
+   },
+   "inverse_exact": false
+  }
+ ]
+}

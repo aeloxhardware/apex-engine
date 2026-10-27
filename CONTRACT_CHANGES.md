@@ -4,6 +4,24 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajouts compatibles du 2026-10-27 (le numero reste 2)
+Rien a faire pour l'interface qui lit deja le contrat 2 ; a connaitre :
+- `machine_profile.toolhead_id` (texte, defaut `"aetheris-4"`, R-020) : identifiant du modele de tete,
+  resolu par le moteur dans `res/3d/toolheads/<id>/<id>.glb` (jamais un chemin). Inconnu : journal, et
+  `nozzle_model_checked=false` a l'etape 9.
+- `params.allow_multi_mesh` vaut `true` par defaut (R-013) : un fichier a plusieurs objets est accepte, les
+  transformations de nœud d'une scene (3MF, GLB) sont appliquees, une piece a volume positif n'est plus
+  jetee comme « fragment ». Un fichier a un seul objet donne le meme resultat qu'avant.
+- Resultat `surface_inconsistent` : `diagnostic` porte aussi `self_intersections` et `volume_pct` (R-016).
+- G-code (C4, C5) : ligne en clair `; apex_kinematics pivot_to_tip=… b_sign=… tilt_sign=… z_reference=…`
+  (R-007) et bloc chiffre `apex_block_begin v1` (R-010) portant `sliced` et `meta` (`kinematics` comprise),
+  place apres l'en-tete en clair ; ecrit seulement si le paquet Python `cryptography` est present. Le
+  marqueur `; apex_sliced = 1` reste.
+- `tests/vectors/kinematics_vectors.json` (R-008) : vecteurs de la cinematique pivot/pointe, generes par
+  `scripts/gen_kinematics_vectors.py --check`.
+- Modele de tete : celui de l'interface (v4, 16 237 sommets) remplace la v5 du moteur (R-009), copie par
+  `scripts/sync_from_ui.py --check`. Effet mesure sur l'etape 9 : voir `DT.md`.
+
 ## 2 (2026-10-27) - voie unique : la methode de la chaleur ; FEM et Bird retires
 INCOMPATIBLE. Decision de l'utilisateur : la voie par defaut (champ = distance au plateau par la
 methode de la chaleur) devient la seule ; le champ FEM directionnel et la voie Bird sont supprimes.

@@ -467,6 +467,10 @@
      },
      "type": "array"
     },
+    "toolhead_id": {
+     "default": "aetheris-4",
+     "type": "string"
+    },
     "z_clearance_min": {
      "default": 0.0,
      "type": "number"
@@ -528,7 +532,7 @@
      }
     },
     "allow_multi_mesh": {
-     "default": false,
+     "default": true,
      "type": "boolean"
     },
     "collision": {
@@ -678,6 +682,7 @@
         ]
        }
       ],
+      "toolhead_id": "aetheris-4",
       "z_clearance_min": 0.0
      }
     },

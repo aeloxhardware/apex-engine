@@ -1162,3 +1162,60 @@ def test_translation_retry_recovers_and_moves_nodes_back(monkeypatch):
     monkeypatch.setattr(s1, "_tetrahedralize", always_fail)
     with pytest.raises(s1.MeshIngestError, match="toujours"):
         s1._tetrahedralize_with_translation_retry(mesh, 1.0, None, 5.0, 0.0, None, None)
+
+
+# ---------------------------------------------------------------------------
+# R-013 : plusieurs pieces sur le plateau
+# ---------------------------------------------------------------------------
+
+def test_multi_mesh_scene_keeps_node_transforms(tmp_path):
+    """Les transformations de nœud d'une scene (placement d'un 3MF/GLB) ne sont pas perdues."""
+    from pipeline.step1_ingest import _load_raw_mesh
+    scene = trimesh.Scene()
+    scene.add_geometry(trimesh.creation.box((10, 10, 10)), node_name="a")
+    scene.add_geometry(trimesh.creation.box((5, 5, 5)), node_name="b",
+                       transform=trimesh.transformations.translation_matrix([50, 0, 0]))
+    path = str(tmp_path / "plate.glb")
+    scene.export(path)
+    mesh = _load_raw_mesh(path, allow_multi_mesh=True)
+    assert mesh.bounds[1][0] == pytest.approx(52.5, abs=1e-6)   # la seconde piece est restee en x = 50
+
+
+def test_small_real_piece_next_to_large_one_is_not_dropped():
+    """Une petite piece a volume positif n'est jamais prise pour un fragment (`_extract_dominant_shell`)."""
+    from pipeline.step1_ingest import _extract_dominant_shell
+    big = trimesh.creation.box((40, 40, 40))
+    small = trimesh.creation.box((6, 6, 6))
+    small.apply_translation([60, 0, 0])
+    both = trimesh.util.concatenate([big, small])
+    assert _extract_dominant_shell(both) == (None, 0)
+
+
+def test_inverted_fragment_next_to_large_body_is_still_dropped():
+    """Le cas de turkish.stl est conserve : fragment a volume signe negatif (normales inversees)."""
+    from pipeline.step1_ingest import _extract_dominant_shell
+    big = trimesh.creation.box((40, 40, 40))
+    frag = trimesh.creation.box((1, 1, 1))
+    frag.invert()
+    frag.apply_translation([60, 0, 0])
+    dominant, dropped = _extract_dominant_shell(trimesh.util.concatenate([big, frag]))
+    assert dropped == 1 and dominant is not None and len(dominant.faces) == 12
+
+
+def test_surface_inconsistent_diagnostic_carries_numbers_for_translation(monkeypatch):
+    """R-016 : le diagnostic porte aussi `self_intersections` et `volume_pct` (texte reconstructible)."""
+    import types
+    from pipeline import step1_ingest as s1
+    box = trimesh.creation.box((10, 10, 10))
+    fake = {"status": s1.TETRANET_STATUS_INCONSISTENT_SURFACE, "tets": 0, "volume_ratio": 0.42, "sign_conflicts": 1234,
+            "surface_holes": 3, "surface_flipped_edges": 9, "surface_nonmanifold_edges": 0,
+            "surface_duplicate_faces": 0, "surface_vertices": np.asarray(box.vertices),
+            "surface_faces": np.asarray(box.faces), "tet_vertices": np.zeros((0, 3)),
+            "tetrahedra": np.zeros((0, 4), dtype=np.int64)}
+    monkeypatch.setattr(s1._cpp, "module", lambda: types.SimpleNamespace(tetranet_mesh=lambda *a: fake))
+    with pytest.raises(s1.SurfaceInconsistentError) as err:
+        s1._ingest_with_tetranet(box, 1.0, None, False, False, 0.1)
+    assert err.value.diagnostic["volume_pct"] == pytest.approx(42.0)
+    assert err.value.diagnostic["self_intersections"] == 0
+    assert err.value.diagnostic["surface_holes"] == 3
+    assert "1\u202f234 points incohérents" in str(err.value)

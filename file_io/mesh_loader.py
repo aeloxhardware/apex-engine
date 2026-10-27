@@ -10,6 +10,9 @@ fichier reel (res/3d/toolheads/aetheris-4/aetheris-4.glb).
 
 from __future__ import annotations
 
+import os
+import re
+
 import numpy as np
 import trimesh
 
@@ -79,3 +82,24 @@ def load_toolhead_mesh(path: str) -> trimesh.Trimesh:
     mesh.apply_scale(METERS_TO_MILLIMETERS)
     mesh.apply_transform(TOOLHEAD_BODY_TO_MACHINE_UP)
     return mesh
+
+
+TOOLHEADS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "res", "3d", "toolheads")
+
+
+def toolhead_path(toolhead_id: str) -> str:
+    """Chemin du GLB d'un modele de tete designe par son identifiant (R-020).
+
+    L'identifiant vient du profil d'imprimante, donc de l'exterieur : seuls lettres, chiffres, `-` et `_`
+    sont acceptes, pour qu'il ne puisse jamais sortir de `res/3d/toolheads/`."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", toolhead_id or ""):
+        raise ValueError(f"identifiant de tete invalide : {toolhead_id!r}")
+    return os.path.join(TOOLHEADS_DIR, toolhead_id, f"{toolhead_id}.glb")
+
+
+def load_toolhead_by_id(toolhead_id: str) -> trimesh.Trimesh:
+    """`load_toolhead_mesh` pour le modele designe par son identifiant ; `FileNotFoundError` s'il manque."""
+    path = toolhead_path(toolhead_id)
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"modele de tete inconnu : {toolhead_id!r} ({path})")
+    return load_toolhead_mesh(path)

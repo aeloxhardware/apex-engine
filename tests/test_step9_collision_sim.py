@@ -426,10 +426,13 @@ def test_load_real_toolhead_glb_has_expected_extents():
     extents = mesh.extents
     assert extents[0] == pytest.approx(76.0, abs=1.0)
     assert extents[1] == pytest.approx(35.0, abs=1.0)
-    assert extents[2] == pytest.approx(77.15, abs=1.0)
+    assert extents[2] == pytest.approx(76.55, abs=1.0)   # tete v4 de l'interface (R-009) ; v5 du moteur : 77,15
 
     distances_to_origin = np.linalg.norm(mesh.vertices, axis=1)
-    assert distances_to_origin.min() < 1.0  # la pointe (origine) doit etre quasi sur le maillage
+    # la pointe (origine) doit etre quasi sur le maillage : la tete v4 a une face de buse plate de 1,1 mm de rayon
+    # centree sur l'origine (le sommet le plus proche est a 1,10 mm ; la v5 en avait un a 0,1 mm)
+    assert distances_to_origin.min() < 1.5
+    assert abs(mesh.bounds[0][2]) < 0.01   # la face de buse est dans le plan z = 0
 
     # Propriete PHYSIQUE qui compte reellement, et que l'ancien ordre d'axes
     # laissait passer : la tete doit se trouver entierement AU-DESSUS de sa
@@ -438,7 +441,7 @@ def test_load_real_toolhead_glb_has_expected_extents():
     # collisionner ~100% des points de trajectoire contre le plateau et la
     # piece - voir mesh_loader.TOOLHEAD_BODY_TO_MACHINE_UP.
     assert mesh.bounds[0][2] > -1.0, "le corps de la tete ne doit jamais pendre sous la buse"
-    assert mesh.bounds[1][2] == pytest.approx(77.3, abs=1.0)
+    assert mesh.bounds[1][2] == pytest.approx(76.55, abs=1.0)
 
 
 # ---------------------------------------------------------------------------

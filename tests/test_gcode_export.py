@@ -261,3 +261,39 @@ def test_firmware_time_estimate_slows_on_z_limit(machine):
     none = export_gcode(tp, machine, GcodeParams(fw_axis_speeds=None))[1]
     assert none.print_time_fw_s == 0.0
     assert slow.print_time_fw_s > 3.0 * fast.print_time_fw_s > 0.0
+
+
+def test_kinematics_header_roundtrip_and_in_file(tmp_path):
+    """R-007 : l'en-tete porte la cinematique d'ecriture et se relit tel quel."""
+    from file_io.gcode_export import GcodeParams, kinematics_header_line, parse_kinematics_header
+    gp = GcodeParams(pivot_to_tip=47.5, b_sign=-1.0, tilt_sign=-1.0, z_reference="pivot")
+    line = kinematics_header_line(gp)
+    assert line == "; apex_kinematics pivot_to_tip=47.5 b_sign=-1 tilt_sign=-1 z_reference=pivot"
+    assert parse_kinematics_header(["G21", "; apex_sliced = 1", line, "G00 X1"]) == {
+        "pivot_to_tip": 47.5, "b_sign": -1.0, "tilt_sign": -1.0, "z_reference": "pivot"}
+    # absent (ancien fichier) ou apres le premier mouvement : None
+    assert parse_kinematics_header(["G21", "G00 X1 Y0 Z0 B0", line]) is None
+    assert parse_kinematics_header(["G21"]) is None
+
+
+def test_export_writes_kinematics_header(machine):
+    from file_io.gcode_export import parse_kinematics_header
+    params = GcodeParams()
+    lines, _ = export_gcode(_toolpath(machine), machine, params)
+    assert parse_kinematics_header(lines) == {"pivot_to_tip": params.pivot_to_tip, "b_sign": params.b_sign,
+                                              "tilt_sign": params.tilt_sign, "z_reference": params.z_reference}
+
+
+def test_export_writes_encrypted_header_block(machine):
+    """R-010 : le fichier porte le bloc chiffre (sliced + meta) et se reproduit octet pour octet."""
+    from file_io import apex_header
+    if not apex_header.cipher_available():
+        pytest.skip("paquet `cryptography` absent")
+    params = GcodeParams()
+    lines, _ = export_gcode(_toolpath(machine), machine, params)
+    again, _ = export_gcode(_toolpath(machine), machine, params)
+    assert lines == again
+    header = apex_header.read_apex_header(lines)
+    assert header["sliced"] is True
+    assert header["meta"]["kinematics"]["pivot_to_tip"] == params.pivot_to_tip
+    assert lines[:7][2:] == ["G21", "G90", "M82", "G92 E0", "M109 S195"]   # le bloc suit l'en-tete en clair

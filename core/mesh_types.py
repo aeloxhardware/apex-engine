@@ -340,6 +340,9 @@ class MachineProfile:
                                       # aussi le point de singularité où l'angle du premier
                                       # axe est indéterminé (limite #19)
     nozzle_model: Any = None         # maillage 3D tête (buse + porte-buse + carriage proche)
+    # Identifiant du modele de tete (dossier de `res/3d/toolheads/<id>/<id>.glb`), lie au profil
+    # d'imprimante (R-020). Jamais un chemin : il traverse le contrat, le moteur le resout chez lui.
+    toolhead_id: str = "aetheris-4"
     nozzle_diameter: float = 0.4
     max_angular_velocity: float = 0.0     # rad/s
     max_angular_acceleration: float = 0.0

@@ -1,0 +1,2 @@
+Genere depuis apex-ui:src/assets/models/aetheris-4.glb par scripts/sync_from_ui.py -- ne pas editer.
+sha256 511c08070dd2b1d172ce9ee406e1c1e5023251c6394e934daf23954a2209cd3d

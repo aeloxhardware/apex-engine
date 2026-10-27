@@ -108,6 +108,21 @@ def check_model_fits_machine(mesh_path: str, machine_profile: MachineProfile) ->
     loaded = _trimesh.load(mesh_path, force="mesh")
     check_fits_platform(np.asarray(loaded.vertices), radius, max_height)
 
+def ensure_toolhead(machine_profile: MachineProfile) -> None:
+    """Charge la tete que designe `toolhead_id` quand le profil n'en porte pas (profil venu d'une requete
+    JSON : `nozzle_model` n'est pas serialise, R-020). Echec : journal et `nozzle_model=None`, jamais un crash
+    (step9 degrade en `nozzle_model_checked=False`)."""
+    if machine_profile.nozzle_model is not None or not machine_profile.toolhead_id:
+        return
+    try:
+        from file_io.mesh_loader import load_toolhead_by_id
+
+        machine_profile.nozzle_model = load_toolhead_by_id(machine_profile.toolhead_id)
+    except Exception as exc:
+        print(f"[main] Avertissement : tete {machine_profile.toolhead_id!r} non chargee ({exc}) - "
+              f"simulation de collision desactivee (nozzle_model=None).", file=sys.stderr)
+
+
 def _default_machine_profile() -> MachineProfile:
     """
     Cinematique par defaut = la machine actuelle documentee dans CLAUDE.md
@@ -126,17 +141,13 @@ def _default_machine_profile() -> MachineProfile:
     head_axis = np.array([1.0, 0.0, 0.0])
 
     nozzle_model = None
-    glb_path = os.path.join(
-        os.path.dirname(__file__), "res", "3d", "toolheads", "aetheris-4", "aetheris-4.glb"
-    )
-    if os.path.isfile(glb_path):
-        try:
-            from file_io.mesh_loader import load_toolhead_mesh
+    try:
+        from file_io.mesh_loader import load_toolhead_by_id
 
-            nozzle_model = load_toolhead_mesh(glb_path)
-        except Exception as exc:  # pragma: no cover - chemin de repli, pas une logique testee
-            print(f"[main] Avertissement : echec du chargement de {glb_path} ({exc}) - "
-                  f"simulation de collision desactivee (nozzle_model=None).", file=sys.stderr)
+        nozzle_model = load_toolhead_by_id("aetheris-4")
+    except Exception as exc:  # pragma: no cover - chemin de repli, pas une logique testee
+        print(f"[main] Avertissement : echec du chargement de la tete aetheris-4 ({exc}) - "
+              f"simulation de collision desactivee (nozzle_model=None).", file=sys.stderr)
 
     return MachineProfile(
         rotation_axes=[
@@ -176,7 +187,7 @@ class PipelineParams:
     defaut, il les expose juste au niveau orchestrateur/CLI.
     """
     resolution: float = 1.5  # partage step1 (densite de tetraedrisation) et FieldSolverParams.resolution
-    allow_multi_mesh: bool = False
+    allow_multi_mesh: bool = True
     # near_platform_resolution/margin calibres sur res/test_models/l_shape_overhang.stl
     # (CLAUDE.md) : l'erreur angulaire pres du plateau (voir field_solver
     # ci-dessous) est une erreur de discretisation FEM, pas de ponderation -
@@ -413,6 +424,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
     LayerExtractionError, FieldSolverError, SchedulingError,
     ToolpathResolutionError remontent telles quelles a l'appelant.
     """
+    ensure_toolhead(params.machine_profile)
     check_model_fits_machine(mesh_path, params.machine_profile)
     _current: list = [None]
 

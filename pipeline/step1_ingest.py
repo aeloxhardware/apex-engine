@@ -228,10 +228,11 @@ def _load_raw_mesh(mesh_path: str, allow_multi_mesh: bool) -> trimesh.Trimesh:
                 f"'{mesh_path}' contient plusieurs objets (Scene) mais "
                 "allow_multi_mesh=False. Fusionnez le fichier ou activez ce parametre."
             )
-        geometries = list(loaded.geometry.values())
-        if len(geometries) == 0:
+        if len(loaded.geometry) == 0:
             raise MeshIngestError(f"'{mesh_path}' ne contient aucune geometrie.")
-        loaded = trimesh.util.concatenate(geometries)
+        # `to_geometry()` applique les transformations de nœud de la scene (placement des objets d'un 3MF) ;
+        # concatener `geometry.values()` les perdait et empilait les pieces a l'origine (R-013).
+        loaded = loaded.to_geometry()
 
     if not isinstance(loaded, trimesh.Trimesh):
         raise MeshIngestError(
@@ -952,6 +953,13 @@ def _extract_dominant_shell(mesh: trimesh.Trimesh) -> tuple[Optional[trimesh.Tri
     if volume_ratio < _DOMINANT_SHELL_VOLUME_RATIO:
         return None, 0
 
+    # R-013 : une vraie piece posee a cote de la grande (volume POSITIF non negligeable) ne doit jamais etre
+    # jetee en silence. Les fragments de turkish.stl sont soit a volume signe negatif (normales inversees),
+    # soit de l'ordre de 1e-6 du volume total ; une piece imprimable n'est ni l'un ni l'autre.
+    for c in components:
+        if c is not dominant and float(c.volume) > 0 and abs(c.volume) / max(total_volume, 1e-9) >= _KEPT_PIECE_VOLUME_RATIO:
+            return None, 0
+
     dropped_count = len(components) - 1
     return dominant, dropped_count
 
@@ -969,6 +977,9 @@ def _extract_dominant_shell(mesh: trimesh.Trimesh) -> tuple[Optional[trimesh.Tri
 # tres au-dela de ce seuil (marge large, pas un seuil calibre au plus
 # juste).
 _DOMINANT_SHELL_VOLUME_RATIO = 0.95
+
+# Une composante a volume positif d'au moins cette part du volume total est une piece, pas un fragment.
+_KEPT_PIECE_VOLUME_RATIO = 1e-3
 
 
 # ---------------------------------------------------------------------------
@@ -2490,8 +2501,10 @@ def _ingest_with_tetranet(
             if len(out["surface_faces"]) else raw_mesh
         self_intersections = int(_count_self_intersecting_faces(cleaned))
         volume_pct = 100.0 * float(out["volume_ratio"])
+        # Les deux nombres dont l'interface a besoin pour reconstruire le texte (traduisible) : R-016.
+        diagnostic = {**mesher_report, "self_intersections": self_intersections, "volume_pct": volume_pct}
         raise SurfaceInconsistentError(surface_error_message(mesher_report, volume_pct, self_intersections),
-                                       mesher_report)
+                                       diagnostic)
     mesh = trimesh.Trimesh(out["surface_vertices"], out["surface_faces"], process=False)
     tet_mesh = TetMesh(tet_vertices=np.asarray(out["tet_vertices"], dtype=np.float64),
                        tetrahedra=np.asarray(out["tetrahedra"], dtype=np.int64))

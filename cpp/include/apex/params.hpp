@@ -156,6 +156,7 @@ struct MachineProfile {
     std::vector<RotationAxisSpec> rotation_axes{std::vector<RotationAxisSpec>{}};
     std::vector<double> platform_origin{};
     // nozzle_model : donnee d'execution, non transcrite
+    std::string toolhead_id{"aetheris-4"};
     double nozzle_diameter{0.4};
     double max_angular_velocity{0.0};
     double max_angular_acceleration{0.0};
@@ -198,7 +199,7 @@ struct SupportCheckParams {
 
 struct PipelineParams {
     double resolution{1.5};
-    bool allow_multi_mesh{false};
+    bool allow_multi_mesh{true};
     std::optional<double> near_platform_resolution{0.5};
     double near_platform_margin{5.0};
     std::optional<double> junction_refinement_resolution{std::nullopt};
@@ -220,7 +221,7 @@ struct PipelineParams {
     bool height_clamp{false};
     std::optional<std::vector<double>> coupled_reorientation_tiers{std::nullopt};
     int coupled_reorientation_rounds{3};
-    MachineProfile machine_profile{MachineProfile{.rotation_axes = std::vector<RotationAxisSpec>{RotationAxisSpec{.axis = std::vector<double>{0.0, 0.0, 1.0}, .angle_range_deg = std::array<double, 2>{0.0, 360.0}}, RotationAxisSpec{.axis = std::vector<double>{1.0, 0.0, 0.0}, .angle_range_deg = std::array<double, 2>{0.0, 185.0}}}, .platform_origin = std::vector<double>{0.0, 0.0, 0.0}, .nozzle_diameter = 0.4, .max_angular_velocity = 29.08940264298949, .max_angular_acceleration = 22.689280275926283, .build_volume = std::nullopt, .z_clearance_min = 0.0, .platform_radius = 150.0, .position_coupled_axes = std::vector<int>{0}, .radial_direction = std::vector<double>{0.0, -1.0, 0.0}}};
+    MachineProfile machine_profile{MachineProfile{.rotation_axes = std::vector<RotationAxisSpec>{RotationAxisSpec{.axis = std::vector<double>{0.0, 0.0, 1.0}, .angle_range_deg = std::array<double, 2>{0.0, 360.0}}, RotationAxisSpec{.axis = std::vector<double>{1.0, 0.0, 0.0}, .angle_range_deg = std::array<double, 2>{0.0, 185.0}}}, .platform_origin = std::vector<double>{0.0, 0.0, 0.0}, .toolhead_id = "aetheris-4", .nozzle_diameter = 0.4, .max_angular_velocity = 29.08940264298949, .max_angular_acceleration = 22.689280275926283, .build_volume = std::nullopt, .z_clearance_min = 0.0, .platform_radius = 150.0, .position_coupled_axes = std::vector<int>{0}, .radial_direction = std::vector<double>{0.0, -1.0, 0.0}}};
     std::optional<TravelRoutingParams> travel_routing{std::nullopt};
     std::optional<CollisionOrderParams> collision_order{std::nullopt};
     std::optional<SupportCheckParams> support_check{std::nullopt};

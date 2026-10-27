@@ -171,6 +171,47 @@ def _z_offset(cz, z_reference):
     raise ValueError(f"z_reference inconnu : {z_reference!r} (attendu 'tip' ou 'pivot')")
 
 
+def _encrypted_header(params):
+    """Bloc d'en-tete chiffre Apex (`sliced` + `meta`, R-010) ; `[]` si le chiffrement est indisponible."""
+    from config.schema import APEX_CONTRACT_VERSION
+    from file_io.apex_header import header_block_lines
+    meta = {"generator": "Apex engine", "contract": APEX_CONTRACT_VERSION,
+            "kinematics": {"pivot_to_tip": float(params.pivot_to_tip), "b_sign": float(params.b_sign),
+                           "tilt_sign": float(params.tilt_sign), "z_reference": params.z_reference},
+            "layer_height": float(params.layer_height), "line_width": float(params.line_width),
+            "print_speed": float(params.print_speed), "travel_speed": float(params.travel_speed),
+            "nozzle_temp": float(params.nozzle_temp)}
+    return header_block_lines(meta)
+
+
+KINEMATICS_HEADER_KEY = "apex_kinematics"
+
+
+def kinematics_header_line(params):
+    """Ligne d'en-tete `; apex_kinematics pivot_to_tip=46 b_sign=1 tilt_sign=1 z_reference=tip` (R-007).
+
+    Dit avec quelle cinematique pivot/pointe le fichier a ete ecrit : l'apercu et le noyau d'edition de
+    l'interface la relisent au lieu de la supposer. Quand le bloc chiffre (R-010) sera ecrit, ces valeurs
+    rejoindront `meta` ; la ligne en clair reste, comme `; apex_sliced = 1`."""
+    return (f"; {KINEMATICS_HEADER_KEY} pivot_to_tip={float(params.pivot_to_tip):g} "
+            f"b_sign={float(params.b_sign):g} tilt_sign={float(params.tilt_sign):g} "
+            f"z_reference={params.z_reference}")
+
+
+def parse_kinematics_header(lines):
+    """Relit `kinematics_header_line` ; `None` si le fichier n'en porte pas (G-code d'une ancienne version)."""
+    prefix = f"; {KINEMATICS_HEADER_KEY} "
+    for line in lines:
+        line = line.strip()
+        if line.startswith(prefix):
+            kv = dict(item.split("=", 1) for item in line[len(prefix):].split())
+            return {"pivot_to_tip": float(kv["pivot_to_tip"]), "b_sign": float(kv["b_sign"]),
+                    "tilt_sign": float(kv["tilt_sign"]), "z_reference": kv["z_reference"]}
+        if line[:3] in ("G00", "G01"):
+            break   # l'en-tete est fini au premier mouvement
+    return None
+
+
 def machine_to_firmware(position, b_deg, pivot_to_tip, previous_y=None, singularity_radius=1e-6,
                         tilt_sign=1.0, z_reference="tip", b_sign=1.0):
     """Pointe (x, y, z) + B d'Apex -> (X, Y, Z, B) firmware (B emis = b_sign * B). Y deroule par rapport a
@@ -424,6 +465,8 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
                # En clair tant que le moteur n'ecrit pas le bloc d'en-tete chiffre Apex
                # (slicer_ux/docs/APEX_HEADER_FORMAT.md), ou il rejoindra les metadonnees.
                "; apex_sliced = 1"]
+    out.append(kinematics_header_line(params))   # R-007 : la cinematique d'ecriture voyage avec le fichier
+    out += _encrypted_header(params)              # R-010 : meme information dans le bloc chiffre (sans le paquet : rien)
     state = {"fw": None, "e": 0.0, "retracted": False}
     guard = {"x": [], "y": [], "z": []}
 
