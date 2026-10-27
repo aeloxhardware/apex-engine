@@ -547,3 +547,13 @@ def test_fast_checker_is_reused_while_material_is_unchanged():
     moved = [ToolpathPoint(position=p.position + 0.1, axis_angles=[], extrusion=1.0, feedrate=1.0) for p in pts]
     b = fast_checker_for(ToolpathMachine(points=moved), machine, sim, samples)
     assert b is not a and np.allclose(b.dense.min(axis=0), a.dense.min(axis=0) + 0.1)
+
+
+def test_printed_part_margin_defaults_to_safety_margin_and_can_be_negative():
+    """Marge propre a la matiere deposee : None = safety_margin ; negative =
+    recouvrement tolere (la tete est exacte, effleurer une couche n'est pas un choc)."""
+    from pipeline.step9_collision_sim import CollisionSimParams, printed_margin_of
+    base = CollisionSimParams(path_sampling_step=2.0, safety_margin=1.0)
+    assert printed_margin_of(base) == 1.0
+    tolerant = CollisionSimParams(path_sampling_step=2.0, safety_margin=1.0, printed_part_margin=-0.15)
+    assert printed_margin_of(tolerant) == -0.15 and tolerant.safety_margin == 1.0

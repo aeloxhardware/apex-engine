@@ -71,7 +71,7 @@
   },
   "CollisionSimParams": {
    "additionalProperties": false,
-   "description": "CollisionSimParams(path_sampling_step: 'float', safety_margin: 'float', max_adjustment_iterations: 'int' = 3, grid_cell_size_multiplier: 'float' = 4.0, toolhead_sample_spacing: 'float' = 5.0, nozzle_contact_clearance: 'float' = 3.0, fast_kdtree: 'bool' = False, fast_densify_step: 'float' = 0.25)",
+   "description": "CollisionSimParams(path_sampling_step: 'float', safety_margin: 'float', printed_part_margin: 'Optional[float]' = None, max_adjustment_iterations: 'int' = 3, grid_cell_size_multiplier: 'float' = 4.0, toolhead_sample_spacing: 'float' = 5.0, nozzle_contact_clearance: 'float' = 3.0, fast_kdtree: 'bool' = False, fast_densify_step: 'float' = 0.25)",
    "properties": {
     "fast_densify_step": {
      "type": "number"
@@ -90,6 +90,16 @@
     },
     "path_sampling_step": {
      "type": "number"
+    },
+    "printed_part_margin": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ]
     },
     "safety_margin": {
      "type": "number"
@@ -530,6 +540,7 @@
       "max_adjustment_iterations": 3,
       "nozzle_contact_clearance": 3.0,
       "path_sampling_step": 2.0,
+      "printed_part_margin": -0.15,
       "safety_margin": 1.0,
       "toolhead_sample_spacing": 5.0
      }

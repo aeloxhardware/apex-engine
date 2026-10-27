@@ -49,6 +49,7 @@ from pipeline.step9_collision_sim import (
     CollisionSimParams,
     _evaluate_point,
     _grow_printed_index_to,
+    printed_margin_of,
     _filter_nozzle_contact_zone,
     _PrintedGeometryIndex,
     _surface_sample_points,
@@ -400,6 +401,7 @@ def _collisions_at_points(
                 machine_profile,
                 printed_index,
                 sim_params.safety_margin,
+                printed_margin_of(sim_params),
             )
         )
     return events
@@ -678,7 +680,7 @@ def _try_local_reorientation(
         else:
             events = _evaluate_point(
                 point_idx, toolhead_samples, candidate_point, machine_profile, printed_index,
-                sim_params.safety_margin
+                sim_params.safety_margin, printed_margin_of(sim_params)
             )
         if not events:
             return candidate

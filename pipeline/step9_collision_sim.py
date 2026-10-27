@@ -49,10 +49,23 @@ from core.mesh_types import (
 )
 
 
+def printed_margin_of(params: "CollisionSimParams") -> float:
+    """Marge appliquee a la matiere deja deposee."""
+    return params.safety_margin if params.printed_part_margin is None else params.printed_part_margin
+
+
 @dataclass
 class CollisionSimParams:
     path_sampling_step: float
     safety_margin: float
+    # Marge propre a la MATIERE DEJA DEPOSEE, mesuree a la surface du cordon
+    # (rayon de buse). None = `safety_margin`. NEGATIVE = recouvrement toleré :
+    # le modele de tete est exact, donc la pointe peut effleurer ou mordre un peu
+    # la couche sans que ce soit une collision (decision de l'utilisateur,
+    # 2026-10-27). Mesure : sur deux G-code (un cartesien plat, un Benchy polaire)
+    # les contacts a marge 0 recouvrent la matiere de 0,18 mm au plus. Le plateau
+    # garde `safety_margin` : la pointe ne descend jamais sous lui.
+    printed_part_margin: Optional[float] = None
     # Non utilise par step9 lui-meme - porte pour le contrat CollisionSimParams
     # (CLAUDE.md), consomme par l'etape 10 qui boucle sur step9.
     max_adjustment_iterations: int = 3
@@ -675,6 +688,7 @@ def _evaluate_point(
     machine_profile: MachineProfile,
     printed_index: _PrintedGeometryIndex,
     safety_margin: float,
+    printed_margin: Optional[float] = None,
 ) -> list[CollisionEvent]:
     events: list[CollisionEvent] = []
 
@@ -682,7 +696,8 @@ def _evaluate_point(
         toolhead_base_samples, point.position, point.axis_angles, machine_profile.rotation_axes
     )
 
-    printed_penetration = _check_printed_part(toolhead_samples, printed_index, safety_margin)
+    printed_penetration = _check_printed_part(
+        toolhead_samples, printed_index, safety_margin if printed_margin is None else printed_margin)
     if printed_penetration is not None:
         events.append(
             CollisionEvent(
@@ -756,7 +771,7 @@ class FastCollisionChecker:
         from scipy.spatial import cKDTree
 
         self.machine, self.params, self.samples = machine_profile, params, toolhead_base_samples
-        self.reach = params.safety_margin + machine_profile.nozzle_diameter / 2.0
+        self.reach = printed_margin_of(params) + machine_profile.nozzle_diameter / 2.0
         self.dense, self.owner = _densified_printed_material(toolpath.points, params.fast_densify_step)
         self._tree = None       # arbre scipy construit a la demande : inutile en mode natif (2026-10-06)
         self.owner_pad = np.r_[self.owner, np.iinfo(np.int64).max]   # indice "absent" de cKDTree
@@ -1004,6 +1019,7 @@ def run(
                 machine_profile,
                 printed_index,
                 params.safety_margin,
+                printed_margin_of(params),
             )
         )
 

@@ -16,6 +16,7 @@ Ce que l'interface doit faire :
   `layers.support_driven_order`, `geodesic_order`, `frontier_order`, `nozzle_width`,
   `support_*` ;
 - `layers.isovalue_order` vaut `true` par defaut ;
+- ajout compatible : `collision.printed_part_margin` (mm, facultatif, defaut -0,15 dans le pipeline) ;
 - un champ retire envoye dans une requete est une erreur (code 2), comme tout champ inconnu.
 
 ## 1 (2026-10-26) - premiere version numerotee

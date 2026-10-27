@@ -271,7 +271,8 @@ class PipelineParams:
         # 2026-10-01 (l-triple et l_shape entiers, turkish et death par
         # echantillon) : 0 faux positif, 0 faux negatif, ecart <= 0,087 mm ;
         # death 16 s au lieu de plusieurs heures.
-        default_factory=lambda: CollisionSimParams(path_sampling_step=2.0, safety_margin=1.0, fast_kdtree=True)
+        default_factory=lambda: CollisionSimParams(path_sampling_step=2.0, safety_margin=1.0, fast_kdtree=True,
+                                       printed_part_margin=-0.15)
     )
     adjustment: Step10Params = field(default_factory=Step10Params)
     # Borne de l'angle de tete selon la hauteur au-dessus du plateau, AVANT
