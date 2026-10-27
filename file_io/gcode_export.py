@@ -57,6 +57,8 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from core import progress as _progress
+
 
 @dataclass
 class GcodeParams:
@@ -598,6 +600,7 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
 
     last_kind = None
     for i in range(n_loop):
+        _progress.report(i, n_loop, span=(0.4, 1.0))   # R-017 : points ecrits
         kind = "lissage" if skin[i] else "corps"
         b = float(ang[i, 1])
         if i > 0:

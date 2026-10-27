@@ -39,6 +39,7 @@ from typing import Optional
 
 import numpy as np
 
+from core import progress as _progress
 from core import _cpp
 from core.geometry_utils import (
     _rodrigues_rotate,
@@ -869,8 +870,10 @@ def run(
     """
     layers_by_id = {layer.id: layer for layer in layers}
     raw_points = _iter_schedule_points(schedule, layers_by_id, params)
+    _progress.milestone(0.15)                # R-017 : points bruts assembles
     if params.per_point_normal and direction_field is not None and raw_points:
         _apply_per_point_normals(raw_points, layers_by_id, direction_field)
+    _progress.milestone(0.3)                 # normales par point
     return resolve_raw_points(raw_points, machine_profile, params)
 
 
@@ -911,6 +914,7 @@ def resolve_raw_points(
             raw_points, axes, reference_direction, platform_origin, params
         )
 
+    _progress.milestone(0.85)                # cinematique inverse resolue (l'etape la plus longue, indivisible)
     if params.free_axis_median_window > 1 and axes:
         resolved_angles, residual_errors = _median_filter_free_axes(
             resolved_angles, raw_points, axes, machine_profile, reference_direction,

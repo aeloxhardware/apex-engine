@@ -41,6 +41,7 @@ import shapely.affinity
 from shapely.geometry import LineString, MultiPolygon, Polygon
 
 from core import _cpp
+from core import progress as _progress
 from core.geometry_utils import point_in_polygon_2d
 from core.mesh_types import Layer, MeshData, OverhangMap
 
@@ -1390,8 +1391,13 @@ def run(
     if native_layers is not None:
         return native_layers
 
+    finished = [0]
+
     def one_layer(layer: Layer) -> Layer:
-        return _fill_layer(layer, mesh_data, overhang_map, params, isovalue_rank)
+        out = _fill_layer(layer, mesh_data, overhang_map, params, isovalue_rank)
+        finished[0] += 1                       # R-017 : couches remplies (le verrou est dans `_progress`)
+        _progress.report(finished[0], len(layers))
+        return out
 
     # Couches INDEPENDANTES (fonction pure par couche) : fils d'execution,
     # ordre de sortie conserve (`map`), resultat identique par construction.
@@ -1408,6 +1414,8 @@ def run(
 # pont, parois/remplissage Clipper2, offset hors-plan, decoupage en troncons, en parallele.
 # APEX_NATIVE_LAYER=0 rend le chemin couche par couche de Python.
 _NATIVE_LAYER = os.environ.get("APEX_NATIVE_LAYER", "1") == "1"
+_NATIVE_CHUNKS = 20      # tranches de couches du chemin natif (une fraction de progression par tranche)
+_NATIVE_MIN_CHUNK = 32   # jamais moins : un appel natif trop court ne parallelise plus
 
 
 def _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank):
@@ -1449,10 +1457,22 @@ def _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank):
         "run_split_min_amplitude": params.run_split_min_amplitude,
     }
     threads = _STEP6_THREADS if _STEP6_THREADS is not None else 0
-    result = module.fill_layers(
-        frames, loop_begin, point_begin, points, sweep, config, kdtree,
-        np.ascontiguousarray(overhang_map.is_bridge, dtype=np.uint8),
-        np.ascontiguousarray(overhang_map.bridge_span_direction, dtype=float), int(threads))
+    is_bridge = np.ascontiguousarray(overhang_map.is_bridge, dtype=np.uint8)
+    span = np.ascontiguousarray(overhang_map.bridge_span_direction, dtype=float)
+    # Les couches sont independantes : le noyau les remplit par TRANCHES, pour rendre la main (et la
+    # progression, R-017) entre deux tranches. Assez de couches par tranche pour garder le parallelisme.
+    n = len(layers)
+    step = max(_NATIVE_MIN_CHUNK, -(-n // _NATIVE_CHUNKS))
+    result: list = []
+    for lo in range(0, n, step):
+        hi = min(n, lo + step)
+        p_lo, p_hi = int(loop_begin[lo]), int(loop_begin[hi])
+        result += list(module.fill_layers(
+            np.ascontiguousarray(frames[lo:hi]), np.ascontiguousarray(loop_begin[lo:hi + 1] - loop_begin[lo]),
+            np.ascontiguousarray(point_begin[p_lo:p_hi + 1] - point_begin[p_lo]),
+            np.ascontiguousarray(points[point_begin[p_lo]:point_begin[p_hi]]),
+            np.ascontiguousarray(sweep[lo:hi]), config, kdtree, is_bridge, span, int(threads)))
+        _progress.report(hi, n)
     return [replace(layer, toolpath_2d=list(polys)) for layer, polys in zip(layers, result)]
 
 

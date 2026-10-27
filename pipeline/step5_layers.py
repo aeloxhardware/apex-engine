@@ -55,6 +55,7 @@ from core.mesh_types import (
     TetMesh,
 )
 from core import _cpp
+from core import progress as _progress
 from core.spatial import KDTree
 
 
@@ -1172,7 +1173,8 @@ def run(
             np.ascontiguousarray(scalar_field.values, dtype=float),
         )
 
-    for isovalue in isovalues:
+    for done, isovalue in enumerate(isovalues):
+        _progress.report(done, len(isovalues))   # R-017 : couches deja extraites
         if (native_extractor is not None and (params.split_disjoint_clusters is None)
                 and hasattr(native_extractor, "extract_layer")):
             # Chemin par defaut en un appel natif : isosurface, contours, regions et

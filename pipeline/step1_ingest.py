@@ -35,6 +35,7 @@ from trimesh import grouping as trimesh_grouping
 from trimesh.creation import triangulate_polygon
 from trimesh.path import polygons as trimesh_polygons
 
+from core import progress as _progress
 from core import _cpp
 from core.mesh_types import JunctionZone, MeshData, TetMesh
 from core.spatial import KDTree, RayIntersector
@@ -2613,6 +2614,7 @@ def run(
             etre reduit a un volume tetraedrisable meme apres reparation.
     """
     raw_mesh = _load_raw_mesh(mesh_path, allow_multi_mesh)
+    _progress.milestone(0.03)                # R-017 : fichier lu
     if mesher == "tetranet":
         if junction_zones:
             print("[step1] TetraNet : zones de jonction non prises en charge, retour a TetGen")
@@ -2624,6 +2626,7 @@ def run(
             return _ingest_with_tetranet(raw_mesh, resolution, platform_z, place_on_platform,
                                          check_surface_coverage, tetranet_refuse_ratio)
     cleaned_mesh, report = _clean_and_repair(raw_mesh)
+    _progress.milestone(0.1)                 # surface nettoyee et reparee ; reste la tetraedrisation (TetGen, indivisible)
 
     if place_on_platform and len(cleaned_mesh.vertices):
         target_z = 0.0 if platform_z is None else float(platform_z)
@@ -2676,6 +2679,7 @@ def run(
         report.is_watertight_after_repair = bool(final_mesh.is_watertight)
         print(f"[step1] surface reparee : {label} ({tet_mesh.tet_count} tetraedres)")
         cleaned_mesh = final_mesh
+    _progress.milestone(0.9)                 # volume tetraedrise
     mesh_data = _build_mesh_data(cleaned_mesh)
 
     report.tetrahedra_generated = tet_mesh.tet_count

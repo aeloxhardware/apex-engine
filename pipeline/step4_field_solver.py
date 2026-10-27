@@ -30,6 +30,7 @@ import scipy.sparse as sp
 import scipy.sparse.linalg as spla
 
 from core import _cpp
+from core import progress as _progress
 from core.mesh_types import (
     MeshData,
     OverhangMap,
@@ -579,7 +580,9 @@ def run(
     """
     shape_gradients, volumes = _compute_shape_gradients(tet_mesh)
     platform_nodes = _identify_platform_nodes(tet_mesh, mesh_data, region_dependency_graph)
+    _progress.milestone(0.1)                 # R-017 : gradients de forme et nœuds du plateau
     values = _heat_method_distance(tet_mesh, shape_gradients, volumes, platform_nodes, params)
+    _progress.milestone(0.9)                 # diffusion, flux et integration resolus
     return ScalarField(
         values=values,
         gradient=_compute_per_tet_gradient(tet_mesh, shape_gradients, values),

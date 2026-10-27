@@ -117,6 +117,13 @@ def test_slice_end_to_end(tmp_path, capsys):
     assert [e["slug"] for e in steps if e["fraction"] == 1.0] == expected
     assert all(0.0 <= e["fraction"] <= 1.0 for e in steps)
 
+    # R-017 : fractions intermediaires reelles, croissantes dans chaque etape (jamais un recul)
+    for slug in expected:
+        fractions = [e["fraction"] for e in steps if e["slug"] == slug]
+        assert fractions == sorted(fractions), slug
+    intermediate = {e["slug"] for e in steps if 0.0 < e["fraction"] < 1.0}
+    assert {"ingest", "field", "machine_toolpath", "export"} <= intermediate
+
     # aucun fichier temporaire ne reste
     assert sorted(os.listdir(out_dir)) == [os.path.basename(result["gcode"])]
 

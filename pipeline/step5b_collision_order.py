@@ -34,6 +34,7 @@ from typing import Optional
 
 import numpy as np
 
+from core import progress as _progress
 from core.mesh_types import Layer, MachineProfile
 
 
@@ -205,6 +206,7 @@ def run(layers: list[Layer], machine_profile: MachineProfile,
     edges: set[tuple[int, int]] = set()
     support_edges: set[tuple[int, int]] = set()
     for k, layer in enumerate(layers):
+        _progress.report(k, len(layers))     # R-017 : couches deja posees
         poses = _layer_poses(layer, params.pose_spacing)
         if not len(poses):
             continue

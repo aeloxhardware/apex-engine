@@ -37,6 +37,7 @@ import trimesh
 import trimesh.proximity
 
 from core import _cpp
+from core import progress as _progress
 from core.geometry_utils import _rodrigues_rotate, point_has_support_along_direction
 from core.mesh_types import (
     AABB,
@@ -908,6 +909,10 @@ def fast_batch_events(checker: "FastCollisionChecker", toolpath: ToolpathMachine
     return events
 
 
+_NATIVE_TRANCHES = 20       # tranches du controle rapide natif (une fraction de progression par tranche)
+_NATIVE_MIN_TRANCHE = 5000  # jamais moins : un appel natif trop court ne parallelise plus
+
+
 def _run_fast_kdtree(
     toolpath: ToolpathMachine,
     machine_profile: MachineProfile,
@@ -917,8 +922,15 @@ def _run_fast_kdtree(
 ) -> list[CollisionEvent]:
     """Variante rapide de la boucle de `run` (voir FastCollisionChecker)."""
     checker = fast_checker_for(toolpath, machine_profile, params, toolhead_base_samples)
-    native_events = fast_batch_events(checker, toolpath, list(sample_indices))
+    # Points independants : le noyau les traite par tranches (rend la main, donc la progression, R-017).
+    indices = list(sample_indices)
+    tranche = max(_NATIVE_MIN_TRANCHE, -(-len(indices) // _NATIVE_TRANCHES))
+    native_events = fast_batch_events(checker, toolpath, indices[:tranche])
     if native_events is not None:
+        _progress.report(min(tranche, len(indices)), len(indices))
+        for start in range(tranche, len(indices), tranche):
+            native_events += fast_batch_events(checker, toolpath, indices[start:start + tranche])
+            _progress.report(min(start + tranche, len(indices)), len(indices))
         return native_events
     events: list[CollisionEvent] = []
     axes = machine_profile.rotation_axes or []
@@ -938,6 +950,7 @@ def _run_fast_kdtree(
                 np.ascontiguousarray(verts_block, dtype=float), np.asarray(block, dtype=np.int64), float(checker.reach))
             plates = _platform_disc_batch(verts_block, machine_profile, params)
             batch = (best, plates)
+        _progress.report(start + len(block), len(sample_indices))
         for k, point_idx in enumerate(block):
             point = pts[k]
             verts = verts_block[k] if verts_block is not None else None
@@ -1007,7 +1020,8 @@ def run(
 
     events: list[CollisionEvent] = []
     last_grown_idx = 0
-    for point_idx in sample_indices:
+    for done, point_idx in enumerate(sample_indices):
+        _progress.report(done, len(sample_indices))   # R-017 : points deja testes
         last_grown_idx = _grow_printed_index_to(
             printed_index, toolpath.points, point_idx, last_grown_idx
         )

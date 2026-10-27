@@ -32,6 +32,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from core import progress as _core_progress
 from core.mesh_types import (
     CollisionReport,
     ColorMap,
@@ -380,9 +381,11 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
         zlow = np.array([s9._positioned_toolhead_vertices(head, np.zeros(3), [0.0, float(b)], machine.rotation_axes)
                          [:, 2].min() for b in grid_b])
         head_zlow = head_zlow_from_table(grid_b, zlow)
+    _core_progress.milestone(0.15)           # R-017 : hauteur mini de la tete par B
     gp = gcode_params if gcode_params is not None else GcodeParams(pivot_to_tip=pivot_to_tip, strict=True)
     arrays = toolpath_arrays(toolpath)
     travel_check = material_travel_check(arrays, machine, gp) if check_travel else None
+    _core_progress.milestone(0.4)            # degagements controles ; reste l'ecriture du fichier
     return export_gcode(arrays, machine, gp, out_path, head_zlow=head_zlow, travel_check=travel_check)
 
 
@@ -417,8 +420,8 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
         de `CollisionSimParams` (`params.collision`).
 
     `progress(slug, fraction)` : appele au debut (0.0) et a la fin (1.0) de chaque etape de
-    `PIPELINE_STEPS`, jamais sur une estimation de duree. Pas de fraction intermediaire pour
-    l'instant : les etapes ne rendent pas la main avant d'avoir fini.
+    `PIPELINE_STEPS`, jamais sur une estimation de duree. Des fractions intermediaires sont emises
+    par les boucles des etapes (`core/progress.py`, R-017) ; une phase indivisible n'en emet qu'a sa fin.
 
     Ne catch aucune exception metier : MeshIngestError, SegmentationError,
     LayerExtractionError, FieldSolverError, SchedulingError,
@@ -430,6 +433,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
 
     def _stage(slug: Optional[str]) -> None:
         """Termine l'etape en cours (1.0) puis ouvre `slug` (0.0) ; `None` termine seulement."""
+        _core_progress.end()
         if progress is None:
             return
         if _current[0] is not None:
@@ -437,6 +441,8 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
         _current[0] = slug
         if slug is not None:
             progress(slug, 0.0)
+            # fractions intermediaires reelles des boucles de l'etape (R-017, core/progress.py)
+            _core_progress.begin(lambda fraction, _slug=slug: progress(_slug, fraction))
 
     junction_zones = None
     if params.junction_refinement_resolution is not None:
@@ -521,9 +527,11 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
 
     _stage("layers")
     print("[main] Etape 5/10 - extraction des couches courbes")
-    layers = layers_run(tet_mesh, mesh_data, scalar_field, region_dependency_graph, params.layers)
+    with _core_progress.phase(0.0, 0.7 if params.collision_order is not None else 1.0):
+        layers = layers_run(tet_mesh, mesh_data, scalar_field, region_dependency_graph, params.layers)
     if params.collision_order is not None:
-        layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)
+        with _core_progress.phase(0.7, 1.0):
+            layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)
         print(f"[main]   ordre contraint par la tete : {order_report.constraints} contrainte(s), "
               f"{order_report.moved_layers} couche(s) deplacee(s), {order_report.cycle_breaks} violee(s)")
     print(f"[main]   {len(layers)} couche(s)")
@@ -592,7 +600,8 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
 
     _stage("collision")
     print("[main] Etape 9/10 - simulation de collision")
-    collision_report = collision_run(toolpath, params.machine_profile, params.collision)
+    with _core_progress.phase(0.0, 0.8):
+        collision_report = collision_run(toolpath, params.machine_profile, params.collision)
     print(
         f"[main]   {len(collision_report.events)} collision(s) detectee(s) "
         f"(nozzle_model_checked={collision_report.nozzle_model_checked}, "

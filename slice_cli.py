@@ -36,6 +36,7 @@ import traceback
 import numpy as np
 
 from config import schema
+from core import progress as _core_progress
 
 EXIT_OK, EXIT_ERROR, EXIT_INVALID, EXIT_REFUSED = 0, 1, 2, 3
 
@@ -207,8 +208,12 @@ def slice_main(argv: list[str]) -> int:
         with contextlib.redirect_stdout(log):
             result = run_pipeline(request["mesh"], request["params"], progress=progress)
             progress("export", 0.0)
-            _lines, report = export_gcode_checked(result.adjusted_toolpath, request["params"], temp_path,
-                                                  gcode_params=request["gcode_params"])
+            _core_progress.begin(lambda fraction: progress("export", fraction))   # R-017
+            try:
+                _lines, report = export_gcode_checked(result.adjusted_toolpath, request["params"], temp_path,
+                                                      gcode_params=request["gcode_params"])
+            finally:
+                _core_progress.end()
         if not report.written:
             with contextlib.suppress(FileNotFoundError):
                 os.remove(temp_path)
@@ -225,6 +230,8 @@ def slice_main(argv: list[str]) -> int:
             os.remove(temp_path)
         traceback.print_exc(file=log)
         return refuse("error", EXIT_ERROR, f"{type(exc).__name__} : {exc}")
+    finally:
+        _core_progress.end()   # R-017 : jamais de rappel vers `log`, qui va etre ferme
 
     warnings = []
     if result.adjustment_report.unresolved_collisions:

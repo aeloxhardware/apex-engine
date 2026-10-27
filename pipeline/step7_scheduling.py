@@ -46,6 +46,7 @@ import numpy as np
 import trimesh
 import trimesh.proximity
 
+from core import progress as _progress
 from core.geometry_utils import (
     composed_rotation_directions,
     fibonacci_sphere_directions,
@@ -845,6 +846,7 @@ def run(
         return native
 
     colored_layers = _apply_colors_to_layers(layers, mesh_data, color_map, params)
+    _progress.milestone(0.5)                 # R-017 : couleurs projetees ; reste l'ordonnancement
     groups_per_layer = _group_segments_by_color(colored_layers)
 
     # Construit le graphe (region, color) : sortie intermediaire exploitable

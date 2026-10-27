@@ -32,6 +32,7 @@ import numpy as np
 import trimesh
 
 from core import _cpp
+from core import progress as _progress
 from core.geometry_utils import _rodrigues_rotate_single, composed_rotation_angles_and_directions
 from core.mesh_types import (
     AdjustmentLogEntry,
@@ -805,7 +806,13 @@ def run(
         # quadratique (73 s sur 81 s de step10, 2026-10-06). Meme resultat.
         diagnostic_set = set(diagnostic_indices)
         pending_event_indices = {event.point_index for event in pending_events}
-        for point_index in problem_indices:
+        # R-017 : le nombre d'iterations n'est pas connu d'avance. La premiere occupe [0, 0,8] de la barre,
+        # chaque suivante la moitie de ce qui reste : la fraction est croissante et ne repose que sur des
+        # points deja traites.
+        lo = 0.0 if iteration == 1 else 1.0 - 0.2 * 0.5 ** (iteration - 2)
+        hi = 0.8 if iteration == 1 else 1.0 - 0.2 * 0.5 ** (iteration - 1)
+        for done, point_index in enumerate(problem_indices):
+            _progress.report(done, len(problem_indices), span=(lo, hi))
             is_diagnostic_only = point_index in diagnostic_set and point_index not in pending_event_indices
 
             # --- Niveau 1 : reorientation locale ------------------------------

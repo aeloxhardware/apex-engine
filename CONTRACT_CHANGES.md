@@ -17,6 +17,11 @@ Rien a faire pour l'interface qui lit deja le contrat 2 ; a connaitre :
   (R-007) et bloc chiffre `apex_block_begin v1` (R-010) portant `sliced` et `meta` (`kinematics` comprise),
   place apres l'en-tete en clair ; ecrit seulement si le paquet Python `cryptography` est present. Le
   marqueur `; apex_sliced = 1` reste.
+- Progression (C3, R-017) : des lignes `{"type":"step","slug","fraction"}` avec une fraction intermediaire
+  ]0, 1[ sont emises DANS chaque etape (croissantes, au plus une par pas de 1 % et par 100 ms, jamais
+  estimees). Etapes a boucle : couches (5, 5b), remplissage (6), collision (9), ajustement (10), export ;
+  etapes a phases indivisibles (maillage volumique, champ, cinematique inverse, ordonnancement) : quelques
+  jalons seulement. `overhang` et `segmentation` n'en ont pas (instantanees). L'interface n'a rien a changer.
 - `tests/vectors/kinematics_vectors.json` (R-008) : vecteurs de la cinematique pivot/pointe, generes par
   `scripts/gen_kinematics_vectors.py --check`.
 - Modele de tete : celui de l'interface (v4, 16 237 sommets) remplace la v5 du moteur (R-009), copie par

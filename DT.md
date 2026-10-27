@@ -13,7 +13,17 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 - 🟢 R-016 : le diagnostic de `SurfaceInconsistentError` porte `self_intersections` et `volume_pct`. ⬛ Reste une decision de l'utilisateur : TetraNet mailleur par defaut (sinon ce refus n'arrive jamais).
 - 🟢 R-020 : `MachineProfile.toolhead_id` (defaut `aetheris-4`), `file_io.mesh_loader.load_toolhead_by_id` (identifiant, jamais un chemin), `main.ensure_toolhead` pour les profils venus d'une requete.
 - 🟢 R-009 : modele de tete = celui de l'interface (v4), copie par `scripts/sync_from_ui.py --check` (SHA-256 `511c0807…`). Origine verifiee : la face de buse plate (rayon 1,1 mm) est dans le plan z = 0, centree sur l'origine ; X identique a la v5. Test `test_load_real_toolhead_glb_has_expected_extents` adapte (v4 : sommet le plus proche a 1,10 mm, hauteur 76,55 mm).
-- ♦️ **Effet mesure sur l'etape 9** (`APEX_USE_CPP=0`, defauts de `main`, evenements de collision de step9 avant ajustement, toutes resolues par step10, 0 non resolue) : l_shape **40 → 221**, 8 → 66 s ; l-triple **49 → 265**, 12 → 96 s. Cause : 20 527 points d'echantillonnage de la tete (spacing 5 mm) contre 1 540 avec la v5 (les sommets de la tete detaillee sont tous pris). death et turkish NON mesures (Python seul trop long ici, noyau natif absent sur ce poste). A decider apres mesure sur Windows avec le noyau : echantillonner la surface a pas fixe plutot que tous les sommets, ou une tete de collision simplifiee derivee de la v4.
+- 🟢 R-017 : `core/progress.py` (fractions croissantes, debit limite a 1 %/100 ms, `phase` pour les sous-etapes) ; boucles instrumentees : step5, 5b, 6 (Python et natif par tranches de 32+ couches, polylignes identiques a l'appel unique sur l_shape), 9 (natif par tranches de 5 000 points, evenements identiques), 10, export ; jalons : step1, 4, 7, 8. ⬛ Restent indivisibles faute de rappel dans le noyau : TetGen, CG de la methode de la chaleur, cinematique inverse native. Suite : 399 (Python) et 506 (natif, module compile sur ce poste Linux) passes.
+- ♦️ **Effet mesure de la tete v4 sur l'etape 9** (defauts de `main`, noyau natif compile sur ce poste Linux, evenements de collision de step9 AVANT ajustement ; step10 les resout tous : 0 non resolue sur les 5 modeles) :
+
+  | modele | evenements v5 → v4 | pipeline complet v5 → v4 |
+  |---|---:|---:|
+  | l_shape | 26 → 146 | 0,3 → 1,8 s |
+  | l-triple | 46 → 302 | 0,4 → 2,3 s |
+  | death | 395 → 1 420 | 38,9 → 50,5 s |
+  | turkish | 308 → 634 | 44,2 → 71,8 s |
+
+  En Python seul : l_shape 40 → 221 (8 → 66 s), l-triple 49 → 265 (12 → 96 s). Cause : 20 527 points d'echantillonnage de la tete (spacing 5 mm) contre 1 540 avec la v5 (tous les sommets de la tete detaillee sont pris). Plus d'evenements = tete plus fidele (ailettes, ventilateur) et plus de travail pour step10 ; ce n'est pas un defaut en soi, mais le temps (+30 a +60 %) et l'ecart avec les mesures des limites #64/#67 (v5) sont a decider : echantillonner la surface a pas fixe plutot que tous les sommets, ou une tete de collision simplifiee derivee de la v4. Matiere sans appui (step9b) et collisions finales apres step10 NON remesurees.
 
 ## 2026-10-27 — Retrait de FEM et de Bird termine ; collisions de tete mesurees
 - 🟢 Voie unique = chaleur. Retires : champ FEM directionnel, multibranche, parties planes, `Constraint[]`, options de step3/step5 liees, copie de recherche S4 Slicer (citation et licence gardees). Contrat d'interface passe a 2 (`CONTRACT_CHANGES.md`). Tests : 348 passes en Python pur, suite native verte (Linux, g++).

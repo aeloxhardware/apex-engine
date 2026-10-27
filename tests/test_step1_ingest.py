@@ -1204,7 +1204,6 @@ def test_inverted_fragment_next_to_large_body_is_still_dropped():
 
 def test_surface_inconsistent_diagnostic_carries_numbers_for_translation(monkeypatch):
     """R-016 : le diagnostic porte aussi `self_intersections` et `volume_pct` (texte reconstructible)."""
-    import types
     from pipeline import step1_ingest as s1
     box = trimesh.creation.box((10, 10, 10))
     fake = {"status": s1.TETRANET_STATUS_INCONSISTENT_SURFACE, "tets": 0, "volume_ratio": 0.42, "sign_conflicts": 1234,
@@ -1212,7 +1211,17 @@ def test_surface_inconsistent_diagnostic_carries_numbers_for_translation(monkeyp
             "surface_duplicate_faces": 0, "surface_vertices": np.asarray(box.vertices),
             "surface_faces": np.asarray(box.faces), "tet_vertices": np.zeros((0, 3)),
             "tetrahedra": np.zeros((0, 4), dtype=np.int64)}
-    monkeypatch.setattr(s1._cpp, "module", lambda: types.SimpleNamespace(tetranet_mesh=lambda *a: fake))
+    try:
+        real = s1._cpp.module()
+    except RuntimeError:   # noyau natif absent (APEX_USE_CPP=0)
+        real = None
+
+    class _Module:   # le noyau natif reste visible pour le reste de l'etape 1 quand il est actif
+        tetranet_mesh = staticmethod(lambda *a: fake)
+
+        def __getattr__(self, name):
+            return getattr(real, name)
+    monkeypatch.setattr(s1._cpp, "module", lambda: _Module())
     with pytest.raises(s1.SurfaceInconsistentError) as err:
         s1._ingest_with_tetranet(box, 1.0, None, False, False, 0.1)
     assert err.value.diagnostic["volume_pct"] == pytest.approx(42.0)
