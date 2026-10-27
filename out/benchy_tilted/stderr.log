@@ -1,0 +1,40 @@
+{"type": "step", "slug": "ingest", "fraction": 0.0}
+[main] Etape 1/10 - ingestion : out/benchy_tilted/in.stl
+[main]   watertight avant/apres reparation : True/True, 196099 tetraedres
+{"type": "step", "slug": "ingest", "fraction": 1.0}
+{"type": "step", "slug": "overhang", "fraction": 0.0}
+[main] Etape 2/10 - detection des surplombs
+[main]   167 faces en surplomb sur 1196
+{"type": "step", "slug": "overhang", "fraction": 1.0}
+{"type": "step", "slug": "segmentation", "fraction": 0.0}
+[main] Etape 3/10 - segmentation en regions
+[main]   27 region(s)
+{"type": "step", "slug": "segmentation", "fraction": 1.0}
+{"type": "step", "slug": "field", "fraction": 0.0}
+[main] Etape 4/10 - resolution du champ scalaire
+{"type": "step", "slug": "field", "fraction": 1.0}
+{"type": "step", "slug": "layers", "fraction": 0.0}
+[main] Etape 5/10 - extraction des couches courbes
+[main]   219 couche(s)
+{"type": "step", "slug": "layers", "fraction": 1.0}
+{"type": "step", "slug": "toolpath2d", "fraction": 0.0}
+[main] Etape 6/10 - remplissage 2D par couche
+{"type": "step", "slug": "toolpath2d", "fraction": 1.0}
+{"type": "step", "slug": "scheduling", "fraction": 0.0}
+[main] Etape 7/10 - couleur + ordonnancement
+[main]   219 passe(s) d'impression
+{"type": "step", "slug": "scheduling", "fraction": 1.0}
+{"type": "step", "slug": "machine_toolpath", "fraction": 0.0}
+[main] Etape 8/10 - trajectoire machine (resolution IK)
+[main]   211174 point(s) de trajectoire, 113912 orientation(s) inatteignable(s)
+{"type": "step", "slug": "machine_toolpath", "fraction": 1.0}
+{"type": "step", "slug": "collision", "fraction": 0.0}
+[main] Etape 9/10 - simulation de collision
+[main]   1494 collision(s) detectee(s) (nozzle_model_checked=True, chuck_checked=False)
+{"type": "step", "slug": "collision", "fraction": 1.0}
+{"type": "step", "slug": "adjustment", "fraction": 0.0}
+[main] Etape 10/10 - ajustement
+[main]   converged=True, 115406 ajustement(s), 0 collision(s) non resolue(s)
+{"type": "step", "slug": "adjustment", "fraction": 1.0}
+{"type": "step", "slug": "export", "fraction": 0.0}
+{"type": "step", "slug": "export", "fraction": 1.0}
