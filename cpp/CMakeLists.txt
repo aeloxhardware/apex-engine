@@ -39,6 +39,7 @@ pybind11_add_module(apex_core
   src/core/overhang.cpp
   src/core/segmentation.cpp
   src/core/scheduling.cpp
+  src/core/skin_check.cpp
   src/gpu/vk_context.cpp
   third_party/clipper2/src/clipper.engine.cpp
   third_party/clipper2/src/clipper.offset.cpp

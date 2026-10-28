@@ -27,6 +27,12 @@ Rien a faire pour l'interface qui lit deja le contrat 2 ; a connaitre :
   identifiant `ingest` : disparu de `main.py steps` et des lignes de progression. Ajout compatible pour une interface
   qui affiche la liste de `steps` ; une interface qui testait le slug `ingest` en dur doit le retirer. Le numero de
   contrat reste 2.
+- `params.skin` (objet ou `null`, defaut `null`, 2026-10-28) : lissage non-planaire sur la voie chaleur, opt-in
+  (`pipeline/skin/`). Champs : `thickness` (0,2 mm), `pattern` (`rectilinear` par defaut ; motifs de
+  `surface_paths.PATTERNS`), `head_tolerance_deg` (45), `trim_radius`, `max_iter`, `loop_sampling`,
+  `exclusion_rounds`, `plate_radius`, `face_sample`. Non mesure sur les quatre modeles : ne pas l'activer par defaut.
+  Le G-code porte alors des passes `; --- lissage ---` ; `GcodeParams.skin_thickness` s'applique (avant : par erreur
+  a tout point peint). Ajout compatible.
 - `tests/vectors/kinematics_vectors.json` (R-008) : vecteurs de la cinematique pivot/pointe, generes par
   `scripts/gen_kinematics_vectors.py --check`.
 - Modele de tete : celui de l'interface (v4, 16 237 sommets) remplace la v5 du moteur (R-009), copie par

@@ -42,6 +42,7 @@
 #include "apex/scheduling.hpp"
 #include "apex/support.hpp"
 #include "apex/tet_topology.hpp"
+#include "apex/skin_check.hpp"
 #include "apex/toolpath2d.hpp"
 #include "apex/types.hpp"
 #include "apex/internal/parallel_pool.hpp"
@@ -1834,4 +1835,59 @@ PYBIND11_MODULE(apex_core, m) {
         py::arg("vertices"), py::arg("faces"), py::arg("cell_size"), py::arg("snap_alpha") = 0.5,
         py::arg("skin_tolerance") = 0.05, py::arg("refuse_ratio") = 0.05, py::arg("threads") = 0u,
         "Maillage tetraedrique TetraNet : dict (maillage, surface nettoyee, diagnostic).");
+
+    py::class_<apex::SkinCheckIndex>(m, "SkinCheckIndex",
+                                     "Controle de collision du lissage Bird (grille incrementale).")
+        .def(py::init<double>(), py::arg("cell"))
+        .def("size", &apex::SkinCheckIndex::size)
+        .def(
+            "add_polylines",
+            [](apex::SkinCheckIndex& self, const DoubleArray& pts, const IntArray& starts, double step) {
+                if (pts.ndim() != 2 || pts.shape(1) != 3) throw std::invalid_argument("pts doit etre (N,3)");
+                py::gil_scoped_release release;
+                self.add_polylines(pts.data(), starts.data(), static_cast<std::int64_t>(starts.size()) - 1, step);
+            },
+            py::arg("pts"), py::arg("starts"), py::arg("step"))
+        .def(
+            "check_zone",
+            [](const apex::SkinCheckIndex& self, const DoubleArray& head, const DoubleArray& axes,
+               const DoubleArray& pts, const IntArray& starts, const DoubleArray& cosv, const DoubleArray& sinv,
+               const IntArray& tested, double plate_radius, double margin, double reach, double step) {
+                const auto n_tested = static_cast<py::ssize_t>(tested.size());
+                py::array_t<bool> plate(n_tested);
+                py::array_t<double> dist(n_tested);
+                {
+                    py::gil_scoped_release release;
+                    self.check_zone(head.data(), head.shape(0), axes.data(), axes.shape(0), pts.data(),
+                                    starts.data(), static_cast<std::int64_t>(starts.size()) - 1, cosv.data(),
+                                    sinv.data(), tested.data(), n_tested, plate_radius, margin, reach, step,
+                                    reinterpret_cast<std::uint8_t*>(plate.mutable_data()), dist.mutable_data());
+                }
+                return py::make_tuple(plate, dist);
+            },
+            py::arg("head"), py::arg("axes"), py::arg("pts"), py::arg("starts"), py::arg("cos"), py::arg("sin"),
+            py::arg("tested"), py::arg("plate_radius"), py::arg("margin"), py::arg("reach"), py::arg("step"))
+        .def(
+            "check_zone_parallel",
+            [](const apex::SkinCheckIndex& self, const DoubleArray& head, const DoubleArray& axes,
+               const DoubleArray& pts, const IntArray& starts, const DoubleArray& cosv, const DoubleArray& sinv,
+               const IntArray& tested, double plate_radius, double margin, double reach, double step, int threads) {
+                const auto n_tested = static_cast<py::ssize_t>(tested.size());
+                py::array_t<bool> plate(n_tested);
+                py::array_t<double> dist(n_tested);
+                {
+                    py::gil_scoped_release release;
+                    self.check_zone_parallel(head.data(), head.shape(0), axes.data(), axes.shape(0), pts.data(),
+                                             starts.data(), static_cast<std::int64_t>(starts.size()) - 1,
+                                             cosv.data(), sinv.data(), tested.data(), n_tested, plate_radius,
+                                             margin, reach, step,
+                                             reinterpret_cast<std::uint8_t*>(plate.mutable_data()),
+                                             dist.mutable_data(), threads);
+                }
+                return py::make_tuple(plate, dist);
+            },
+            py::arg("head"), py::arg("axes"), py::arg("pts"), py::arg("starts"), py::arg("cos"), py::arg("sin"),
+            py::arg("tested"), py::arg("plate_radius"), py::arg("margin"), py::arg("reach"), py::arg("step"),
+            py::arg("threads") = 0,
+            "Meme resultat que check_zone (au bit), points testes repartis sur `threads` fils (0 = coeurs).");
 }

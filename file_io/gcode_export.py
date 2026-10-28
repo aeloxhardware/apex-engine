@@ -156,7 +156,7 @@ def toolpath_arrays(toolpath) -> dict:
     return {"position": np.array([p.position for p in pts], dtype=float),
             "axis_angles": np.array([p.axis_angles for p in pts], dtype=float),
             "extrusion": np.array([p.extrusion for p in pts], dtype=float),
-            "is_skin": np.array([bool(p.color_id) for p in pts])}
+            "is_skin": np.array([bool(getattr(p, "is_skin", False)) for p in pts], dtype=bool)}
 
 
 def head_body_direction_rz(b_deg):

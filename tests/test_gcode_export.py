@@ -297,3 +297,12 @@ def test_export_writes_encrypted_header_block(machine):
     assert header["sliced"] is True
     assert header["meta"]["kinematics"]["pivot_to_tip"] == params.pivot_to_tip
     assert lines[:7][2:] == ["G21", "G90", "M82", "G92 E0", "M109 S195"]   # le bloc suit l'en-tete en clair
+
+
+def test_toolpath_arrays_flags_skin_explicitly_not_by_color():
+    """`is_skin` vient du champ du point ; une couleur peinte n'en fait plus un point de lissage."""
+    from core.mesh_types import ToolpathMachine, ToolpathPoint
+    from file_io.gcode_export import toolpath_arrays
+    pts = [ToolpathPoint(position=np.zeros(3), axis_angles=[0.0, 0.0], extrusion=1.0, feedrate=1.0, color_id=2),
+           ToolpathPoint(position=np.zeros(3), axis_angles=[0.0, 0.0], extrusion=1.0, feedrate=1.0, is_skin=True)]
+    assert toolpath_arrays(ToolpathMachine(points=pts))["is_skin"].tolist() == [False, True]

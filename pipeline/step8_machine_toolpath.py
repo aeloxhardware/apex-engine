@@ -959,7 +959,7 @@ def resolve_raw_points(
             )
         )
 
-    return ToolpathMachine(points=points), diagnostics
+    return ToolpathMachine(points=points, layer_ids=np.asarray(raw_points.layer_id, dtype=np.int64).copy()), diagnostics
 
 
 #: Issue du dernier appel a `_resolve_all_axis_angles` : `None` = chemin

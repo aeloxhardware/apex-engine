@@ -197,6 +197,18 @@ struct SupportCheckParams {
     int direction_candidate_count{26};
 };
 
+struct SkinParams {
+    double thickness{0.2};
+    std::string pattern{"rectilinear"};
+    double head_tolerance_deg{45.0};
+    double trim_radius{2.0};
+    int max_iter{8};
+    double loop_sampling{2.0};
+    int exclusion_rounds{3};
+    std::optional<double> plate_radius{std::nullopt};
+    std::optional<int> face_sample{std::nullopt};
+};
+
 struct PipelineParams {
     double resolution{1.5};
     bool allow_multi_mesh{true};
@@ -226,6 +238,7 @@ struct PipelineParams {
     std::optional<CollisionOrderParams> collision_order{std::nullopt};
     std::optional<SupportCheckParams> support_check{std::nullopt};
     bool reachable_tilt_from_machine{true};
+    std::optional<SkinParams> skin{std::nullopt};
 };
 
 struct GcodeParams {

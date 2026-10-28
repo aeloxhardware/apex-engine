@@ -33,6 +33,8 @@ from typing import Callable, Optional
 import numpy as np
 
 from core import progress as _core_progress
+from pipeline.skin import chain as skin_chain
+from pipeline.skin.inject import inject as skin_inject
 from core.mesh_types import (
     CollisionReport,
     ColorMap,
@@ -329,6 +331,10 @@ class PipelineParams:
     # Sans effet sur une machine a C libre (position_coupled_axes vide) ou si
     # radial_tilt_origin est deja renseigne.
     reachable_tilt_from_machine: bool = True
+    # Lissage non-planaire (voie chaleur) : `None` = desactive (defaut). Zones accessibles, creusement du corps sous
+    # la peau, trajectoires de surface et ordre (pipeline/skin/, chantier du 2026-10-28). Non mesure sur les quatre
+    # modeles : ne jamais l'activer par defaut sans mesure.
+    skin: Optional[skin_chain.SkinParams] = None
 
 
 @dataclass
@@ -547,7 +553,18 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
 
     _stage("toolpath2d")
     print("[main] Etape 6/10 - remplissage 2D par couche")
-    layers = toolpath2d_run(layers, mesh_data, overhang_map, _effective_toolpath2d_params(params))
+    skin_result = None
+    if params.skin is not None:
+        # lissage non-planaire (opt-in) : zones, creusement du corps, trajectoires de surface et ordre sont calcules
+        # ici, l'etape 6 y est jouee sur les couches creusees ; les passes de lissage sont inserees apres l'etape 8
+        skin_result = skin_chain.run(tet_mesh, scalar_field, layers, mesh_data, overhang_map,
+                                     _effective_toolpath2d_params(params), params.machine_profile, params.collision,
+                                     params.skin)
+        layers = skin_result.layers
+        print(f"[main]   lissage non-planaire : {len([z for z in skin_result.paths if z not in skin_result.excluded_zones])}"
+              f" zone(s) gardee(s), {len(skin_result.excluded_zones)} retiree(s), propre={skin_result.clean}")
+    else:
+        layers = toolpath2d_run(layers, mesh_data, overhang_map, _effective_toolpath2d_params(params))
 
     _stage("scheduling")
     print("[main] Etape 7/10 - couleur + ordonnancement")
@@ -568,6 +585,12 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
         f"[main]   {len(toolpath.points)} point(s) de trajectoire, "
         f"{len(step8_diagnostics)} orientation(s) inatteignable(s)"
     )
+
+    if skin_result is not None:
+        toolpath, _old_to_new = skin_inject(toolpath, skin_result.layers, skin_result.print_order["passes"],
+                                            params.machine_toolpath.default_feedrate)
+        step8_diagnostics = [replace(d, point_index=int(_old_to_new[d.point_index])) for d in step8_diagnostics]
+        print(f"[main]   {len(toolpath.points)} point(s) apres insertion du lissage")
 
     travel_routing_diagnostics: list[TravelRoutingDiagnostic] = []
     if params.travel_routing is not None:

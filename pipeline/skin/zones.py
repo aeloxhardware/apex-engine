@@ -48,6 +48,10 @@ class SkinZones:
     moment: np.ndarray          # (F,) rang de la couche porteuse
     deviation_deg: np.ndarray   # (F,) ecart tete / normale (pire de centre + sommets) ; 0 si non evalue
     evaluated: np.ndarray       # (F,) bool : faces dont le statut a ete calcule
+    angles: Optional[np.ndarray] = None       # (F, axes) angles de tete (buse vers -n)
+    last_access: Optional[np.ndarray] = None  # (F,) dernier moment accessible ; -1 = bloquee des le debut
+    phi: Optional[np.ndarray] = None          # (V,) phi aux sommets de la surface
+    isovalues: Optional[np.ndarray] = None
 
     @property
     def retained(self) -> np.ndarray:
@@ -195,6 +199,7 @@ def compute(
     reach = candidates[status[candidates] == STATUS_RETAINED]
     plate = np.zeros(len(reach), bool)
     last = np.full(len(reach), len(isovalues) - 1)
+    last_all = np.full(len(faces), -1)
     for s in range(0, len(reach), params.face_batch):
         ids = reach[s:s + params.face_batch]
         rot = rotation_matrices(angles[ids], axes)
@@ -204,9 +209,217 @@ def compute(
         low = np.min(np.where(np.isnan(phi), np.inf, phi), axis=1)
         ins = np.isfinite(low)
         last[s:s + len(ids)][ins] = np.searchsorted(isovalues, low[ins] - 1e-9, side="left") - 1
+    last_all[reach] = last
     status[reach[plate]] = STATUS_PLATE
     blocked = np.zeros(len(faces), bool)
     blocked[reach] = last < moment[reach]
     status[(status == STATUS_RETAINED) & blocked] = STATUS_OBJECT
     return SkinZones(vertices=surf_v, faces=faces, normals=normals, areas=areas, status=status, moment=moment,
-                     deviation_deg=deviation, evaluated=evaluated)
+                     deviation_deg=deviation, evaluated=evaluated, angles=angles, last_access=last_all,
+                     phi=surf_phi, isovalues=isovalues)
+
+
+# --- partition en morceaux, bandes de moments et zones (fin de P2 de la voie Bird, inchangee) -------------------
+from scipy.sparse import coo_matrix  # noqa: E402
+from scipy.sparse.csgraph import connected_components  # noqa: E402
+from pipeline.skin import surface_paths as sp  # noqa: E402
+
+EDGE_FACE_ANGLE_DEG = 150.0               # arete vive : angle ENTRE LES FACES en dessous
+MIN_ZONE_AREA = 4.0 * NOZZLE_WIDTH ** 2   # plus petit : pas de couche de surface
+MICRO_INRADIUS = 1.5 * NOZZLE_WIDTH       # micro-zone : plus grande distance au bord en dessous
+STATUS_SMALL, STATUS_MICRO = 5, 6
+STATUS_NAMES[5] = "zone trop petite"
+STATUS_NAMES[6] = "micro-zone non lissee"
+
+
+def layer_rank(values, isovalues):
+    """Rang de la couche qui porte la hauteur deformee `values`."""
+    return np.clip(np.searchsorted(isovalues, values - 1e-9, side="left"), 0, len(isovalues) - 1)
+
+
+def face_adjacency(faces):
+    edges = np.sort(np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]]), axis=1)
+    owner = np.tile(np.arange(len(faces)), 3)
+    order = np.lexsort((edges[:, 1], edges[:, 0]))
+    e, o = edges[order], owner[order]
+    same = np.all(e[1:] == e[:-1], axis=1)
+    a, b = o[:-1][same], o[1:][same]
+    n = len(faces)
+    return coo_matrix((np.ones(len(a) * 2), (np.r_[a, b], np.r_[b, a])), shape=(n, n)).tocsr()
+
+
+def minimal_stabbing(lo, hi):
+    """Plus petit ensemble de moments touchant tous les intervalles [lo, hi]
+    (glouton exact : extremite droite croissante)."""
+    points = []
+    for i in np.argsort(hi, kind="stable"):
+        if not points or points[-1] < lo[i]:
+            points.append(int(hi[i]))
+    return np.array(points)
+
+
+def split_along_level(vertices, faces, phi, face_mask, level):
+    """Coupe les faces de `face_mask` traversees par phi = level (phi lineaire
+    sur chaque face : coupe exacte). Sommets crees partages entre faces
+    voisines (cle = arete). Rend (vertices, faces, phi, parent) ; parent =
+    index de la face coupee d'origine pour chaque nouvelle face."""
+    s = phi[faces] - level
+    pos = s >= 0
+    cross = face_mask & (pos.any(axis=1) & ~pos.all(axis=1))
+    parent = np.arange(len(faces))
+    if not cross.any():
+        return vertices, faces, phi, parent
+    ci = np.flatnonzero(cross)
+    f, sp = faces[ci], pos[ci]
+    # sommet isole en premier (celui dont le signe differe des deux autres), orientation conservee
+    alone = np.where(sp.sum(axis=1) == 1, np.argmax(sp, axis=1), np.argmin(sp, axis=1))
+    roll = np.stack([alone, (alone + 1) % 3, (alone + 2) % 3], axis=1)
+    f = np.take_along_axis(f, roll, axis=1)
+    a, b, c = f[:, 0], f[:, 1], f[:, 2]
+    new_v, new_phi, key_index = [], [], {}
+
+    def edge_point(p, q):
+        out = np.empty(len(p), int)
+        for j, (u, w) in enumerate(zip(p, q)):
+            key = (min(u, w), max(u, w))
+            if key not in key_index:
+                su, sw = phi[u] - level, phi[w] - level
+                t = su / (su - sw)
+                if t <= 1e-9:
+                    key_index[key] = u
+                elif t >= 1 - 1e-9:
+                    key_index[key] = w
+                else:
+                    key_index[key] = len(vertices) + len(new_v)
+                    new_v.append(vertices[u] + t * (vertices[w] - vertices[u]))
+                    new_phi.append(level)
+            out[j] = key_index[key]
+        return out
+
+    pab, pac = edge_point(a, b), edge_point(a, c)
+    tri = np.concatenate([np.stack([a, pab, pac], 1), np.stack([pab, b, c], 1), np.stack([pab, c, pac], 1)])
+    par = np.tile(ci, 3)
+    good = (tri[:, 0] != tri[:, 1]) & (tri[:, 1] != tri[:, 2]) & (tri[:, 0] != tri[:, 2])
+    keep = np.flatnonzero(~cross)
+    vertices = np.vstack([vertices, np.array(new_v).reshape(-1, 3)])
+    phi = np.concatenate([phi, np.array(new_phi)])
+    return vertices, np.vstack([faces[keep], tri[good]]), phi, np.concatenate([keep, par[good]])
+
+
+
+
+def partition(z: SkinZones, edge_face_angle: float = EDGE_FACE_ANGLE_DEG, facet_smoothing=None,
+              micro_inradius: float = MICRO_INRADIUS, trim_points=None, trim_radius: float = 2.0) -> dict:
+    """Morceaux (aretes vives), bandes de moments en nombre minimal, frontieres lisses le long des isovaleurs, zones,
+    micro-zones : renvoie le dictionnaire que la voie Bird ecrivait dans `_skin_pass<k>.npz` (cles `vertices`,
+    `faces`, `status`, `moment`, `zone`, `zone_moment`, `normals`, `areas`, `isovalues`, `nozzle_width`, ...).
+    `trim_points` : points de collision cumules de P5 (rognage local), faces a moins de `trim_radius` retirees."""
+    isovalues = z.isovalues
+    surf_vertices, faces, surf_phi = z.vertices, z.faces, z.phi
+    normals, angles, status, moment, last = z.normals, z.angles, z.status.copy(), z.moment, z.last_access.copy()
+    n_faces = len(faces)
+    tri = surf_vertices[faces]
+    # faces non evaluees (echantillon) : jamais retenues
+    status[~z.evaluated & (status == STATUS_RETAINED)] = STATUS_UNREACHABLE
+    areas = z.areas
+    centers = tri.mean(axis=1)
+    if trim_points is not None:
+        trim_pts = np.asarray(trim_points, dtype=float).reshape(-1, 3)
+        if len(trim_pts):
+            tree = cKDTree(trim_pts)
+            near = np.minimum(tree.query(tri.reshape(-1, 3))[0].reshape(-1, 3).min(axis=1), tree.query(centers)[0])
+            status[(status == 0) & (near <= trim_radius)] = STATUS_OBJECT
+    return _partition_core(surf_vertices, faces, surf_phi, normals, angles, status, moment, last, areas, isovalues,
+                           edge_face_angle, facet_smoothing, micro_inradius)
+
+
+def _partition_core(surf_vertices, faces, surf_phi, normals, angles, status, moment, last, areas, isovalues,
+                    edge_face_angle, facet_smoothing, micro_inradius) -> dict:
+    n_faces = len(faces)
+    kept = np.flatnonzero(status == 0)
+    adj = face_adjacency(faces[kept]).tocoo()
+    cos_n = np.einsum("ij,ij->i", normals[kept][adj.row], normals[kept][adj.col])
+    deviation = np.degrees(np.arccos(np.clip(cos_n, -1, 1)))      # angle entre normales
+    cut_above = 180.0 - edge_face_angle
+    if facet_smoothing is not None:
+        cut_above = max(cut_above, facet_smoothing)
+    link = deviation <= cut_above
+    graph = coo_matrix((np.ones(link.sum()), (adj.row[link], adj.col[link])), shape=(len(kept),) * 2)
+    _n, piece_of_kept = connected_components(graph, directed=False)
+    piece = np.full(n_faces, -1)
+    piece[kept] = piece_of_kept
+    n_edge_pieces = piece_of_kept.max() + 1 if len(kept) else 0
+
+    band_moments = {}                       # morceau -> moments choisis (croissants)
+    levels_needed = {}                      # isovaleur -> faces (d'origine) a couper
+    for p in range(n_edge_pieces):
+        ids = np.flatnonzero(piece == p)
+        points = minimal_stabbing(moment[ids], last[ids])
+        band_moments[p] = points
+        for m in points[:-1]:
+            levels_needed.setdefault(float(isovalues[m]), []).append(ids)
+
+    # coupe exacte le long des lignes de niveau (frontieres lisses)
+    v, f, phi = surf_vertices, faces, surf_phi.copy()
+    origin = np.arange(n_faces)             # face d'origine de chaque face courante
+    for level in sorted(levels_needed):
+        mask_orig = np.zeros(n_faces, bool)
+        mask_orig[np.concatenate(levels_needed[level])] = True
+        v, f, phi, par = split_along_level(v, f, phi, mask_orig[origin], level)
+        origin = origin[par]
+
+    # attributs herites de la face d'origine ; moment porteur recalcule
+    status2, piece2, last2 = status[origin], piece[origin], last[origin]
+    moment2 = layer_rank(phi[f].max(axis=1), isovalues)
+    band = np.full(len(f), -1)
+    for p in range(n_edge_pieces):
+        sel = np.flatnonzero(piece2 == p)
+        pts = band_moments[p]
+        # plus petit moment choisi >= moment porteur ET <= dernier moment accessible
+        j = np.searchsorted(pts, moment2[sel], side="left")
+        ok = j < len(pts)
+        ok[ok] = pts[j[ok]] <= last2[sel][ok]
+        # repli (rare) : premier moment choisi valide pour la face
+        for q in np.flatnonzero(~ok):
+            valid = np.flatnonzero((pts >= moment2[sel[q]]) & (pts <= last2[sel[q]]))
+            j[q] = valid[0] if len(valid) else -1
+        band[sel] = np.where(j >= 0, j, -1)
+    # zones = composantes connexes de (morceau, bande)
+    tri2 = v[f]
+    areas2 = 0.5 * np.linalg.norm(np.cross(tri2[:, 1] - tri2[:, 0], tri2[:, 2] - tri2[:, 0]), axis=1)
+    zone = np.full(len(f), -1)
+    zone_moment = []
+    kept2 = np.flatnonzero((status2 == 0) & (band >= 0))
+    adj2 = face_adjacency(f[kept2]).tocoo()
+    same = (piece2[kept2][adj2.row] == piece2[kept2][adj2.col]) & (band[kept2][adj2.row] == band[kept2][adj2.col])
+    g2 = coo_matrix((np.ones(same.sum()), (adj2.row[same], adj2.col[same])), shape=(len(kept2),) * 2)
+    _n, comp = connected_components(g2, directed=False)
+    for c in range(comp.max() + 1 if len(kept2) else 0):
+        ids = kept2[comp == c]
+        if areas2[ids].sum() < MIN_ZONE_AREA:
+            status2[ids] = 5
+            continue
+        zone[ids] = len(zone_moment)
+        zone_moment.append(int(moment2[ids].max()))          # au plus tot
+    zone_moment = np.array(zone_moment, dtype=int)
+    # micro-zones : rattachees a une voisine si la fusion reste accessible,
+    # sinon NON lissees (decision utilisateur du 2026-09-28) -- statut 6, hors zone,
+    # donc ni creusees par P3 ni tracees par P4
+    zone, merged_moment, zone_merges, micro_left = sp.merge_micro_zones(
+        v, f, areas2, zone, zone_moment, last2, micro_inradius)
+    for z in micro_left:
+        status2[zone == z] = 6
+        zone[zone == z] = -1
+    live = sorted(set(zone[zone >= 0].tolist()))
+    remap = np.full(len(zone_moment), -1)
+    remap[live] = np.arange(len(live))
+    zone = np.where(zone >= 0, remap[np.maximum(zone, 0)], -1)
+    zone_moment = np.array([merged_moment[z] for z in live], dtype=int)
+    zone_merges = np.array([(remap[q] if remap[q] >= 0 else -1, zz, m) for zz, q, _a, _b, m, _l in zone_merges],
+                           dtype=int).reshape(-1, 3)
+    normals2, angles2 = normals[origin], angles[origin]
+    return dict(vertices=v, faces=f, status=status2, moment=moment2, zone=zone,
+                zone_moment=zone_moment, angles=angles2, normals=normals2, areas=areas2, isovalues=isovalues,
+                nozzle_width=NOZZLE_WIDTH, last_access=last2, origin=origin, edge_piece=piece2,
+                surface_vertices=surf_vertices, surface_faces=faces, surface_status=status,
+                edge_face_angle=edge_face_angle, zone_merges=zone_merges, micro_inradius=micro_inradius)

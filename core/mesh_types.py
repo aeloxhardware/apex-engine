@@ -390,6 +390,7 @@ class ToolpathPoint:
     extrusion: float
     feedrate: float
     color_id: Optional[int] = None
+    is_skin: bool = False           # couche de lissage non-planaire (epaisseur propre a l'export, `skin_thickness`)
 
 
 @dataclass
@@ -411,6 +412,9 @@ class Step8Diagnostic:
 class ToolpathMachine:
     """Trajectoire machine finale, prête pour simulation (étape 9) puis export G-code."""
     points: list[ToolpathPoint] = field(default_factory=list)
+    # Couche (`Layer.id`) de chaque point du CORPS, issue de l'étape 8 ; `None` hors étape 8 (tests, trajectoire
+    # relue). Sert à insérer le lissage non-planaire après la couche qui le porte (`pipeline/skin/inject.py`).
+    layer_ids: Optional[np.ndarray] = None
 
 
 @dataclass
