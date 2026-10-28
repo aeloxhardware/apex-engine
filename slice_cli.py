@@ -232,6 +232,7 @@ def slice_main(argv: list[str]) -> int:
         return refuse("error", EXIT_ERROR, f"{type(exc).__name__} : {exc}")
     finally:
         _core_progress.end()   # R-017 : jamais de rappel vers `log`, qui va etre ferme
+        _core_progress.set_stage_switcher(None)
 
     warnings = []
     if result.adjustment_report.unresolved_collisions:

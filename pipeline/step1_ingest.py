@@ -2614,7 +2614,7 @@ def run(
             etre reduit a un volume tetraedrisable meme apres reparation.
     """
     raw_mesh = _load_raw_mesh(mesh_path, allow_multi_mesh)
-    _progress.milestone(0.03)                # R-017 : fichier lu
+    _progress.milestone(0.5)                 # R-017 : fichier lu (etape « import »)
     if mesher == "tetranet":
         if junction_zones:
             print("[step1] TetraNet : zones de jonction non prises en charge, retour a TetGen")
@@ -2623,10 +2623,13 @@ def run(
         else:
             if near_platform_resolution is not None:
                 print("[step1] TetraNet : raffinement pres du plateau pas encore porte, ignore")
+            _progress.milestone(0.9)
+            _progress.switch_stage("tetrahedralization")   # TetraNet nettoie et maille en un appel (R-022)
             return _ingest_with_tetranet(raw_mesh, resolution, platform_z, place_on_platform,
                                          check_surface_coverage, tetranet_refuse_ratio)
     cleaned_mesh, report = _clean_and_repair(raw_mesh)
-    _progress.milestone(0.1)                 # surface nettoyee et reparee ; reste la tetraedrisation (TetGen, indivisible)
+    _progress.milestone(0.9)                 # surface nettoyee et reparee : fin de l'« import » (R-022)
+    _progress.switch_stage("tetrahedralization")   # reste le maillage volumique (TetGen, indivisible)
 
     if place_on_platform and len(cleaned_mesh.vertices):
         target_z = 0.0 if platform_z is None else float(platform_z)

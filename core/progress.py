@@ -24,6 +24,7 @@ MAX_FRACTION = 0.999
 
 _lock = threading.Lock()
 _sink: Optional[Callable[[float], None]] = None
+_switcher: Optional[Callable[[str], None]] = None
 _last_fraction = 0.0
 _last_time = 0.0
 _scale = (0.0, 1.0)
@@ -35,6 +36,22 @@ def begin(sink: Optional[Callable[[float], None]]) -> None:
     global _sink, _last_fraction, _last_time, _scale
     with _lock:
         _sink, _last_fraction, _last_time, _scale = sink, 0.0, -1e9, (0.0, 1.0)
+
+
+def set_stage_switcher(switcher: Optional[Callable[[str], None]]) -> None:
+    """Rappel `switcher(slug)` par lequel une etape peut en ouvrir une autre en cours de route (l'etape 1 se
+    partage en « import » et « tetrahedralization », R-022). `None` : `switch_stage` ne fait rien."""
+    global _switcher
+    with _lock:
+        _switcher = switcher
+
+
+def switch_stage(slug: str) -> None:
+    """Passe a l'etape `slug` (ferme l'etape courante a 1.0, ouvre `slug` a 0.0) si un orchestrateur l'a demande."""
+    with _lock:
+        switcher = _switcher
+    if switcher is not None:
+        switcher(slug)
 
 
 def end() -> None:

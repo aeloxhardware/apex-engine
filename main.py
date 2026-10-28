@@ -393,7 +393,8 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
 # §5.3, contrat C3) : (slug, libelle). La liste vient d'ici, l'interface ne l'invente pas.
 # `export` n'est pas une etape de `run_pipeline` : c'est `slice_cli` qui l'ajoute.
 PIPELINE_STEPS: tuple[tuple[str, str], ...] = (
-    ("ingest", "Lecture et maillage volumique du modele"),
+    ("import", "Import du modele"),
+    ("tetrahedralization", "Tetraedralisation du maillage triangule"),
     ("overhang", "Detection des surplombs"),
     ("segmentation", "Segmentation en regions"),
     ("field", "Calcul du champ de couches"),
@@ -429,6 +430,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
     """
     ensure_toolhead(params.machine_profile)
     check_model_fits_machine(mesh_path, params.machine_profile)
+    _core_progress.set_stage_switcher(None)   # jamais un rappel laisse par une execution interrompue
     _current: list = [None]
 
     def _stage(slug: Optional[str]) -> None:
@@ -480,7 +482,11 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
         )
         print(f"[main]   {len(junction_zones)} zone(s) de jonction detectee(s)")
 
-    _stage("ingest")
+    _stage("import")
+    # L'etape 1 passe d'« import » a « tetrahedralization » quand le maillage de surface est pret (R-022) ;
+    # le rappel n'agit que si « import » est l'etape courante (la passe legere des jonctions ne le declenche pas).
+    _core_progress.set_stage_switcher(
+        (lambda slug: _stage(slug) if _current[0] == "import" else None) if progress is not None else None)
     print(f"[main] Etape 1/10 - ingestion : {mesh_path}")
     mesh_data, tet_mesh, ingest_report = ingest_run(
         mesh_path,
@@ -494,6 +500,9 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
         mesher=params.mesher,
         tetranet_refuse_ratio=params.tetranet_refuse_ratio,
     )
+    _core_progress.set_stage_switcher(None)
+    if _current[0] == "import":      # jamais bascule (chemin sans jalon) : l'etape existe quand meme, de 0 a 1
+        _stage("tetrahedralization")
     print(
         f"[main]   watertight avant/apres reparation : "
         f"{ingest_report.was_watertight_initially}/{ingest_report.is_watertight_after_repair}, "

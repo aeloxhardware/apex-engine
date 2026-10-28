@@ -122,7 +122,11 @@ def test_slice_end_to_end(tmp_path, capsys):
         fractions = [e["fraction"] for e in steps if e["slug"] == slug]
         assert fractions == sorted(fractions), slug
     intermediate = {e["slug"] for e in steps if 0.0 < e["fraction"] < 1.0}
-    assert {"ingest", "field", "machine_toolpath", "export"} <= intermediate
+    assert {"import", "tetrahedralization", "field", "machine_toolpath", "export"} <= intermediate
+    # R-022 : « import » est fini (1.0) avant que « tetrahedralization » commence (0.0)
+    order = [(e["slug"], e["fraction"]) for e in steps if e["slug"] in ("import", "tetrahedralization")]
+    assert order.index(("import", 1.0)) < order.index(("tetrahedralization", 0.0))
+    assert "ingest" not in [s["slug"] for s in slice_cli._steps()]
 
     # aucun fichier temporaire ne reste
     assert sorted(os.listdir(out_dir)) == [os.path.basename(result["gcode"])]

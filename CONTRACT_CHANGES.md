@@ -22,6 +22,11 @@ Rien a faire pour l'interface qui lit deja le contrat 2 ; a connaitre :
   estimees). Etapes a boucle : couches (5, 5b), remplissage (6), collision (9), ajustement (10), export ;
   etapes a phases indivisibles (maillage volumique, champ, cinematique inverse, ordonnancement) : quelques
   jalons seulement. `overhang` et `segmentation` n'en ont pas (instantanees). L'interface n'a rien a changer.
+- Etapes (C3, R-022, 2026-10-28) : l'etape `ingest` est remplacee par `import` (lecture, nettoyage et reparation de la
+  surface) puis `tetrahedralization` (TetGen ou TetraNet, puis structures d'acceleration), chacune de 0 a 1. Ancien
+  identifiant `ingest` : disparu de `main.py steps` et des lignes de progression. Ajout compatible pour une interface
+  qui affiche la liste de `steps` ; une interface qui testait le slug `ingest` en dur doit le retirer. Le numero de
+  contrat reste 2.
 - `tests/vectors/kinematics_vectors.json` (R-008) : vecteurs de la cinematique pivot/pointe, generes par
   `scripts/gen_kinematics_vectors.py --check`.
 - Modele de tete : celui de l'interface (v4, 16 237 sommets) remplace la v5 du moteur (R-009), copie par
