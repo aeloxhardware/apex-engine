@@ -37,6 +37,8 @@ class SkinParams:
     exclusion_rounds: int = 3
     plate_radius: Optional[float] = None   # defaut : rayon du plateau de la machine, sinon 150 mm
     face_sample: Optional[int] = None      # n'evaluer qu'un echantillon de faces (mesure) ; None = toutes
+    head_sample_spacing: float = 5.0       # echantillonnage de la tete pour l'accessibilite P2 (mm) ; P5 verifie tout apres
+    workers: Optional[int] = None          # processus du calcul d'accessibilite (None = coeurs, 8 au plus)
 
 
 @dataclass
@@ -96,7 +98,9 @@ def run(
     body_uncarved = body_from_layers(filled)
     isovalues = np.sort(np.unique([l.isovalue for l in layers]))
     z = timed("P2 accessibilite", zones.compute, tet_mesh, scalar_field, isovalues, machine, sim,
-              zones.SkinZoneParams(head_tolerance_deg=params.head_tolerance_deg), params.face_sample)
+              zones.SkinZoneParams(head_tolerance_deg=params.head_tolerance_deg,
+                                   head_sample_spacing=params.head_sample_spacing),
+              params.face_sample, surface=(mesh_data.vertices, mesh_data.faces), workers=params.workers)
     loop_sim = replace(sim, path_sampling_step=params.loop_sampling)
     full_sim = replace(sim, path_sampling_step=0.0)
     trim: list = []

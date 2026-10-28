@@ -120,10 +120,16 @@ def rotation_matrices(angles_deg: np.ndarray, axes) -> np.ndarray:
     return total
 
 
-def surface_mesh(tet_mesh: TetMesh, solid: PrintedSolid, max_edge: float):
-    """Surface du volume re-decoupee a `max_edge`, normales sortantes : (vertices, faces, normals, areas, centers)."""
-    verts = tet_mesh.tet_vertices
-    surf_v, faces = trimesh.remesh.subdivide_to_size(verts, boundary_faces(tet_mesh.tetrahedra), max_edge)
+def surface_mesh(tet_mesh: TetMesh, solid: PrintedSolid, max_edge: float, surface=None):
+    """Surface du volume re-decoupee a `max_edge`, normales sortantes : (vertices, faces, normals, areas, centers).
+    `surface` : (vertices, faces) de la surface d'origine (`MeshData`) ; sinon la frontiere des tetraedres, bien plus
+    fine pres du plateau (raffinement local) donc beaucoup plus de faces a evaluer."""
+    if surface is not None:
+        surf_v, faces = trimesh.remesh.subdivide_to_size(np.asarray(surface[0], dtype=float),
+                                                        np.asarray(surface[1], dtype=np.int64), max_edge)
+    else:
+        surf_v, faces = trimesh.remesh.subdivide_to_size(tet_mesh.tet_vertices, boundary_faces(tet_mesh.tetrahedra),
+                                                        max_edge)
     tri = surf_v[faces]
     cross = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
     areas = 0.5 * np.linalg.norm(cross, axis=1)
@@ -136,6 +142,43 @@ def surface_mesh(tet_mesh: TetMesh, solid: PrintedSolid, max_edge: float):
     return surf_v, faces, normals, areas, centers
 
 
+_ACCESS: dict = {}
+
+
+def _access_chunk(ids: np.ndarray):
+    a = _ACCESS
+    plate = np.zeros(len(ids), bool)
+    last = np.full(len(ids), len(a["isovalues"]) - 1)
+    for s in range(0, len(ids), a["batch"]):
+        part = ids[s:s + a["batch"]]
+        rot = rotation_matrices(a["angles"][part], a["axes"])
+        pts = np.einsum("fij,pj->fpi", rot, a["head"]) + a["centers"][part][:, None, :]
+        plate[s:s + len(part)] = (pts[:, :, 2] < a["margin"]).any(axis=1)
+        phi = a["solid"].phi_at(pts.reshape(-1, 3)).reshape(len(part), -1)
+        low = np.min(np.where(np.isnan(phi), np.inf, phi), axis=1)
+        ins = np.isfinite(low)
+        last[s:s + len(part)][ins] = np.searchsorted(a["isovalues"], low[ins] - 1e-9, side="left") - 1
+    return plate, last
+
+
+def _last_accessible(head, centers, angles, axes, solid, isovalues, face_ids, margin, batch, workers):
+    """(plateau, dernier moment accessible) par face de `face_ids` : la tete posee sur la face, buse vers -n, ne doit
+    ni entrer dans le plateau ni, tant que la face n'est pas portee, dans la piece. Faces independantes : reparties
+    sur des processus (fork ; la memoire est partagee, rien n'est copie)."""
+    import os
+    _ACCESS.update(head=head, centers=centers, angles=angles, axes=axes, solid=solid, isovalues=isovalues,
+                   margin=margin, batch=batch)
+    workers = workers if workers is not None else max(1, min(8, (os.cpu_count() or 2)))
+    if workers <= 1 or len(face_ids) < 4 * batch or not hasattr(os, "fork"):
+        return _access_chunk(face_ids)
+    from concurrent.futures import ProcessPoolExecutor
+    import multiprocessing
+    chunks = np.array_split(face_ids, workers * 4)
+    with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("fork")) as pool:
+        parts = list(pool.map(_access_chunk, chunks))
+    return np.concatenate([p for p, _l in parts]), np.concatenate([l for _p, l in parts])
+
+
 def compute(
     tet_mesh: TetMesh,
     scalar_field: ScalarField,
@@ -145,6 +188,8 @@ def compute(
     params: Optional[SkinZoneParams] = None,
     face_sample: Optional[int] = None,
     seed: int = 0,
+    surface=None,
+    workers: Optional[int] = None,
 ) -> SkinZones:
     """Statut de chaque face de la surface. `face_sample` : n'evaluer qu'un echantillon (graine fixe) de faces
     hors plateau ; les autres gardent `evaluated=False` et le statut 1 (jamais retenues)."""
@@ -152,7 +197,7 @@ def compute(
     verts = tet_mesh.tet_vertices
     isovalues = np.sort(np.unique(np.asarray(isovalues, dtype=float)))
     solid = PrintedSolid(verts, tet_mesh.tetrahedra, scalar_field.values)
-    surf_v, faces, normals, areas, centers = surface_mesh(tet_mesh, solid, params.max_edge)
+    surf_v, faces, normals, areas, centers = surface_mesh(tet_mesh, solid, params.max_edge, surface)
 
     solid.tolerance = -1e-6                  # sommets de surface : sur la frontiere
     surf_phi = solid.phi_at(surf_v)
@@ -197,18 +242,9 @@ def compute(
     hn = machine.nozzle_model.face_normals[tid]
     head = np.vstack([head, head + sim.safety_margin * hn, head - sim.safety_margin * hn])   # marge de securite
     reach = candidates[status[candidates] == STATUS_RETAINED]
-    plate = np.zeros(len(reach), bool)
-    last = np.full(len(reach), len(isovalues) - 1)
     last_all = np.full(len(faces), -1)
-    for s in range(0, len(reach), params.face_batch):
-        ids = reach[s:s + params.face_batch]
-        rot = rotation_matrices(angles[ids], axes)
-        pts = np.einsum("fij,pj->fpi", rot, head) + centers[ids][:, None, :]
-        plate[s:s + len(ids)] = (pts[:, :, 2] < sim.safety_margin).any(axis=1)
-        phi = solid.phi_at(pts.reshape(-1, 3)).reshape(len(ids), -1)
-        low = np.min(np.where(np.isnan(phi), np.inf, phi), axis=1)
-        ins = np.isfinite(low)
-        last[s:s + len(ids)][ins] = np.searchsorted(isovalues, low[ins] - 1e-9, side="left") - 1
+    plate, last = _last_accessible(head, centers, angles, axes, solid, isovalues, reach, sim.safety_margin,
+                                   params.face_batch, workers)
     last_all[reach] = last
     status[reach[plate]] = STATUS_PLATE
     blocked = np.zeros(len(faces), bool)
