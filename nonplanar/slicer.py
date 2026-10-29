@@ -14,12 +14,17 @@ import trimesh
 from . import heightfield as hf
 from . import layers as ly
 from . import toolpath as tp
+from .regions import mask_to_geometry
 
 
 @dataclass
 class SliceParams:
-    layer_height: float = 0.2
-    first_layer_height: float | None = None   # None : = layer_height
+    # Hauteurs de couche : plancher et plafond viennent du profil d'imprimante (donc de l'UX).
+    min_layer_height: float = ly.DEFAULT_MIN_LAYER
+    max_layer_height: float = ly.DEFAULT_MAX_LAYER
+    layer_height: float | None = None         # épaisseur nominale ; None : 0,2 (0,25 sans inter-couches)
+    first_layer_height: float | None = None   # None : 0,2 borné par plancher et plafond
+    intermediate_layers: bool = True          # inter-couches locales là où l'espacement dépasse le plafond
     grid_cell: float = 0.25
     toolpath: tp.ToolpathParams = field(default_factory=tp.ToolpathParams)
     filament_diameter: float = 1.75
@@ -38,7 +43,9 @@ class SliceParams:
 
 @dataclass
 class SliceReport:
-    layer_count: int
+    layer_count: int                  # couches principales
+    intermediate_layer_count: int
+    fraction_below_min: float         # part de la longueur extrudée sous le plancher
     thickness_min: float
     thickness_max: float
     slope_max_deg: float
@@ -65,7 +72,11 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
     mesh.apply_translation(off)
 
     field_ = hf.from_mesh(mesh, p.grid_cell)
-    stack = ly.build(field_, p.layer_height, p.first_layer_height)
+    stack = ly.build(field_, p.layer_height, p.first_layer_height, min_layer=p.min_layer_height,
+                     max_layer=p.max_layer_height, intermediate=p.intermediate_layers)
+    sequence = stack.sequence()
+    last_grid, split_grid = stack.last_grid(), stack.split_grid()
+    xs, ys = field_.xs, field_.ys
     n = stack.count
     w = p.toolpath.line_width
     fil_area = math.pi * (p.filament_diameter / 2) ** 2
@@ -82,6 +93,7 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
     retracted = False
     total_len = 0.0
     thick_min, thick_max = np.inf, 0.0
+    below_len = 0.0
 
     def emit_travel(dest: np.ndarray, zc: float) -> None:
         nonlocal cur, retracted
@@ -98,38 +110,59 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
             retracted = False
         cur = dest.copy()
 
-    for k in range(1, n + 1):
-        out.append(f"; <layer> {k}")
-        speed = p.first_layer_speed if k == 1 else p.print_speed
-        path = tp.layer_polylines(field_.footprint, k, n, p.toolpath)
+    for k, j in sequence:
+        mask = stack.active_mask(k, j, last_grid, split_grid)
+        region = field_.footprint.intersection(mask_to_geometry(xs, ys, mask))
+        if region.is_empty or region.area < 1e-3:
+            continue
+        gx, gy = np.meshgrid(xs, ys)
+        zg = (stack.z(k, gx.ravel(), gy.ravel()) if j == 0
+              else stack.z_sub(k, j, gx.ravel(), gy.ravel())).reshape(gx.shape)
+        solid_mask = ((field_.top - zg) < p.toolpath.solid_top_mm) | \
+            ((zg - field_.bottom) < p.toolpath.solid_bottom_mm)
+        solid_mask = np.where(np.isnan(field_.top), False, solid_mask) & mask
+        solid = field_.footprint.intersection(mask_to_geometry(xs, ys, solid_mask))
+        out.append(f"; <layer> {k}" + (f" intermediate {j}" if j else ""))
+        speed = p.first_layer_speed if (k == 1 and j == 0) else p.print_speed
+        zfun = (lambda x, y, k=k: stack.z(k, x, y)) if j == 0 else \
+            (lambda x, y, k=k, j=j: stack.z_sub(k, j, x, y))
+        tfun = (lambda x, y, k=k: stack.thickness(k, x, y)) if j == 0 else \
+            (lambda x, y, k=k, j=j: stack.thickness_sub(k, j, x, y))
+        path = tp.layer_polylines(region, solid, k * 100 + j, p.toolpath)
         for pl in path.polylines:
-            pts = tp.densify(pl.xy, stack, k, p.toolpath.max_segment)
+            pts = tp.densify(pl.xy, stack, k, p.toolpath.max_segment, j)
             if len(pts) < 2 or np.isnan(pts[:, 2]).any():
                 continue
             # Dégagement : plus haut point de la couche entre départ et arrivée, plus z_hop.
             if cur is not None:
                 line = np.linspace(cur[:2], pts[0, :2], 12)
-                zc = float(np.nanmax(stack.z(k, line[:, 0], line[:, 1]))) + p.z_hop
+                zc = max(float(np.nanmax(zfun(line[:, 0], line[:, 1]))), float(cur[2])) + p.z_hop
             else:
                 zc = float(pts[0, 2]) + p.z_hop
             emit_travel(pts[0], zc)
-            for a, b in zip(pts[:-1], pts[1:]):
-                seg = float(np.linalg.norm(b - a))
-                if seg < 1e-9:
-                    continue
-                mid = (a[:2] + b[:2]) / 2
-                t = float(stack.thickness(k, mid[0], mid[1]))
-                thick_min, thick_max = min(thick_min, t), max(thick_max, t)
-                vol = seg * float(_bead_area(np.array(t), w))
-                e += p.flow * vol / fil_area
-                total_len += seg
-                out.append(f"G1 X{b[0]:.3f} Y{b[1]:.3f} Z{b[2]:.3f} E{e:.5f} F{speed * 60:g}")
+            seg_v = np.diff(pts, axis=0)
+            seg_len = np.linalg.norm(seg_v, axis=1)
+            mids = (pts[:-1, :2] + pts[1:, :2]) / 2
+            t_all = tfun(mids[:, 0], mids[:, 1])
+            real = t_all > 1e-6
+            if real.any():
+                thick_min = min(thick_min, float(t_all[real].min()))
+                thick_max = max(thick_max, float(t_all[real].max()))
+                below_len += float(seg_len[real & (t_all < p.min_layer_height - 1e-6)].sum())
+            vols = seg_len * _bead_area(np.maximum(t_all, 0.0), w)
+            e_run = e + np.cumsum(p.flow * vols / fil_area)
+            total_len += float(seg_len.sum())
+            f_str = f"{speed * 60:g}"
+            for b_, e_ in zip(pts[1:], e_run):
+                out.append(f"G1 X{b_[0]:.3f} Y{b_[1]:.3f} Z{b_[2]:.3f} E{e_:.5f} F{f_str}")
+            e = float(e_run[-1])
             cur = pts[-1].copy()
     out.append(f"G1 Z{(cur[2] if cur is not None else 0) + 5:.3f} F{p.travel_speed * 60:g}")
     out.append("M104 S0\nM140 S0")
     report = SliceReport(
-        layer_count=n, thickness_min=float(thick_min), thickness_max=float(thick_max),
-        slope_max_deg=ly.max_slope_deg(field_, n, n, stack.first_layer), extruded_length=total_len,
+        layer_count=n, intermediate_layer_count=len(sequence) - n,
+        fraction_below_min=below_len / total_len if total_len else 0.0, thickness_min=float(thick_min), thickness_max=float(thick_max),
+        slope_max_deg=ly.max_slope_deg(field_, stack, stack.count), extruded_length=total_len,
         filament_length=e, offset=(float(off[0]), float(off[1]), float(off[2])),
     )
     return "\n".join(out) + "\n", report

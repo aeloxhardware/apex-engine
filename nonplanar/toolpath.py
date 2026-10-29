@@ -19,8 +19,8 @@ class ToolpathParams:
     line_width: float = 0.4
     wall_count: int = 2
     infill_density: float = 0.2
-    solid_bottom_layers: int = 3
-    solid_top_layers: int = 4
+    solid_bottom_mm: float = 0.6      # profondeur remplie à 100 % depuis le dessous
+    solid_top_mm: float = 0.8         # idem sous le dessus (mesurée en z, pas en nombre de couches)
     max_segment: float = 0.5          # longueur maximale d'un segment 3D relevé
 
 
@@ -80,27 +80,34 @@ def _zigzag(region, spacing: float, angle_deg: float) -> list[np.ndarray]:
     return [np.vstack(c) for c in chains]
 
 
-def layer_polylines(footprint, k: int, count: int, params: ToolpathParams) -> LayerPath:
-    """Parois (de l'intérieur vers l'extérieur) puis remplissage, en 2D."""
+def layer_polylines(region, solid_region, index: int, params: ToolpathParams) -> LayerPath:
+    """Parois (de l'intérieur vers l'extérieur) puis remplissage, en 2D.
+
+    `region` : zone où la couche existe ; `solid_region` : partie de `region` à remplir à 100 %
+    (couches du bas et du haut de chaque colonne).
+    """
     w = params.line_width
-    solid = k <= params.solid_bottom_layers or k > count - params.solid_top_layers
-    path = LayerPath(k)
+    path = LayerPath(index)
     n_walls = params.wall_count
-    inner_region = footprint.buffer(-(n_walls * w))
-    density = 1.0 if solid else params.infill_density
-    spacing = w / max(min(density, 1.0), 1e-3)
-    angle = 45.0 if k % 2 else 135.0
-    for line in _zigzag(inner_region, spacing, angle):
-        path.polylines.append(Polyline(line, "infill"))
+    inner = region.buffer(-(n_walls * w))
+    angle = 45.0 if index % 2 else 135.0
+    if solid_region is None or solid_region.is_empty:
+        solid, sparse = inner.buffer(0).difference(inner.buffer(0)), inner
+    else:
+        solid = inner.intersection(solid_region.buffer(0))
+        sparse = inner.difference(solid)
+    sparse_spacing = w / max(min(params.infill_density, 1.0), 1e-3)
+    for geom, spacing in ((sparse, sparse_spacing), (solid, w)):
+        for line in _zigzag(geom, spacing, angle):
+            path.polylines.append(Polyline(line, "infill"))
     for i in range(n_walls - 1, -1, -1):
-        ring_geom = footprint.buffer(-(i + 0.5) * w)
-        for ring in _rings(ring_geom):
+        for ring in _rings(region.buffer(-(i + 0.5) * w)):
             path.polylines.append(Polyline(ring, "wall_outer" if i == 0 else "wall_inner"))
     return path
 
 
-def densify(xy: np.ndarray, stack: LayerStack, k: int, max_segment: float) -> np.ndarray:
-    """Relève (K,2) sur la surface S_k et redécoupe : retourne (M,3)."""
+def densify(xy: np.ndarray, stack: LayerStack, k: int, max_segment: float, j: int = 0) -> np.ndarray:
+    """Relève (K,2) sur la surface de la couche (k, j) et redécoupe : retourne (M,3)."""
     out = [xy[0:1]]
     for a, b in zip(xy[:-1], xy[1:]):
         length = float(np.linalg.norm(b - a))
@@ -108,5 +115,5 @@ def densify(xy: np.ndarray, stack: LayerStack, k: int, max_segment: float) -> np
         t = np.linspace(0, 1, m + 1)[1:, None]
         out.append(a + (b - a) * t)
     pts = np.vstack(out)
-    z = stack.z(k, pts[:, 0], pts[:, 1])
+    z = stack.z(k, pts[:, 0], pts[:, 1]) if j == 0 else stack.z_sub(k, j, pts[:, 0], pts[:, 1])
     return np.column_stack([pts, z])

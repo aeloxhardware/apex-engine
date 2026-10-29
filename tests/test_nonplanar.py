@@ -51,18 +51,34 @@ def test_heightfield_matches_analytic_surface():
     assert np.allclose(f.bottom, 0.0)
 
 
-def test_layers_nested_end_on_top_and_bounded_thickness():
+@pytest.mark.parametrize("inter", [False, True])
+def test_layers_nested_end_on_top_and_bounded_thickness(inter):
     f = from_mesh(wave_plate(), cell=0.25)
-    stack = build(f, 0.2)
-    x, y = np.array([3.0, 7.5, 12.0]), np.array([4.0, 9.0, 15.0])
+    stack = build(f, intermediate=inter)
+    xx, yy = np.meshgrid(f.xs[::6], f.ys[::6])
+    x, y = xx.ravel(), yy.ravel()
     prev = f.bottom_at(x, y)
-    for k in range(1, stack.count + 1):
-        z = stack.z(k, x, y)
-        assert (z > prev - 1e-9).all()                          # couches emboîtées
-        if k >= 2:
-            assert (z - prev <= 0.2 + 1e-9).all()               # épaisseur bornée
-        prev = z
-    assert np.allclose(prev, f.top_at(x, y))                    # la dernière couche EST le dessus
+    for k, j in stack.sequence():
+        z = stack.z(k, x, y) if j == 0 else stack.z_sub(k, j, x, y)
+        t = stack.thickness(k, x, y) if j == 0 else stack.thickness_sub(k, j, x, y)
+        active = stack.active_mask(k, j)[::6, ::6].ravel() & (t > 1e-6)
+        assert (z >= prev - 1e-9)[active].all()                 # couches emboîtées
+        assert (t[active] <= 0.25 + 1e-9).all()                 # plafond
+        assert (t[active] >= 0.1 - 1e-9).all()                  # plancher
+        prev = np.where(active, z, prev)
+    assert np.allclose(prev, f.top_at(x, y), atol=1e-6)         # la dernière couche EST le dessus
+
+
+def test_intermediate_layers_cover_only_thick_columns():
+    f = from_mesh(wave_plate(amp=2.5, mean=3.5), cell=0.25)
+    stack = build(f, intermediate=True)
+    subs = [(k, j) for k, j in stack.sequence() if j > 0]
+    assert subs, "colonnes hautes : il faut des inter-couches"
+    full = f.top.size - np.isnan(f.top).sum()
+    for k, j in subs:
+        assert stack.active_mask(k, j).sum() < full             # jamais toute la pièce
+    plain = build(f, intermediate=False)
+    assert all(j == 0 for _, j in plain.sequence())
 
 
 def test_overhang_is_refused():
@@ -89,7 +105,8 @@ def test_gcode_extrusion_monotone_and_z_inside_part():
             zmax = max(zmax, d["Z"])
             assert f.bottom_at(d["X"], d["Y"]) - 2e-3 <= d["Z"] <= f.top_at(d["X"], d["Y"]) + 2e-3  # G-code à 3 décimales
     assert zmax == pytest.approx(float(np.nanmax(f.top)), abs=0.06)
-    assert rep.thickness_max <= 0.2 + 1e-6
+    assert rep.thickness_max <= 0.25 + 1e-6
+    assert rep.thickness_min >= 0.1 - 1e-6
 
 
 def test_place_on_bed_moves_bottom_to_zero():
