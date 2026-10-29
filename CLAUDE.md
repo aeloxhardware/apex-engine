@@ -2134,7 +2134,7 @@ pour affichage/validation avant export G-code.
       la construction du contrôle des dégagements (0,5 s sur le Benchy) ne justifient aucun port pour la
       vitesse. Ils ne se justifient plus que par l'orchestrateur natif (bascule finale, R-014).
 
-84. **Second algorithme « Aeolis » (nom choisi par l'utilisateur le 2026-10-29) : tranchage non planaire « surface en hauteur » (paquet `nonplanar/`, v0).** Le paquet et l'identifiant `nonplanar-heightfield/1` gardent leur nom technique ; « Aeolis » est le nom affiché (`meta.algorithm_name`, `generator` = `Apex engine (Aeolis)`).
+84. **Second algorithme « Element Aeolis » (nom choisi par l'utilisateur le 2026-10-29) : tranchage non planaire « surface en hauteur » (paquet `nonplanar/`, v0).** Le paquet et l'identifiant `nonplanar-heightfield/1` gardent leur nom technique ; « Element Aeolis » est le nom affiché (`meta.algorithm_name`, `generator` = `Apex engine (Element Aeolis)`).
     Indépendant du pipeline 5 axes : couches `z = S_k(x,y)`, buse verticale, sans tétraèdres.
     Modèles de test de l'utilisateur dans `res/test_models/non_planar/` (5 plaques 50 × 50 mm,
     toutes des surfaces en hauteur) + sortie IceSL de la plaque 5 pour comparaison. Détail,
@@ -2142,6 +2142,13 @@ pour affichage/validation avant export G-code.
     IceSL) : `nonplanar/README.md`. Tests : `tests/test_nonplanar.py`. Non branché dans
     `main.py` ni dans le contrat (C1/C2) : à ouvrir en demande dans `apex/integration/REQUESTS.md`
     quand l'utilisateur décide de l'exposer.
+
+85. **Famille de noms des algorithmes de tranchage (décision de l'utilisateur, 2026-10-29) : toujours préfixés
+    « Element ».** **Element Aeolis** : non planaire, couches `z = S_k(x,y)` (fait, limite #84). **Element Aequor** :
+    hybride planaire / non planaire, pour un maximum d'imprimantes compatibles (futur, pas commencé).
+    **Element Arva** : planaire (futur, pas commencé). Le pipeline 5 axes reste « Apex ». Noms choisis, MARQUES NON
+    VÉRIFIÉES : chercher les antériorités avant tout usage public. Les identifiants techniques (`nonplanar/`,
+    `nonplanar-heightfield/1`) ne changent pas ; le nom affiché voyage dans `meta.algorithm_name` du bloc chiffré.
 
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 

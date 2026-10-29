@@ -1,4 +1,4 @@
-"""Aeolis : tranchage non planaire « surface en hauteur » (couches z = S_k(x,y), buse verticale).
+"""Element Aeolis : tranchage non planaire « surface en hauteur » (couches z = S_k(x,y), buse verticale).
 
 Second algorithme du moteur, indépendant du pipeline 5 axes (`pipeline/`) : il ne partage
 avec lui ni le champ scalaire ni la tétraédrisation. Voir `nonplanar/README.md`.

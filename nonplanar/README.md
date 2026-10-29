@@ -1,4 +1,4 @@
-# Aeolis (paquet `nonplanar/`) : tranchage non planaire « surface en hauteur »
+# Element Aeolis (paquet `nonplanar/`) : tranchage non planaire « surface en hauteur »
 
 Second algorithme du moteur, **indépendant du pipeline 5 axes** (`pipeline/`) : pas de
 tétraédrisation, pas de champ scalaire, buse verticale. Les couches sont des surfaces

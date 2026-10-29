@@ -73,8 +73,8 @@ def _header_meta(p: "SliceParams") -> dict:
     """Metadonnees du bloc d'en-tete chiffre (R-010) : la machine et sa cinematique, pour que l'apercu
     ne les devine pas d'apres les mots presents."""
     desc = kin.cartesian()
-    return {**common_meta("Apex engine (Aeolis)"), "algorithm": "nonplanar-heightfield/1",
-            "algorithm_name": "Aeolis",
+    return {**common_meta("Apex engine (Element Aeolis)"), "algorithm": "nonplanar-heightfield/1",
+            "algorithm_name": "Element Aeolis",
             "machine": desc["machine"], "kinematics_description": desc,
             "min_layer_height": p.min_layer_height, "max_layer_height": p.max_layer_height,
             "intermediate_layers": p.intermediate_layers}
