@@ -175,3 +175,18 @@ def test_every_motion_carries_the_six_axes_and_header_describes_kinematics():
     assert [a["letter"] for a in desc["axes"]] == list("XYZABC")
     assert {a["letter"] for a in desc["axes"] if a["type"] == "unused"} == set("ABC")
     json.dumps(desc)
+
+
+def test_walls_follow_only_the_part_outline_not_internal_region_boundaries():
+    from shapely.geometry import box
+    from nonplanar import toolpath as tp
+    outline = box(0, 0, 20, 20)
+    region = box(0, 0, 12, 20)                  # frontière interne en x = 12 (colonne terminée au-delà)
+    path = tp.layer_polylines(region, None, 3, tp.ToolpathParams(), outline)
+    walls = [pl.xy for pl in path.polylines if pl.kind.startswith("wall")]
+    assert walls
+    allw = np.vstack(walls)
+    assert (allw[:, 0] < 12 + 1e-5).all()                       # rien au-delà de la région
+    assert not ((abs(allw[:, 0] - 12) < 0.05) & (allw[:, 1] > 1) & (allw[:, 1] < 19)).any()   # pas de paroi sur x = 12
+    infill = np.vstack([pl.xy for pl in path.polylines if pl.kind == "infill"])
+    assert infill[:, 0].max() > 11.5                            # le remplissage va jusqu'à la frontière interne

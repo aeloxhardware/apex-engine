@@ -144,7 +144,17 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
             (lambda x, y, k=k, j=j: stack.z_sub(k, j, x, y))
         tfun = (lambda x, y, k=k: stack.thickness(k, x, y)) if j == 0 else \
             (lambda x, y, k=k, j=j: stack.thickness_sub(k, j, x, y))
-        path = tp.layer_polylines(region, solid, k * 100 + j, p.toolpath)
+        # L'angle du remplissage alterne d'une couche à l'autre ; compté depuis le HAUT de chaque
+        # colonne pour que la couche du dessus ait partout la même direction (sinon le dessus se
+        # compose de plaques d'orientations différentes là où les colonnes finissent à des rangs
+        # différents).
+        zones = None
+        if j == 0:
+            parity = np.where(np.isnan(last_grid), 0, (last_grid - k) % 2) == 0
+            even = field_.footprint.intersection(mask_to_geometry(xs, ys, parity & mask))
+            odd = field_.footprint.intersection(mask_to_geometry(xs, ys, ~parity & mask))
+            zones = [(even, 45.0), (odd, 135.0)]
+        path = tp.layer_polylines(region, solid, k * 100 + j, p.toolpath, field_.footprint, zones)
         for pl in path.polylines:
             pts = tp.densify(pl.xy, stack, k, p.toolpath.max_segment, j)
             if len(pts) < 2 or np.isnan(pts[:, 2]).any():

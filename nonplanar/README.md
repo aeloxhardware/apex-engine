@@ -31,6 +31,16 @@ volume intégré contre volume du maillage), jamais tranchés faux.
 4. `slicer` : G-code cartésien X Y Z E ; débit = longueur 3D × section locale du cordon (modèle
    « stade », épaisseur locale de la couche) ; dégagement au plus haut point de la surface.
 
+## Parois : seulement sur le contour de la pièce
+
+Une couche n'existe pas partout : une colonne terminée (la pièce y est trop basse pour le plancher
+d'épaisseur) ou une inter-couche s'arrête sur une frontière INTERNE à la pièce. Les parois ne
+suivent que le contour réel de la pièce ; aucune paroi ni retrait le long d'une frontière
+interne (v0 : anneaux concentriques visibles sur le dessus, signalés par l'utilisateur le
+2026-10-29 sur la plaque 6, aux creux et le long du bord). Le remplissage va jusqu'à la
+frontière ; la couche suivante recouvre. L'angle du remplissage est compté depuis le haut de chaque
+colonne, donc le dessus a partout la même direction.
+
 ## Collision de la vraie tête (`headcheck.py`, activée par défaut)
 
 La tête (GLB `aetheris-4`, buse verticale) est réduite à son enveloppe inférieure (point le plus
