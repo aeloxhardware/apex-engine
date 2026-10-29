@@ -15,6 +15,9 @@ Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le 
   `; apex_kinematics_json {...}` (JSON sur une ligne, ASCII). Chaine serie de liaisons (cote pieces / cote outil), un
   axe par lettre de XYZABC (`linear`, `rotary` ou `unused`), vecteur directeur, plage, sens positif, decalage outil,
   conventions (compensation du pivot, signes). La ligne `; apex_kinematics pivot_to_tip=...` (R-007) reste.
+  Champs ajoutes le meme jour : `part_origin` (point de la piece au pivot, axes a 0) et `conventions.rotation` (regle
+  unique : main droite autour de `axis`). Exemple d'une machine decrite hors du code :
+  `res/machines/corexy-tilting-bed.example.json` ; `kinematics_description.validate` refuse une description incoherente.
 
 ## Ajouts compatibles du 2026-10-27 (le numero reste 2)
 Rien a faire pour l'interface qui lit deja le contrat 2 ; a connaitre :

@@ -1,0 +1,20 @@
+{
+  "schema": "apex-kinematics/1",
+  "machine": "corexy-tilting-bed",
+  "units": {"linear": "mm", "angular": "deg"},
+  "word_order": "XYZABC",
+  "frame": "repère machine droit, Z vers le haut, tous les axes à 0",
+  "axes": [
+    {"letter": "X", "type": "linear", "side": "tool", "axis": [1,0,0], "range": [0,300], "positive": "la tête va vers +X"},
+    {"letter": "Y", "type": "linear", "side": "tool", "axis": [0,1,0], "range": [0,300], "positive": "la tête va vers +Y"},
+    {"letter": "Z", "type": "linear", "side": "tool", "axis": [0,0,1], "range": [0,300], "positive": "la tête monte"},
+    {"letter": "A", "type": "rotary", "side": "bed", "axis": [1,0,0], "origin": [150,150,20], "range": [-30,30], "positive": "le bord +Y du plateau monte"},
+    {"letter": "B", "type": "rotary", "side": "bed", "axis": [0,1,0], "origin": [150,150,20], "range": [-30,30], "positive": "le bord +X du plateau descend (repère déjà incliné par A)"},
+    {"letter": "C", "type": "unused", "note": "toujours 0"}
+  ],
+  "chain": {"bed": ["A", "B"], "tool": ["X", "Y", "Z"]},
+  "tool_offset": [0, 0, 0],
+  "part_origin": [150, 150, 20],
+  "coupling": {"type": "corexy", "handled_by": "firmware", "motors": {"M1": "X + Y", "M2": "X - Y"}},
+  "conventions": {"rotation": "main droite autour de axis, appliquee dans l'ordre de chain (de la machine vers la piece ou l'outil)"}
+}

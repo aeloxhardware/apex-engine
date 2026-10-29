@@ -17,6 +17,12 @@ TOUJOURS listés, un axe inutilisé a `type: "unused"`), dit :
   range         [min, max] en mm ou degrés ; null si illimité (rotation déroulée)
   positive      sens positif, en une phrase (jamais « le sens du moteur »)
 
+  Sens des rotations : RÈGLE UNIQUE, main droite autour de `axis` (`conventions.rotation`) ; `positive`
+  n'est qu'un commentaire lisible.
+
+`part_origin` : le point de la pièce qui coïncide avec le pivot quand tous les axes sont à 0 (sans lui,
+deux lecteurs peuvent placer la pièce différemment sur le plateau).
+
 L'ordre des axes dans chaque côté est l'ordre d'application depuis le repère machine : la pointe
 est obtenue en appliquant les liaisons du côté outil du repère machine vers la buse, puis
 `tool_offset`. `conventions` porte ce qui n'est pas géométrique (compensation du pivot, signes).
@@ -31,6 +37,7 @@ import json
 from typing import Optional
 
 SCHEMA = "apex-kinematics/1"
+ROTATION_RULE = "main droite autour de axis, appliquee dans l'ordre de chain (de la machine vers la piece ou l'outil)"
 JSON_KEY = "apex_kinematics_json"
 
 
@@ -48,7 +55,8 @@ def cartesian(travel: Optional[dict] = None) -> dict:
     return {"schema": SCHEMA, "machine": "cartesian", "units": {"linear": "mm", "angular": "deg"},
             "word_order": "XYZABC", "frame": "repère machine droit, Z vers le haut",
             "axes": axes, "chain": {"bed": ["Y"], "tool": ["X", "Z"]},
-            "tool_offset": [0, 0, 0], "coupling": None, "conventions": {}}
+            "tool_offset": [0, 0, 0], "part_origin": [0, 0, 0], "coupling": None,
+            "conventions": {"rotation": ROTATION_RULE}}
 
 
 def apex_polar(params, machine=None) -> dict:
@@ -84,8 +92,9 @@ def apex_polar(params, machine=None) -> dict:
             "word_order": "XYZABC",
             "frame": "repère de la pièce quand Y = 0 : +X = direction radiale de la tête, Z vers le haut",
             "axes": axes, "chain": {"bed": ["Y"], "tool": ["X", "Z", "B"]},
-            "tool_offset": [0, 0, -L], "coupling": None,
+            "tool_offset": [0, 0, -L], "part_origin": origin, "coupling": None,
             "conventions": {
+                "rotation": ROTATION_RULE,
                 "tool_offset_from": "pivot de B",
                 "pivot_compensation": "le G-code commande le PIVOT : X = R + L·sin(B), Z = z + L·(cos(B) − 1) ; "
                                       "à B = 0, X et Z sont ceux de la pointe",
@@ -95,8 +104,39 @@ def apex_polar(params, machine=None) -> dict:
                 "note": "Y est imposé par la position du point (la tête ne balaie qu'un demi-plan)"}}
 
 
+def validate(desc: dict) -> None:
+    """Refuse une description incohérente (`ValueError`) : six axes XYZABC exactement une fois, chaînes
+    qui ne citent que des axes utilisés du bon côté, vecteurs d'axe unitaires, pivot des axes rotatifs."""
+    if desc.get("schema") != SCHEMA:
+        raise ValueError(f"schéma inconnu : {desc.get('schema')!r}")
+    letters = [a["letter"] for a in desc["axes"]]
+    if letters != list("XYZABC"):
+        raise ValueError(f"les six axes XYZABC doivent figurer une fois, dans cet ordre : {letters}")
+    by = {a["letter"]: a for a in desc["axes"]}
+    for side in ("bed", "tool"):
+        for l in desc["chain"][side]:
+            if l not in by or by[l]["type"] == "unused" or by[l]["side"] != side:
+                raise ValueError(f"axe {l} cité côté {side} mais déclaré autrement")
+    used = {l for side in ("bed", "tool") for l in desc["chain"][side]}
+    for a in desc["axes"]:
+        if a["type"] == "unused":
+            if a["letter"] in used:
+                raise ValueError(f"axe inutilisé {a['letter']} présent dans une chaîne")
+            continue
+        if a["letter"] not in used:
+            raise ValueError(f"axe {a['letter']} déclaré mais absent des chaînes")
+        v = a["axis"]
+        if abs(sum(c * c for c in v) - 1.0) > 1e-9:
+            raise ValueError(f"axe {a['letter']} : vecteur non unitaire {v}")
+        if a["type"] == "rotary" and "origin" not in a:
+            raise ValueError(f"axe rotatif {a['letter']} sans `origin`")
+    if len(desc["part_origin"]) != 3 or len(desc["tool_offset"]) != 3:
+        raise ValueError("part_origin et tool_offset sont des vecteurs 3D")
+
+
 def header_lines(desc: dict) -> list[str]:
     """Lignes de commentaire : résumé lisible, puis le JSON complet sur UNE ligne."""
+    validate(desc)
     parts = []
     for a in desc["axes"]:
         if a["type"] == "unused":

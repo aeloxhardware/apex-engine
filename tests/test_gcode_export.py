@@ -323,3 +323,24 @@ def test_toolpath_arrays_flags_skin_explicitly_not_by_color():
     pts = [ToolpathPoint(position=np.zeros(3), axis_angles=[0.0, 0.0], extrusion=1.0, feedrate=1.0, color_id=2),
            ToolpathPoint(position=np.zeros(3), axis_angles=[0.0, 0.0], extrusion=1.0, feedrate=1.0, is_skin=True)]
     assert toolpath_arrays(ToolpathMachine(points=pts))["is_skin"].tolist() == [False, True]
+
+
+def test_kinematics_validate_and_example_corexy_tilting_bed():
+    import json
+    from pathlib import Path
+    from file_io import kinematics_description as kin
+    for desc in (kin.cartesian(), kin.apex_polar(GcodeParams())):
+        kin.validate(desc)
+        assert desc["part_origin"] is not None and "rotation" in desc["conventions"]
+    ex = json.loads((Path(__file__).resolve().parent.parent / "res" / "machines"
+                     / "corexy-tilting-bed.example.json").read_text(encoding="utf-8"))
+    kin.validate(ex)
+    assert ex["chain"]["bed"] == ["A", "B"] and ex["coupling"]["type"] == "corexy"
+    bad = json.loads(json.dumps(ex))
+    bad["chain"]["bed"] = ["B", "X"]                       # X est côté outil
+    with pytest.raises(ValueError):
+        kin.validate(bad)
+    bad = json.loads(json.dumps(ex))
+    bad["axes"][3]["axis"] = [2, 0, 0]                     # non unitaire
+    with pytest.raises(ValueError):
+        kin.validate(bad)
