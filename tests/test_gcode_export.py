@@ -155,6 +155,23 @@ def test_export_extrusion_and_retraction(machine):
     assert all(b >= a - params.retract_length - 1e-9 for a, b in zip(es, es[1:]))
 
 
+def test_every_move_writes_the_six_axes_and_header_describes_the_kinematics(machine):
+    from file_io import kinematics_description as kin
+    lines, _ = export_gcode(_toolpath(machine), machine, GcodeParams())
+    moves = [ln for ln in lines if ln.startswith("G00")]
+    assert moves
+    for ln in moves:
+        letters = "".join(w[0] for w in ln.split(";")[0].split()[1:] if w[0] in "XYZABC")
+        assert letters == "XYZABC", ln                                    # les six, dans l'ordre
+        assert " A0 " in ln and " C0 " in ln                              # inutilises : 0
+    desc = kin.parse_header(lines)
+    assert desc["machine"] == "apex-polar-4axis"
+    assert [a["letter"] for a in desc["axes"]] == list("XYZABC")
+    assert desc["conventions"]["pivot_to_tip"] == GcodeParams().pivot_to_tip
+    assert desc["chain"] == {"bed": ["Y"], "tool": ["X", "Z", "B"]}
+    assert parse_gcode(lines)                                              # le lecteur ignore A et C
+
+
 def test_parse_round_trip_positions(machine):
     tp = _toolpath(machine)
     params = GcodeParams(decimals=6, max_tip_deviation=None)

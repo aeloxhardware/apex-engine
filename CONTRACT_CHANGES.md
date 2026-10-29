@@ -4,6 +4,18 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajouts du 2026-10-29 (le numero reste 2, a confirmer par l'utilisateur)
+- G-code (C4, C5), tous les algorithmes de tranchage : **chaque mouvement ecrit les six axes `X Y Z A B C`**, dans cet
+  ordre, meme si l'un d'eux reste a 0 (decision de l'utilisateur). Machine Apex actuelle :
+  `G00 X.. Y.. Z.. A0 B.. C0 [E..] F..` (A et C valent 0). Tranchage non planaire (cartesien) :
+  `G1 X.. Y.. Z.. A0.000 B0.000 C0.000 E.. F..`. Un lecteur qui lit par lettre n'a rien a changer ; un lecteur a expression
+  reguliere stricte doit accepter `A` et `C` (le moteur : `parse_gcode`, deja tolerant).
+- G-code : description de la cinematique en tete de fichier, format `apex-kinematics/1` (`file_io/kinematics_description.py`) :
+  une ligne lisible `; kinematics <machine> (apex-kinematics/1) : X=... Y=... ...` puis une ligne
+  `; apex_kinematics_json {...}` (JSON sur une ligne, ASCII). Chaine serie de liaisons (cote pieces / cote outil), un
+  axe par lettre de XYZABC (`linear`, `rotary` ou `unused`), vecteur directeur, plage, sens positif, decalage outil,
+  conventions (compensation du pivot, signes). La ligne `; apex_kinematics pivot_to_tip=...` (R-007) reste.
+
 ## Ajouts compatibles du 2026-10-27 (le numero reste 2)
 Rien a faire pour l'interface qui lit deja le contrat 2 ; a connaitre :
 - `machine_profile.toolhead_id` (texte, defaut `"aetheris-4"`, R-020) : identifiant du modele de tete,

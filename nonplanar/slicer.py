@@ -14,6 +14,8 @@ import trimesh
 from . import heightfield as hf
 from . import layers as ly
 from . import toolpath as tp
+from file_io import kinematics_description as kin
+from file_io.gcode_axes import axes_words
 from . import headcheck as hc
 from .regions import mask_to_geometry
 
@@ -93,6 +95,7 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
         f"M140 S{p.bed_temp:g}", f"M104 S{p.nozzle_temp:g}", "G28",
         f"M190 S{p.bed_temp:g}", f"M109 S{p.nozzle_temp:g}", "G92 E0",
         f"; layers = {n}",
+        *kin.header_lines(kin.cartesian()),
     ]
     e = 0.0
     cur = None            # position courante (x, y, z)
@@ -104,6 +107,10 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
     head_rep = hc.HeadReport(checked=head_env is not None,
                              clearance_slope_deg=head_env.clearance_slope_deg if head_env else 0.0)
 
+    def axes6(x: float, y: float, z: float) -> str:
+        """Les six axes XYZABC (file_io/gcode_axes.py) ; A, B, C valent 0 sur une machine cartésienne."""
+        return " ".join(axes_words({"X": x, "Y": y, "Z": z}, lambda v: f"{v:.3f}"))
+
     def emit_travel(dest: np.ndarray, zc: float) -> None:
         nonlocal cur, retracted
         far = cur is None or np.linalg.norm(dest[:2] - cur[:2]) > 2.0
@@ -111,9 +118,9 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
             out.append(f"G1 E{e - p.retract_length:.5f} F{p.retract_speed * 60:g}")
             retracted = True
         if cur is not None and far:
-            out.append(f"G1 Z{zc:.3f} F{p.travel_speed * 60:g}")
-        out.append(f"G0 X{dest[0]:.3f} Y{dest[1]:.3f} F{p.travel_speed * 60:g}")
-        out.append(f"G1 Z{dest[2]:.3f} F{p.travel_speed * 60:g}")
+            out.append(f"G0 {axes6(cur[0], cur[1], zc)} F{p.travel_speed * 60:g}")
+            out.append(f"G0 {axes6(dest[0], dest[1], zc)} F{p.travel_speed * 60:g}")
+        out.append(f"G0 {axes6(dest[0], dest[1], dest[2])} F{p.travel_speed * 60:g}")
         if retracted:
             out.append(f"G1 E{e:.5f} F{p.retract_speed * 60:g}")
             retracted = False
@@ -170,10 +177,11 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
             total_len += float(seg_len.sum())
             f_str = f"{speed * 60:g}"
             for b_, e_ in zip(pts[1:], e_run):
-                out.append(f"G1 X{b_[0]:.3f} Y{b_[1]:.3f} Z{b_[2]:.3f} E{e_:.5f} F{f_str}")
+                out.append(f"G1 {axes6(b_[0], b_[1], b_[2])} E{e_:.5f} F{f_str}")
             e = float(e_run[-1])
             cur = pts[-1].copy()
-    out.append(f"G1 Z{(cur[2] if cur is not None else 0) + 5:.3f} F{p.travel_speed * 60:g}")
+    cx, cy, cz = (cur[0], cur[1], cur[2]) if cur is not None else (0.0, 0.0, 0.0)
+    out.append(f"G0 {axes6(cx, cy, cz + 5)} F{p.travel_speed * 60:g}")
     out.append("M104 S0\nM140 S0")
     if head_env is not None:
         out.insert(1, f"; head_collisions = {head_rep.colliding_points} / {head_rep.points} points, "

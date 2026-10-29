@@ -157,3 +157,21 @@ def test_head_report_in_slice():
     assert rep.head.checked and rep.head.points > 0
     assert rep.head.colliding_points == 0                    # ondulation douce
     assert 15 < rep.head.clearance_slope_deg < 45
+
+
+def test_every_motion_carries_the_six_axes_and_header_describes_kinematics():
+    import json
+    from file_io import kinematics_description as kin
+    gcode, _ = slice_mesh(wave_plate(), SliceParams(grid_cell=0.5, check_head=False))
+    lines = gcode.splitlines()
+    moves = [l for l in lines if l.startswith(("G0 ", "G1 ")) and any(f" {a}" in l for a in "XYZ")]
+    assert moves
+    for l in moves:
+        words = [w[0] for w in l.split(";")[0].split()[1:]]
+        assert "".join(w for w in words if w in "XYZABC") == "XYZABC", l   # tous, dans l'ordre
+        assert " A0.000 " in l + " " and " B0.000 " in l + " " and " C0.000 " in l + " "
+    desc = kin.parse_header(lines)
+    assert desc["machine"] == "cartesian"
+    assert [a["letter"] for a in desc["axes"]] == list("XYZABC")
+    assert {a["letter"] for a in desc["axes"] if a["type"] == "unused"} == set("ABC")
+    json.dumps(desc)

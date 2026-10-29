@@ -5,7 +5,8 @@ Ecrit de zero le 2026-09-30, sans reprendre les generateurs de formes fixes
 `scripts/gen_*_gcode.py` (decision de l'utilisateur). Seuls les FAITS machine
 releves dans ces scripts, verifies avec l'utilisateur, sont repris :
 
-- commande `G00 Y<C> X<R> Z<Z> B<B> E<e> F<f>` ; en-tete `G21 G90 M82 G92 E0
+- commande `G00 X<R> Y<C> Z<Z> A0 B<B> C0 E<e> F<f>` (les six axes XYZABC sont toujours écrits, A et C
+  valent 0 ; voir `file_io/gcode_axes.py`) ; en-tete `G21 G90 M82 G92 E0
   M109 S<t>` ;
 - firmware Y = angle polaire du point, `atan2(y, x)` en degres. Avec la
   convention d'Apex (`coupled_axis_angle`, +R = -Y a angles nuls), c'est
@@ -58,6 +59,8 @@ from typing import Callable, Optional
 import numpy as np
 
 from core import progress as _progress
+from file_io.gcode_axes import axes_words
+from file_io import kinematics_description as _kin
 
 
 @dataclass
@@ -467,6 +470,7 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
                # En clair tant que le moteur n'ecrit pas le bloc d'en-tete chiffre Apex
                # (slicer_ux/docs/APEX_HEADER_FORMAT.md), ou il rejoindra les metadonnees.
                "; apex_sliced = 1"]
+    out += _kin.header_lines(_kin.apex_polar(params, machine))   # description complète (apex-kinematics/1)
     out.append(kinematics_header_line(params))   # R-007 : la cinematique d'ecriture voyage avec le fichier
     out += _encrypted_header(params)              # R-010 : meme information dans le bloc chiffre (sans le paquet : rien)
     state = {"fw": None, "e": 0.0, "retracted": False}
@@ -586,7 +590,8 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
             feed = params.rotation_feed
         feed = min(max(feed, 1.0), params.max_feed)
         state["e"] += e_add
-        words = [f"X{fmt(fw[0])}", f"Y{fmt(fw[1])}", f"Z{fmt(fw[2])}", f"B{fmt(fw[3])}"]
+        # Six axes XYZABC sur chaque mouvement (file_io/gcode_axes.py) ; A et C restent à 0 sur cette machine.
+        words = axes_words({"X": fw[0], "Y": fw[1], "Z": fw[2], "B": fw[3]}, fmt)
         if e_add:
             words.append(f"E{fmt(state['e'])}")
         out.append("G00 " + " ".join(words) + f" F{fmt(feed)}" + (f" ; {comment}" if comment else ""))

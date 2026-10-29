@@ -115,7 +115,9 @@ std::string export_gcode_body(const double* pos, const double* ang, const double
         out += "G00 X"; fmt(fw.x, P.decimals, out);
         out += " Y"; fmt(fw.y, P.decimals, out);
         out += " Z"; fmt(fw.z, P.decimals, out);
+        out += " A0";                          // six axes XYZABC toujours ecrits (file_io/gcode_axes.py)
         out += " B"; fmt(fw.b, P.decimals, out);
+        out += " C0";
         if (e_add != 0.0) { out += " E"; fmt(e, P.decimals, out); }
         out += " F"; fmt(feed, P.decimals, out);
         if (!comment.empty()) { out += " ; "; out += comment; }
