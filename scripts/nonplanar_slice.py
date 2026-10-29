@@ -1,4 +1,4 @@
-"""Tranche un maillage « surface en hauteur » en couches non planaires : STL -> G-code.
+"""Aeolis : tranche un maillage « surface en hauteur » en couches non planaires : STL -> G-code.
 
     python scripts/nonplanar_slice.py modele.stl sortie.gcode [--layer-height 0.2] [--center 155,155]
 """

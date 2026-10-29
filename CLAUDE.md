@@ -2134,7 +2134,7 @@ pour affichage/validation avant export G-code.
       la construction du contrôle des dégagements (0,5 s sur le Benchy) ne justifient aucun port pour la
       vitesse. Ils ne se justifient plus que par l'orchestrateur natif (bascule finale, R-014).
 
-84. **Second algorithme : tranchage non planaire « surface en hauteur » (`nonplanar/`, 2026-10-29, v0).**
+84. **Second algorithme « Aeolis » (nom choisi par l'utilisateur le 2026-10-29) : tranchage non planaire « surface en hauteur » (paquet `nonplanar/`, v0).** Le paquet et l'identifiant `nonplanar-heightfield/1` gardent leur nom technique ; « Aeolis » est le nom affiché (`meta.algorithm_name`, `generator` = `Apex engine (Aeolis)`).
     Indépendant du pipeline 5 axes : couches `z = S_k(x,y)`, buse verticale, sans tétraèdres.
     Modèles de test de l'utilisateur dans `res/test_models/non_planar/` (5 plaques 50 × 50 mm,
     toutes des surfaces en hauteur) + sortie IceSL de la plaque 5 pour comparaison. Détail,

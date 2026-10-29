@@ -213,3 +213,4 @@ def test_signature_is_first_line_and_meta_carries_the_version():
         meta = apex_header.read_apex_header(lines)["meta"]
         assert meta["apex_version"] == apex_version() != "unknown"
         assert meta["algorithm"] == "nonplanar-heightfield/1"
+        assert meta["algorithm_name"] == "Aeolis" and meta["generator"] == "Apex engine (Aeolis)"
