@@ -144,7 +144,7 @@ def test_export_extrusion_and_retraction(machine):
     tp = _toolpath(machine)
     params = GcodeParams()
     lines, rep = export_gcode(tp, machine, params)
-    assert lines[:7][2:] == ["G21", "G90", "M82", "G92 E0", "M109 S195"]
+    assert lines[:8][3:] == ["G21", "G90", "M82", "G92 E0", "M109 S195"]
     area = np.pi * (params.filament_diameter / 2) ** 2
     expected = (10 + 10 + 10) * 0.2 * 0.4 / area
     assert rep.filament_mm == pytest.approx(expected)
@@ -317,7 +317,7 @@ def test_export_writes_encrypted_header_block(machine):
     header = apex_header.read_apex_header(lines)
     assert header["sliced"] is True
     assert header["meta"]["kinematics"]["pivot_to_tip"] == params.pivot_to_tip
-    assert lines[:7][2:] == ["G21", "G90", "M82", "G92 E0", "M109 S195"]   # le bloc suit l'en-tete en clair
+    assert lines[:8][3:] == ["G21", "G90", "M82", "G92 E0", "M109 S195"]   # le bloc suit l'en-tete en clair
 
 
 def test_toolpath_arrays_flags_skin_explicitly_not_by_color():
@@ -348,3 +348,15 @@ def test_kinematics_validate_and_example_corexy_tilting_bed():
     bad["axes"][3]["axis"] = [2, 0, 0]                     # non unitaire
     with pytest.raises(ValueError):
         kin.validate(bad)
+
+
+def test_signature_is_first_line_and_meta_carries_the_version(machine):
+    from file_io import apex_header
+    from file_io.apex_signature import SIGNATURE, apex_version, has_signature
+    lines, _ = export_gcode(_toolpath(machine), machine, GcodeParams())
+    assert lines[0] == SIGNATURE and has_signature(lines)
+    assert apex_version() != "unknown"
+    if apex_header.cipher_available():
+        meta = apex_header.read_apex_header(lines)["meta"]
+        assert meta["apex_version"] == apex_version()
+        assert meta["generator"] == "Apex engine" and meta["contract"] >= 2

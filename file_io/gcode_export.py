@@ -61,6 +61,7 @@ import numpy as np
 from core import progress as _progress
 from file_io.gcode_axes import axes_words
 from file_io import kinematics_description as _kin
+from file_io.apex_signature import SIGNATURE, common_meta
 
 
 @dataclass
@@ -183,7 +184,7 @@ def _encrypted_header(params, machine=None):
     desc = _kin.apex_polar(params, machine)
     # `machine` et `kinematics_description` : l'interface n'a plus a deviner le type de fichier d'apres
     # la presence d'un mot B ou C (tous les axes XYZABC sont ecrits, R-025).
-    meta = {"generator": "Apex engine", "contract": APEX_CONTRACT_VERSION,
+    meta = {**common_meta("Apex engine"),
             "machine": desc["machine"], "kinematics_description": desc,
             "kinematics": {"pivot_to_tip": float(params.pivot_to_tip), "b_sign": float(params.b_sign),
                            "tilt_sign": float(params.tilt_sign), "z_reference": params.z_reference},
@@ -475,6 +476,7 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
                # (slicer_ux/docs/APEX_HEADER_FORMAT.md), ou il rejoindra les metadonnees.
                "; apex_sliced = 1"]
     out += _kin.header_lines(_kin.apex_polar(params, machine))   # description complète (apex-kinematics/1)
+    out.insert(0, SIGNATURE)                      # ligne fixe, en clair : l'interface reconnait Apex (R-025)
     out.append(kinematics_header_line(params))   # R-007 : la cinematique d'ecriture voyage avec le fichier
     out += _encrypted_header(params, machine)              # R-010 : meme information dans le bloc chiffre (sans le paquet : rien)
     state = {"fw": None, "e": 0.0, "retracted": False}

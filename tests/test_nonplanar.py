@@ -201,3 +201,15 @@ def test_encrypted_header_names_the_machine():
     assert block["sliced"] is True
     assert block["meta"]["machine"] == "cartesian"
     assert block["meta"]["kinematics_description"]["axes"][0]["letter"] == "X"
+
+
+def test_signature_is_first_line_and_meta_carries_the_version():
+    from file_io import apex_header
+    from file_io.apex_signature import SIGNATURE, apex_version
+    gcode, _ = slice_mesh(wave_plate(), SliceParams(grid_cell=0.5, check_head=False))
+    lines = gcode.splitlines()
+    assert lines[0] == SIGNATURE
+    if apex_header.cipher_available():
+        meta = apex_header.read_apex_header(lines)["meta"]
+        assert meta["apex_version"] == apex_version() != "unknown"
+        assert meta["algorithm"] == "nonplanar-heightfield/1"

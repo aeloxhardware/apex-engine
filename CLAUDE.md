@@ -31,7 +31,7 @@ L'application Apex (moteur + interface) a **un seul numéro de version**, rangé
 commun **`aeloxhardware/apex`** : fichier `VERSION` (source de vérité) et `VERSIONS.md`
 (journal). **À chaque changement de version du moteur**, la session met aussi à jour ces deux
 fichiers dans `apex` (récupérer d'abord son dernier état : l'interface a pu changer le numéro
-entre-temps), et commence ses messages de commit par le numéro complet. Format du numéro,
+entre-temps), et commence ses messages de commit par le numéro complet. **Copie aussi le numéro dans `config/APEX_VERSION`** (lu par `file_io/apex_signature.py`, écrit dans `meta.apex_version` du bloc chiffré des G-code). Format du numéro,
 niveaux à monter et règle des conflits : `apex/integration/RULES.md`, §9. Le détail des
 changements du moteur reste dans le DT et les limites numérotées de ce fichier.
 

@@ -16,6 +16,7 @@ from . import layers as ly
 from . import toolpath as tp
 from file_io import kinematics_description as kin
 from file_io.apex_header import header_block_lines
+from file_io.apex_signature import SIGNATURE, common_meta
 from file_io.gcode_axes import axes_words
 from . import headcheck as hc
 from .regions import mask_to_geometry
@@ -71,10 +72,9 @@ def _bead_area(t: np.ndarray, w: float) -> np.ndarray:
 def _header_meta(p: "SliceParams") -> dict:
     """Metadonnees du bloc d'en-tete chiffre (R-010) : la machine et sa cinematique, pour que l'apercu
     ne les devine pas d'apres les mots presents."""
-    from config.schema import APEX_CONTRACT_VERSION
     desc = kin.cartesian()
-    return {"generator": "Apex engine (nonplanar)", "algorithm": "nonplanar-heightfield/1",
-            "contract": APEX_CONTRACT_VERSION, "machine": desc["machine"], "kinematics_description": desc,
+    return {**common_meta("Apex engine (nonplanar)"), "algorithm": "nonplanar-heightfield/1",
+            "machine": desc["machine"], "kinematics_description": desc,
             "min_layer_height": p.min_layer_height, "max_layer_height": p.max_layer_height,
             "intermediate_layers": p.intermediate_layers}
 
@@ -102,6 +102,7 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
     fil_area = math.pi * (p.filament_diameter / 2) ** 2
 
     out: list[str] = [
+        SIGNATURE,
         "; apex_nonplanar = 1",
         *header_block_lines(_header_meta(p)),
         "G21", "G90", "M82",
