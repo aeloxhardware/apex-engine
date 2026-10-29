@@ -190,3 +190,14 @@ def test_walls_follow_only_the_part_outline_not_internal_region_boundaries():
     assert not ((abs(allw[:, 0] - 12) < 0.05) & (allw[:, 1] > 1) & (allw[:, 1] < 19)).any()   # pas de paroi sur x = 12
     infill = np.vstack([pl.xy for pl in path.polylines if pl.kind == "infill"])
     assert infill[:, 0].max() > 11.5                            # le remplissage va jusqu'à la frontière interne
+
+
+def test_encrypted_header_names_the_machine():
+    from file_io.apex_header import cipher_available, read_apex_header
+    if not cipher_available():
+        pytest.skip("paquet cryptography absent : pas de bloc chiffre")
+    gcode, _ = slice_mesh(wave_plate(), SliceParams(grid_cell=0.5, check_head=False))
+    block = read_apex_header(gcode.splitlines())
+    assert block["sliced"] is True
+    assert block["meta"]["machine"] == "cartesian"
+    assert block["meta"]["kinematics_description"]["axes"][0]["letter"] == "X"

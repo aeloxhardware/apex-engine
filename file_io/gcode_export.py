@@ -176,11 +176,15 @@ def _z_offset(cz, z_reference):
     raise ValueError(f"z_reference inconnu : {z_reference!r} (attendu 'tip' ou 'pivot')")
 
 
-def _encrypted_header(params):
+def _encrypted_header(params, machine=None):
     """Bloc d'en-tete chiffre Apex (`sliced` + `meta`, R-010) ; `[]` si le chiffrement est indisponible."""
     from config.schema import APEX_CONTRACT_VERSION
     from file_io.apex_header import header_block_lines
+    desc = _kin.apex_polar(params, machine)
+    # `machine` et `kinematics_description` : l'interface n'a plus a deviner le type de fichier d'apres
+    # la presence d'un mot B ou C (tous les axes XYZABC sont ecrits, R-025).
     meta = {"generator": "Apex engine", "contract": APEX_CONTRACT_VERSION,
+            "machine": desc["machine"], "kinematics_description": desc,
             "kinematics": {"pivot_to_tip": float(params.pivot_to_tip), "b_sign": float(params.b_sign),
                            "tilt_sign": float(params.tilt_sign), "z_reference": params.z_reference},
             "layer_height": float(params.layer_height), "line_width": float(params.line_width),
@@ -472,7 +476,7 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
                "; apex_sliced = 1"]
     out += _kin.header_lines(_kin.apex_polar(params, machine))   # description complète (apex-kinematics/1)
     out.append(kinematics_header_line(params))   # R-007 : la cinematique d'ecriture voyage avec le fichier
-    out += _encrypted_header(params)              # R-010 : meme information dans le bloc chiffre (sans le paquet : rien)
+    out += _encrypted_header(params, machine)              # R-010 : meme information dans le bloc chiffre (sans le paquet : rien)
     state = {"fw": None, "e": 0.0, "retracted": False}
     guard = {"x": [], "y": [], "z": []}
 

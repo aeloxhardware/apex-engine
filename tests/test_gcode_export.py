@@ -170,6 +170,10 @@ def test_every_move_writes_the_six_axes_and_header_describes_the_kinematics(mach
     assert desc["conventions"]["pivot_to_tip"] == GcodeParams().pivot_to_tip
     assert desc["chain"] == {"bed": ["Y"], "tool": ["X", "Z", "B"]}
     assert parse_gcode(lines)                                              # le lecteur ignore A et C
+    from file_io.apex_header import cipher_available, read_apex_header
+    if cipher_available():                                                 # le bloc chiffre porte la machine
+        meta = read_apex_header(lines)["meta"]
+        assert meta["machine"] == "apex-polar-4axis" and meta["kinematics_description"]["axes"][1]["letter"] == "Y"
 
 
 def test_parse_round_trip_positions(machine):

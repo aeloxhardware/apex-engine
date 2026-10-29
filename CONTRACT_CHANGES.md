@@ -5,6 +5,10 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
 ## Ajouts du 2026-10-29 (le numero reste 2, a confirmer par l'utilisateur)
+- G-code (C4, C5), bloc d'en-tete chiffre (R-010) : `meta.machine` (`cartesian` ou `apex-polar-4axis`) et
+  `meta.kinematics_description` (le meme objet `apex-kinematics/1` que la ligne `; apex_kinematics_json`) sont ecrits par
+  les DEUX transcripteurs (polaire et non planaire, ce dernier n'ecrivait pas de bloc avant). Interface : lire ce bloc
+  pour choisir le type de fichier au lieu de deviner d'apres la presence d'un mot B ou C (R-025).
 - G-code (C4, C5), tous les algorithmes de tranchage : **chaque mouvement ecrit les six axes `X Y Z A B C`**, dans cet
   ordre, meme si l'un d'eux reste a 0 (decision de l'utilisateur). Machine Apex actuelle :
   `G00 X.. Y.. Z.. A0 B.. C0 [E..] F..` (A et C valent 0). Tranchage non planaire (cartesien) :
