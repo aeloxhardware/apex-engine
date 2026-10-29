@@ -31,6 +31,18 @@ volume intégré contre volume du maillage), jamais tranchés faux.
 4. `slicer` : G-code cartésien X Y Z E ; débit = longueur 3D × section locale du cordon (modèle
    « stade », épaisseur locale de la couche) ; dégagement au plus haut point de la surface.
 
+## Collision de la vraie tête (`headcheck.py`, activée par défaut)
+
+La tête (GLB `aetheris-4`, buse verticale) est réduite à son enveloppe inférieure (point le plus
+bas par cellule polaire). Pour chaque point de dépôt, on teste si un point de la tête passe sous
+la surface déjà imprimée (couche précédente ; la couche en cours n'est pas comptée, comme à
+l'étape 9). Rapport : `SliceReport.head` (points testés, en collision, pénétration max, pente
+d'un plan montant tolérée par la tête : 28°) et une ligne `; head_collisions` dans le G-code.
+Mesuré le 2026-10-29 sur les plaques : 0 collision sur 2, 3, 5 et 1_1 (50 000 à 60 000 points
+chacune), malgré des pentes de 38 à 71° au-dessus de 28° : ce sont des bosses courtes, le corps
+large de la tête étant à plus de 11 mm au-dessus de la pointe. Limite : pas de correction
+automatique (une collision est signalée, pas évitée) et pas d'inclinaison de la tête.
+
 ## Limites connues (mesurées le 2026-10-29)
 
 - (Corrigé le 2026-10-29) L'épaisseur était non bornée en v0 (0,018 mm sur la plaque 1_1) ;
@@ -40,8 +52,8 @@ volume intégré contre volume du maillage), jamais tranchés faux.
   sauts de z inférieurs à une épaisseur ; l'effet à l'impression n'est pas essayé.
 - Le plancher suppose plafond ≥ 2 × plancher (le reste d'une colonne est absorbé par sa
   dernière couche) ; non vérifié par une garde.
-- Pente du dessus : 70,8° sur la plaque 2 ; aucune limite de pente ni contrôle de collision
-  de la vraie tête n'est encore appliqué.
+- Pente du dessus : 70,8° sur la plaque 2, sans limite imposée (seule la collision de la tête
+  est contrôlée, voir plus haut).
 - **Ne reproduit pas la fonction de couches d'IceSL** (`scripts/compare_nonplanar_icesl.py`,
   plaque 5, `plate_5_icesl_reference.gcode`) : l'interpolation d'IceSL n'est pas linéaire en k
   (écart de z jusqu'à 0,4 mm en milieu de pile) ; sa dernière couche dépasse le dessus d'environ

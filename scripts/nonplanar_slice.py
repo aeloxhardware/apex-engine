@@ -32,7 +32,7 @@ def main() -> None:
     gcode, rep = slice_mesh(trimesh.load(a.stl), p)
     Path(a.gcode).write_text(gcode)
     print(f"{rep.layer_count} couches principales + {rep.intermediate_layer_count} inter-couches, épaisseur {rep.thickness_min:.3f}-{rep.thickness_max:.3f} mm, "
-          f"pente max du dessus {rep.slope_max_deg:.1f}°, filament {rep.filament_length:.0f} mm, "
+          f"pente max du dessus {rep.slope_max_deg:.1f}° (la tête en tolère {rep.head.clearance_slope_deg:.0f}° en plan incliné), collisions de la tête {rep.head.colliding_points}/{rep.head.points} (pénétration max {rep.head.max_penetration:.2f} mm), filament {rep.filament_length:.0f} mm, "
           f"{time.time() - t0:.1f} s")
 
 

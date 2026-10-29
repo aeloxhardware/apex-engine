@@ -120,3 +120,40 @@ def test_place_on_bed_moves_bottom_to_zero():
 def test_user_models_are_heightfields(name):
     f = from_mesh(trimesh.load(MODELS / f"{name}.stl"), cell=0.5)
     assert np.nanmax(f.thickness) > 0
+
+
+def _head_envelope():
+    from nonplanar.headcheck import load_envelope
+    return load_envelope()
+
+
+def test_head_clears_gentle_surface_but_hits_a_steep_wall():
+    """Marche de 14 mm au pied de laquelle la tête (large à partir de 10 mm de hauteur) touche ; loin : rien."""
+    from nonplanar.headcheck import check_points
+    env = _head_envelope()
+
+    class F:   # champ minimal : xs, ys, top, bottom
+        xs = np.linspace(0, 60, 61)
+        ys = np.linspace(0, 60, 61)
+        top = np.zeros((61, 61))
+        bottom = np.zeros((61, 61))
+
+    f = F()
+    f.top = np.where(f.xs[None, :] > 30, 15.2, 1.0) * np.ones((61, 1))
+    t = lambda x, y: np.full_like(x, 0.2)                # noqa: E731
+    # La buse dépose sur la partie basse (z = 1,2), 6 mm avant la marche (matière à 15,0).
+    hit, pen = check_points(env, f, lambda x, y: np.where(x > 30, 15.2, 1.2), t,
+                            np.array([[24.0, 30.0]]), np.array([1.2]))
+    assert hit == 1 and pen > 0.1
+    # Loin de la marche : rien.
+    hit, _ = check_points(env, f, lambda x, y: np.where(x > 30, 15.2, 1.2), t,
+                          np.array([[5.0, 30.0]]), np.array([1.2]))
+    assert hit == 0
+
+
+def test_head_report_in_slice():
+    m = wave_plate(amp=0.5, mean=2.0)
+    _, rep = slice_mesh(m, SliceParams(grid_cell=0.5))
+    assert rep.head.checked and rep.head.points > 0
+    assert rep.head.colliding_points == 0                    # ondulation douce
+    assert 15 < rep.head.clearance_slope_deg < 45

@@ -14,6 +14,7 @@ import trimesh
 from . import heightfield as hf
 from . import layers as ly
 from . import toolpath as tp
+from . import headcheck as hc
 from .regions import mask_to_geometry
 
 
@@ -24,6 +25,10 @@ class SliceParams:
     max_layer_height: float = ly.DEFAULT_MAX_LAYER
     layer_height: float | None = None         # épaisseur nominale ; None : 0,2 (0,25 sans inter-couches)
     first_layer_height: float | None = None   # None : 0,2 borné par plancher et plafond
+    check_head: bool = True                   # collision de la vraie tête (buse verticale)
+    head_model: str | None = None             # GLB de la tête ; None : aetheris-4
+    head_contact_clearance: float = 3.0       # zone de contact buse/cordon exclue du test (mm)
+    head_safety_margin: float = 0.0
     intermediate_layers: bool = True          # inter-couches locales là où l'espacement dépasse le plafond
     grid_cell: float = 0.25
     toolpath: tp.ToolpathParams = field(default_factory=tp.ToolpathParams)
@@ -52,6 +57,7 @@ class SliceReport:
     extruded_length: float
     filament_length: float
     offset: tuple[float, float, float]
+    head: hc.HeadReport = field(default_factory=hc.HeadReport)
 
 
 def _bead_area(t: np.ndarray, w: float) -> np.ndarray:
@@ -94,6 +100,9 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
     total_len = 0.0
     thick_min, thick_max = np.inf, 0.0
     below_len = 0.0
+    head_env = hc.load_envelope(p.head_model, p.head_contact_clearance) if p.check_head else None
+    head_rep = hc.HeadReport(checked=head_env is not None,
+                             clearance_slope_deg=head_env.clearance_slope_deg if head_env else 0.0)
 
     def emit_travel(dest: np.ndarray, zc: float) -> None:
         nonlocal cur, retracted
@@ -140,6 +149,13 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
             else:
                 zc = float(pts[0, 2]) + p.z_hop
             emit_travel(pts[0], zc)
+            if head_env is not None:
+                samp = pts[::3]
+                hit, pen = hc.check_points(head_env, field_, zfun, tfun, samp[:, :2], samp[:, 2],
+                                           p.head_safety_margin)
+                head_rep.points += len(samp)
+                head_rep.colliding_points += hit
+                head_rep.max_penetration = max(head_rep.max_penetration, pen)
             seg_v = np.diff(pts, axis=0)
             seg_len = np.linalg.norm(seg_v, axis=1)
             mids = (pts[:-1, :2] + pts[1:, :2]) / 2
@@ -159,10 +175,13 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
             cur = pts[-1].copy()
     out.append(f"G1 Z{(cur[2] if cur is not None else 0) + 5:.3f} F{p.travel_speed * 60:g}")
     out.append("M104 S0\nM140 S0")
+    if head_env is not None:
+        out.insert(1, f"; head_collisions = {head_rep.colliding_points} / {head_rep.points} points, "
+                      f"penetration max {head_rep.max_penetration:.2f} mm")
     report = SliceReport(
         layer_count=n, intermediate_layer_count=len(sequence) - n,
         fraction_below_min=below_len / total_len if total_len else 0.0, thickness_min=float(thick_min), thickness_max=float(thick_max),
-        slope_max_deg=ly.max_slope_deg(field_, stack, stack.count), extruded_length=total_len,
+        slope_max_deg=ly.max_slope_deg(field_, stack, stack.count), head=head_rep, extruded_length=total_len,
         filament_length=e, offset=(float(off[0]), float(off[1]), float(off[2])),
     )
     return "\n".join(out) + "\n", report
