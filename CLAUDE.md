@@ -2134,6 +2134,15 @@ pour affichage/validation avant export G-code.
       la construction du contrôle des dégagements (0,5 s sur le Benchy) ne justifient aucun port pour la
       vitesse. Ils ne se justifient plus que par l'orchestrateur natif (bascule finale, R-014).
 
+84. **Second algorithme : tranchage non planaire « surface en hauteur » (`nonplanar/`, 2026-10-29, v0).**
+    Indépendant du pipeline 5 axes : couches `z = S_k(x,y)`, buse verticale, sans tétraèdres.
+    Modèles de test de l'utilisateur dans `res/test_models/non_planar/` (5 plaques 50 × 50 mm,
+    toutes des surfaces en hauteur) + sortie IceSL de la plaque 5 pour comparaison. Détail,
+    méthode et limites mesurées (épaisseur minimale non bornée, pente du dessus, écart avec
+    IceSL) : `nonplanar/README.md`. Tests : `tests/test_nonplanar.py`. Non branché dans
+    `main.py` ni dans le contrat (C1/C2) : à ouvrir en demande dans `apex/integration/REQUESTS.md`
+    quand l'utilisateur décide de l'exposer.
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.
