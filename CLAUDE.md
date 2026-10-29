@@ -188,6 +188,14 @@ Liste de toutes les fonctionnalités discutées, au-delà du slicing plan classi
 
 ## Arborescence du projet
 
+> **Depuis le 2026-10-29, chaque algorithme de tranchage vit dans son dossier `element-xxxx/`** (décision de
+> l'utilisateur) : `element-ardor/` (pipeline principal 5 axes ; c'est l'ancien `pipeline/`), `element-aeolis/`
+> (non planaire ; ancien `nonplanar/`), `element-aequor/` et `element-arva/` (à venir, README seulement). Un nom à
+> tiret n'étant pas importable, **`pipeline/` et `nonplanar/` à la racine ne sont plus que des alias d'import** (un
+> `__init__.py` qui redirige `__path__`) : tous les `from pipeline.stepN_... import` et `python -m
+> pipeline._tetrahedralize_worker` restent valables. L'arborescence ci-dessous cite encore `pipeline/` : lire
+> `element-ardor/`. Le code partagé (`core/`, `file_io/`, `config/`, `cpp/`) reste à la racine.
+
 ```
 slicer_engine/
 ├── CLAUDE.md                        # ce fichier
@@ -2134,7 +2142,7 @@ pour affichage/validation avant export G-code.
       la construction du contrôle des dégagements (0,5 s sur le Benchy) ne justifient aucun port pour la
       vitesse. Ils ne se justifient plus que par l'orchestrateur natif (bascule finale, R-014).
 
-84. **Second algorithme « Element Aeolis » (nom choisi par l'utilisateur le 2026-10-29) : tranchage non planaire « surface en hauteur » (paquet `nonplanar/`, v0).** Le paquet et l'identifiant `nonplanar-heightfield/1` gardent leur nom technique ; « Element Aeolis » est le nom affiché (`meta.algorithm_name`, `generator` = `Apex engine (Element Aeolis)`).
+84. **Second algorithme « Element Aeolis » (nom choisi par l'utilisateur le 2026-10-29) : tranchage non planaire « surface en hauteur » (dossier `element-aeolis/`, alias d'import `nonplanar`, v0).** Le paquet et l'identifiant `nonplanar-heightfield/1` gardent leur nom technique ; « Element Aeolis » est le nom affiché (`meta.algorithm_name`, `generator` = `Apex engine (Element Aeolis)`).
     Indépendant du pipeline 5 axes : couches `z = S_k(x,y)`, buse verticale, sans tétraèdres.
     Modèles de test de l'utilisateur dans `res/test_models/non_planar/` (5 plaques 50 × 50 mm,
     toutes des surfaces en hauteur) + sortie IceSL de la plaque 5 pour comparaison. Détail,
@@ -2144,9 +2152,10 @@ pour affichage/validation avant export G-code.
     quand l'utilisateur décide de l'exposer.
 
 85. **Famille de noms des algorithmes de tranchage (décision de l'utilisateur, 2026-10-29) : toujours préfixés
-    « Element ».** **Element Aeolis** : non planaire, couches `z = S_k(x,y)` (fait, limite #84). **Element Aequor** :
+    « Element », un dossier `element-xxxx/` chacun.** **Element Ardor** : pipeline principal 5 axes par la méthode de la
+    chaleur (le feu ; dossier `element-ardor/`, fait). **Element Aeolis** : non planaire, couches `z = S_k(x,y)` (fait, limite #84). **Element Aequor** :
     hybride planaire / non planaire, pour un maximum d'imprimantes compatibles (futur, pas commencé).
-    **Element Arva** : planaire (futur, pas commencé). Le pipeline 5 axes reste « Apex ». Noms choisis, MARQUES NON
+    **Element Arva** : planaire (futur, pas commencé). « Apex » reste le nom de l'application complète (Apex Slicer), qui contient les quatre Elements (air, eau, terre, feu ; Aetheris-4, la machine, est l'éther). Noms choisis, MARQUES NON
     VÉRIFIÉES : chercher les antériorités avant tout usage public. Les identifiants techniques (`nonplanar/`,
     `nonplanar-heightfield/1`) ne changent pas ; le nom affiché voyage dans `meta.algorithm_name` du bloc chiffré.
 

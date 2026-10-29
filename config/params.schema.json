@@ -958,7 +958,7 @@
   },
   "SkinParams": {
    "additionalProperties": false,
-   "description": "SkinParams(thickness: 'float' = 0.2, pattern: 'str' = 'rectilinear', head_tolerance_deg: 'float' = 45.0, trim_radius: 'float' = 2.0, max_iter: 'int' = 8, loop_sampling: 'float' = 2.0, exclusion_rounds: 'int' = 3, plate_radius: 'Optional[float]' = None, face_sample: 'Optional[int]' = None)",
+   "description": "SkinParams(thickness: 'float' = 0.2, pattern: 'str' = 'rectilinear', head_tolerance_deg: 'float' = 45.0, trim_radius: 'float' = 2.0, max_iter: 'int' = 8, loop_sampling: 'float' = 2.0, exclusion_rounds: 'int' = 3, plate_radius: 'Optional[float]' = None, face_sample: 'Optional[int]' = None, head_sample_spacing: 'float' = 5.0, workers: 'Optional[int]' = None)",
    "properties": {
     "exclusion_rounds": {
      "default": 3,
@@ -974,6 +974,10 @@
       }
      ],
      "default": null
+    },
+    "head_sample_spacing": {
+     "default": 5.0,
+     "type": "number"
     },
     "head_tolerance_deg": {
      "default": 45.0,
@@ -1009,6 +1013,17 @@
     "trim_radius": {
      "default": 2.0,
      "type": "number"
+    },
+    "workers": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
     }
    },
    "type": "object"

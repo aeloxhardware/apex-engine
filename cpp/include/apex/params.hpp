@@ -207,6 +207,8 @@ struct SkinParams {
     int exclusion_rounds{3};
     std::optional<double> plate_radius{std::nullopt};
     std::optional<int> face_sample{std::nullopt};
+    double head_sample_spacing{5.0};
+    std::optional<int> workers{std::nullopt};
 };
 
 struct PipelineParams {
