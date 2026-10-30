@@ -66,40 +66,37 @@ class LayerStack:
             return np.ones_like(d)
         return np.maximum(1.0, np.ceil(d / self.max_layer - 1e-9))
 
-    def split_at(self, x, y) -> np.ndarray:
-        s1, d, last = self._column(self.field.bottom_at(x, y), self.field.top_at(x, y))
-        return self._split(d)
+    def sample(self, x, y) -> "Column":
+        """Colonnes aux points (x, y) : dessous, dessus et géométrie de couche, calculés UNE fois.
 
-    def last_layer(self, x, y) -> np.ndarray:
-        """Indice de la dernière couche active aux points (x, y)."""
-        s1, d, last = self._column(self.field.bottom_at(x, y), self.field.top_at(x, y))
-        return last
-
-    def z(self, k: int, x, y) -> np.ndarray:
-        """Hauteur de dépôt de la couche k aux points ; T au-delà de la dernière couche active."""
+        Tout ce qui dépend des mêmes points (hauteur, épaisseur, inter-couches de plusieurs couches)
+        passe par un `Column` plutôt que de réinterpoler la grille à chaque appel."""
         b = self.field.bottom_at(x, y)
         t = self.field.top_at(x, y)
         s1, d, last = self._column(b, t)
-        z = np.where(k >= last, t, s1 + (k - 1) * d)
-        return np.where(last <= 1, t, z) if k == 1 else z
+        return Column(self, b, t, s1, d, last)
+
+    def split_at(self, x, y) -> np.ndarray:
+        return self.sample(x, y).m
+
+    def last_layer(self, x, y) -> np.ndarray:
+        """Indice de la dernière couche active aux points (x, y)."""
+        return self.sample(x, y).last
+
+    def z(self, k: int, x, y) -> np.ndarray:
+        """Hauteur de dépôt de la couche k aux points ; T au-delà de la dernière couche active."""
+        return self.sample(x, y).z(k)
 
     def z_sub(self, k: int, j: int, x, y) -> np.ndarray:
         """Couche intermédiaire j (1..m−1) entre les couches principales k et k+1."""
-        m = self.split_at(x, y)
-        zk, zn = self.z(k, x, y), self.z(k + 1, x, y)
-        return zk + (j / m) * (zn - zk)
+        return self.sample(x, y).z_sub(k, j)
 
     def thickness(self, k: int, x, y) -> np.ndarray:
         """Épaisseur locale de la couche principale k (0 là où elle n'est plus active)."""
-        if k <= 1:
-            return self.z(1, x, y) - self.field.bottom_at(x, y)
-        zk, zp = self.z(k, x, y), self.z(k - 1, x, y)
-        m = self.split_at(x, y)
-        return (zk - zp) / m
+        return self.sample(x, y).thickness(k)
 
     def thickness_sub(self, k: int, j: int, x, y) -> np.ndarray:
-        m = self.split_at(x, y)
-        return (self.z(k + 1, x, y) - self.z(k, x, y)) / m
+        return self.sample(x, y).thickness_sub(k)
 
     def sequence(self) -> list[tuple[int, int]]:
         """Ordre de dépôt : (k, 0) principale, puis (k, j) intermédiaires de l'intervalle k→k+1."""
@@ -129,6 +126,41 @@ class LayerStack:
             return np.where(np.isnan(last), True, last >= k)
         split = self.split_grid() if split is None else split
         return np.where(np.isnan(last), True, (last >= k + 1) & (split > j))
+
+
+class Column:
+    """Géométrie des couches en un jeu de points : mêmes formules que `LayerStack`, sans réinterpoler."""
+
+    def __init__(self, stack: LayerStack, b, t, s1, d, last):
+        self.stack, self.b, self.t, self.s1, self.d, self.last = stack, b, t, s1, d, last
+        self.m = stack._split(d)               # couches par intervalle principal
+        self._z: dict[int, np.ndarray] = {}
+
+    def z(self, k: int) -> np.ndarray:
+        cached = self._z.get(k)
+        if cached is None:
+            z = np.where(k >= self.last, self.t, self.s1 + (k - 1) * self.d)
+            cached = np.where(self.last <= 1, self.t, z) if k == 1 else z
+            self._z[k] = cached
+        return cached
+
+    def z_sub(self, k: int, j: int) -> np.ndarray:
+        zk, zn = self.z(k), self.z(k + 1)
+        return zk + (j / self.m) * (zn - zk)
+
+    def thickness(self, k: int) -> np.ndarray:
+        if k <= 1:
+            return self.z(1) - self.b
+        return (self.z(k) - self.z(k - 1)) / self.m
+
+    def thickness_sub(self, k: int) -> np.ndarray:
+        return (self.z(k + 1) - self.z(k)) / self.m
+
+    def layer_z(self, k: int, j: int) -> np.ndarray:
+        return self.z(k) if j == 0 else self.z_sub(k, j)
+
+    def layer_thickness(self, k: int, j: int) -> np.ndarray:
+        return self.thickness(k) if j == 0 else self.thickness_sub(k)
 
 
 def build(field: Heightfield, layer_height: float | None = None, first_layer: float | None = None,

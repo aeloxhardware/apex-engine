@@ -53,6 +53,34 @@ chacune), malgré des pentes de 38 à 71° au-dessus de 28° : ce sont des bosse
 large de la tête étant à plus de 11 mm au-dessus de la pointe. Limite : pas de correction
 automatique (une collision est signalée, pas évitée) et pas d'inclinaison de la tête.
 
+## Étapes, progression et temps de calcul (2026-10-30)
+
+`slice_mesh(mesh, params, progress=cb)` et `slice_path(chemin, params, progress=cb)` appellent `cb(slug, fraction)`
+pour les étapes de `slicer.AEOLIS_STEPS` (`python main.py steps --algorithm element-aeolis`) :
+`import`, `heightfield` (modèle de surface en hauteur), `layer_surfaces` (surfaces des couches), `toolpath2d` (parois et
+remplissage), `collision` (tête), `export` (écriture du G-code). Chaque étape s'ouvre à 0, finit à 1, et les boucles
+émettent des fractions mesurées sur le travail fait (`core/progress.py`, R-017) : triangles rastérisés, couches
+remplies, points testés contre la tête, points écrits. Aucune durée n'est estimée.
+
+Le tranchage tourne en trois phases (chemins de toutes les couches, puis collision, puis écriture), pour que chaque
+étape ait sa propre barre. Mesure (5 plaques de `res/test_models/non_planar/`, réglages par défaut) :
+
+| plaque | avant | après |
+|---|---:|---:|
+| plate_1_1 | 31,0 s | 8,9 s |
+| plate_2 | 14,0 s | 2,9 s |
+| plate_3 | 20,0 s | 3,2 s |
+| plate_5 | 16,3 s | 3,3 s |
+| plate_6 | 37,2 s | 7,5 s |
+
+D'où vient le gain : hauteur, épaisseur et dessous/dessus interpolés une fois par couche au lieu de ~200 000 petits
+appels (`LayerStack.sample` / `Column`) ; rastérisation vectorisée sur les couples (triangle, nœud), **identique au bit**
+(×40 à ×80) ; union de couverture de GEOS pour l'empreinte (6 s → 0,1 s, repli sur l'union robuste si les triangles du
+dessus se recouvrent) ; lignes du zigzag écartées par un test d'intersection préparé avant l'overlay. Le G-code est
+identique octet pour octet à celui d'avant, SAUF l'effet de l'empreinte : elle diffère d'environ 1e-7 mm² (la
+version précédente la rétrécissait de 1e-7 mm), ce qui change le dernier chiffre de certains `E` et quelques points
+(plate_5 : 58 208 → 58 214 points testés).
+
 ## Limites connues (mesurées le 2026-10-29)
 
 - (Corrigé le 2026-10-29) L'épaisseur était non bornée en v0 (0,018 mm sur la plaque 1_1) ;

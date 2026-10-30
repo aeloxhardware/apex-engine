@@ -59,11 +59,12 @@ def load_envelope(path: str | Path | None = None, contact_clearance: float = 3.0
 
 
 def check_points(env: HeadEnvelope, field, z_fn, t_fn, xy: np.ndarray, z_tip: np.ndarray,
-                 margin: float = 0.0) -> tuple[int, float]:
+                 margin: float = 0.0, printed_fn=None) -> tuple[int, float]:
     """Nombre de points de dépôt en collision et pénétration maximale (mm).
 
     `z_fn(x, y)` : surface de la couche en cours ; `t_fn(x, y)` : son épaisseur locale. La matière
-    déjà posée vaut z_fn − t_fn.
+    déjà posée vaut z_fn − t_fn. `printed_fn(x, y)` (facultatif) rend directement cette différence : il
+    évite d'interpoler deux fois la grille aux mêmes points.
     """
     if len(xy) == 0:
         return 0, 0.0
@@ -80,7 +81,10 @@ def check_points(env: HeadEnvelope, field, z_fn, t_fn, xy: np.ndarray, z_tip: np
         hy = p[:, 1:2] + env.dy[None, :]
         inside = (hx >= x0) & (hx <= x1) & (hy >= y0) & (hy <= y1)
         fx, fy = np.clip(hx, x0, x1), np.clip(hy, y0, y1)
-        printed = z_fn(fx.ravel(), fy.ravel()).reshape(hx.shape) - t_fn(fx.ravel(), fy.ravel()).reshape(hx.shape)
+        if printed_fn is not None:
+            printed = printed_fn(fx.ravel(), fy.ravel()).reshape(hx.shape)
+        else:
+            printed = z_fn(fx.ravel(), fy.ravel()).reshape(hx.shape) - t_fn(fx.ravel(), fy.ravel()).reshape(hx.shape)
         gap = (zt[:, None] + env.h[None, :]) - printed - margin       # < 0 : la tête est dans la matière
         gap = np.where(inside & ~np.isnan(gap), gap, np.inf)
         pen = -gap.min(axis=1)

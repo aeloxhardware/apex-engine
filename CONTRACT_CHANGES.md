@@ -4,6 +4,13 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajouts du 2026-10-30 (le numero reste 2)
+- Etapes de progression par algorithme (C3) : `main.py steps --algorithm <element-ardor|element-aeolis>` ; la reponse porte
+  desormais `algorithm`. Sans option : `element-ardor`, liste inchangee. Element Aeolis : `import`, `heightfield`,
+  `layer_surfaces`, `toolpath2d`, `collision`, `export` (libelles dans `apex/integration/REQUESTS.md`, R-026). Le tranchage
+  Aeolis n'est pas encore appelable par `main.py slice` (R-024) ; seules les etapes sont publiees. Les fractions
+  intermediaires d'Aeolis sont reelles (travail fait), comme R-017.
+
 ## Ajouts du 2026-10-29 (le numero reste 2, a confirmer par l'utilisateur)
 - G-code (C4, C5), signature : la PREMIERE ligne de tout G-code du moteur est `; 85Ejj-sV6dI-NXTGl-JiodA-0b8aZ` (en clair,
   sans signification, `file_io/apex_signature.py`). Le bloc chiffre porte aussi `meta.apex_version` (numero de version de

@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 import numpy as np
+import shapely
 from shapely.geometry import LineString, MultiLineString, MultiPolygon, Polygon
 
 from .layers import LayerStack
@@ -58,10 +59,14 @@ def _zigzag(region, spacing: float, angle_deg: float) -> list[np.ndarray]:
     minx, miny, maxx, maxy = region.bounds
     reach = float(np.hypot(maxx - minx, maxy - miny)) / 2 + spacing
     lines = []
-    for i, off in enumerate(np.arange(-reach, reach + spacing, spacing)):
+    shapely.prepare(region)       # le test d'intersection préparé écarte les lignes qui ne touchent pas la zone
+    for off in np.arange(-reach, reach + spacing, spacing):
         p0 = c + n * off - d * reach
         p1 = c + n * off + d * reach
-        inter = region.intersection(LineString([p0, p1]))
+        line = LineString([p0, p1])
+        if not region.intersects(line):       # intersection vide : même résultat, sans le coût de l'overlay
+            continue
+        inter = region.intersection(line)
         segs = [inter] if isinstance(inter, LineString) else list(getattr(inter, "geoms", []))
         for s in segs:
             if isinstance(s, LineString) and s.length > 1e-6:
@@ -70,6 +75,7 @@ def _zigzag(region, spacing: float, angle_deg: float) -> list[np.ndarray]:
     # raccords : on chaîne les lignes consécutives dont le raccord est couvert par la région
     chains: list[list[np.ndarray]] = []
     safe = region.buffer(1e-6)
+    shapely.prepare(safe)
     for pts in lines:
         if chains:
             end = chains[-1][-1][-1]
@@ -135,14 +141,23 @@ def layer_polylines(region, solid_region, index: int, params: ToolpathParams,
     return path
 
 
+def densify_xy(xy: np.ndarray, max_segment: float) -> np.ndarray:
+    """Redécoupe une polyligne (K,2) en segments d'au plus `max_segment` : retourne (M,2).
+
+    Vectorisé ; mêmes points, à l'arrondi près, que `np.linspace(0, 1, m + 1)[1:]` segment par segment."""
+    a, b = xy[:-1], xy[1:]
+    length = np.linalg.norm(b - a, axis=1)
+    m = np.maximum(1, np.ceil(length / max_segment).astype(int))
+    seg = np.repeat(np.arange(len(m)), m)
+    first = np.cumsum(m) - m
+    i = np.arange(len(seg)) - first[seg] + 1                   # 1..m dans chaque segment
+    mm = m[seg]
+    t = np.where(i == mm, 1.0, i * (1.0 / mm))[:, None]
+    return np.vstack([xy[0:1], a[seg] + (b[seg] - a[seg]) * t])
+
+
 def densify(xy: np.ndarray, stack: LayerStack, k: int, max_segment: float, j: int = 0) -> np.ndarray:
     """Relève (K,2) sur la surface de la couche (k, j) et redécoupe : retourne (M,3)."""
-    out = [xy[0:1]]
-    for a, b in zip(xy[:-1], xy[1:]):
-        length = float(np.linalg.norm(b - a))
-        m = max(1, int(np.ceil(length / max_segment)))
-        t = np.linspace(0, 1, m + 1)[1:, None]
-        out.append(a + (b - a) * t)
-    pts = np.vstack(out)
+    pts = densify_xy(xy, max_segment)
     z = stack.z(k, pts[:, 0], pts[:, 1]) if j == 0 else stack.z_sub(k, j, pts[:, 0], pts[:, 1])
     return np.column_stack([pts, z])

@@ -2150,6 +2150,7 @@ pour affichage/validation avant export G-code.
     IceSL) : `nonplanar/README.md`. Tests : `tests/test_nonplanar.py`. Non branché dans
     `main.py` ni dans le contrat (C1/C2) : à ouvrir en demande dans `apex/integration/REQUESTS.md`
     quand l'utilisateur décide de l'exposer.
+    **Progression et vitesse (2026-10-30, `alpha-0.2.3.0.4.0.0.221`).** Étapes : `import`, `heightfield`, `layer_surfaces`, `toolpath2d`, `collision`, `export` (`slicer.AEOLIS_STEPS`, `main.py steps --algorithm element-aeolis`), chacune avec des fractions RÉELLES (`core/progress.py`) ; le tranchage tourne en trois phases pour cela. Plaques de test : 14-37 s → 3-9 s (tableau dans `element-aeolis/README.md`) : colonnes interpolées une fois (`LayerStack.sample`), rastérisation vectorisée (identique au bit), union de couverture pour l'empreinte (écart ~1e-7 mm² avec l'ancienne : dernier chiffre de `E` parfois différent), test d'intersection préparé dans le zigzag. Reste au profil : overlay shapely du remplissage (~2 s sur plate_6), écriture du texte (~1,5 s). Pas encore appelable par `main.py slice` (R-024) ; demande d'étapes pour l'interface : R-026.
 
 85. **Famille de noms des algorithmes de tranchage (décision de l'utilisateur, 2026-10-29) : toujours préfixés
     « Element », un dossier `element-xxxx/` chacun.** **Element Ardor** : pipeline principal 5 axes par la méthode de la

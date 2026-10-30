@@ -48,7 +48,15 @@ class InvalidRequest(ValueError):
     """Requete mal formee, version du contrat differente, champ inconnu ou valeur refusee."""
 
 
-def _steps() -> list[dict]:
+ALGORITHMS = ("element-ardor", "element-aeolis")
+
+
+def _steps(algorithm: str = "element-ardor") -> list[dict]:
+    """Etapes de progression d'un algorithme ; Element Ardor par defaut (pipeline principal)."""
+    if algorithm == "element-aeolis":
+        import importlib
+        aeolis = importlib.import_module("nonplanar.slicer")
+        return [{"slug": slug, "label": label} for slug, label in aeolis.AEOLIS_STEPS]
     from main import PIPELINE_STEPS
     return [{"slug": slug, "label": label} for slug, label in PIPELINE_STEPS] + \
         [{"slug": "export", "label": "Ecriture du G-code"}]
@@ -86,9 +94,13 @@ def _emit(stream, event: dict) -> None:
 
 
 def steps_main(argv: list[str]) -> int:
-    argparse.ArgumentParser(prog="main.py steps", description="Liste des etapes affichees pendant le tranchage.") \
-        .parse_args(argv)
-    print(_dumps({"contract": schema.APEX_CONTRACT_VERSION, "steps": _steps()}), flush=True)
+    parser = argparse.ArgumentParser(prog="main.py steps",
+                                     description="Liste des etapes affichees pendant le tranchage.")
+    parser.add_argument("--algorithm", choices=ALGORITHMS, default="element-ardor",
+                        help="Algorithme de tranchage (defaut : element-ardor).")
+    args = parser.parse_args(argv)
+    print(_dumps({"contract": schema.APEX_CONTRACT_VERSION, "algorithm": args.algorithm,
+                  "steps": _steps(args.algorithm)}), flush=True)
     return EXIT_OK
 
 

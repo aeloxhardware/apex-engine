@@ -150,3 +150,17 @@ def test_slice_unreadable_model_is_refused_with_exit_3(tmp_path, capsys):
     result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert result["status"] in ("model_refused", "surface_inconsistent") and result["message"]
     assert not [f for f in os.listdir(tmp_path) if f.endswith((".gcode", ".part"))]
+
+
+def test_steps_command_lists_aeolis_steps(capsys):
+    assert slice_cli.steps_main(["--algorithm", "element-aeolis"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    slugs = [s["slug"] for s in out["steps"]]
+    assert out["algorithm"] == "element-aeolis"
+    assert slugs == ["import", "heightfield", "layer_surfaces", "toolpath2d", "collision", "export"]
+    assert len(slugs) == len(set(slugs)) and all(s["label"] for s in out["steps"])
+
+
+def test_steps_command_rejects_unknown_algorithm():
+    with pytest.raises(SystemExit):
+        slice_cli.steps_main(["--algorithm", "inconnu"])

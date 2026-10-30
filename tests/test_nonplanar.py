@@ -214,3 +214,101 @@ def test_signature_is_first_line_and_meta_carries_the_version():
         assert meta["apex_version"] == apex_version() != "unknown"
         assert meta["algorithm"] == "nonplanar-heightfield/1"
         assert meta["algorithm_name"] == "Element Aeolis" and meta["generator"] == "Apex engine (Element Aeolis)"
+
+
+# -- progression réelle, vectorisations -----------------------------------------------------------
+def _quiet_throttle(monkeypatch):
+    from core import progress
+    monkeypatch.setattr(progress, "MIN_INTERVAL", 0.0)
+    monkeypatch.setattr(progress, "MIN_STEP", 0.0)
+
+
+def test_progress_follows_every_stage_with_real_fractions(monkeypatch):
+    """Chaque étape s'ouvre à 0, finit à 1 et ne recule jamais ; les étapes qui bouclent sur du travail
+    (surface, remplissage, collision, écriture) émettent des fractions INTERMÉDIAIRES, pas un saut."""
+    from nonplanar.slicer import AEOLIS_STEPS
+    _quiet_throttle(monkeypatch)
+    events = []
+    slice_mesh(wave_plate(), SliceParams(), progress=lambda slug, f: events.append((slug, f)))
+    slugs = [s for s, _ in AEOLIS_STEPS if s != "import"]
+    assert [s for s, f in events if f == 0.0] == slugs
+    assert [s for s, f in events if f == 1.0] == slugs
+    for slug in slugs:
+        fr = [f for s, f in events if s == slug]
+        assert fr == sorted(fr) and fr[0] == 0.0 and fr[-1] == 1.0
+    for slug in ("heightfield", "toolpath2d", "collision", "export"):
+        assert any(0.0 < f < 1.0 for s, f in events if s == slug), slug
+
+
+def test_slice_path_opens_import_stage(monkeypatch, tmp_path):
+    from nonplanar.slicer import slice_path
+    _quiet_throttle(monkeypatch)
+    wave_plate(n=11).export(tmp_path / "p.stl")
+    events = []
+    slice_path(str(tmp_path / "p.stl"), SliceParams(check_head=False),
+               progress=lambda slug, f: events.append((slug, f)))
+    assert events[0] == ("import", 0.0) and ("import", 1.0) in events
+    assert events.index(("import", 1.0)) < events.index(("heightfield", 0.0))
+
+
+def test_progress_is_silent_without_callback():
+    from core import progress
+    slice_mesh(wave_plate(n=11), SliceParams(check_head=False))
+    progress.report(1, 2)          # aucun rappel resté branché
+
+
+def test_densify_xy_matches_linspace_construction():
+    from nonplanar.toolpath import densify_xy
+    rng = np.random.default_rng(3)
+    xy = rng.random((40, 2)) * 25
+    ref = [xy[0:1]]
+    for a, b in zip(xy[:-1], xy[1:]):
+        m = max(1, int(np.ceil(float(np.linalg.norm(b - a)) / 0.5)))
+        ref.append(a + (b - a) * np.linspace(0, 1, m + 1)[1:, None])
+    assert np.array_equal(densify_xy(xy, 0.5), np.vstack(ref))
+
+
+def test_column_matches_stack_calls():
+    f = from_mesh(wave_plate())
+    stack = build(f)
+    rng = np.random.default_rng(4)
+    x, y = rng.random(200) * 20, rng.random(200) * 20
+    col = stack.sample(x, y)
+    for k in (1, 2, 5, stack.count):
+        assert np.array_equal(col.z(k), stack.z(k, x, y), equal_nan=True)
+        assert np.array_equal(col.thickness(k), stack.thickness(k, x, y), equal_nan=True)
+    if stack.count > 1:
+        assert np.array_equal(col.z_sub(1, 1), stack.z_sub(1, 1, x, y), equal_nan=True)
+
+
+def test_rasterize_matches_triangle_loop():
+    from nonplanar.heightfield import _rasterize
+    m = wave_plate(n=15)
+    xs = np.linspace(0, 20, 41)
+    ys = np.linspace(0, 20, 41)
+    n = m.face_normals
+    for sel, keep_max in ((n[:, 2] > 1e-9, True), (n[:, 2] < -1e-9, False)):
+        out = np.full((41, 41), np.nan)
+        for t in m.triangles[sel]:
+            (x0, y0, z0), (x1, y1, z1), (x2, y2, z2) = t
+            det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+            if abs(det) < 1e-14:
+                continue
+            gx, gy = np.meshgrid(xs, ys)
+            a = ((y1 - y2) * (gx - x2) + (x2 - x1) * (gy - y2)) / det
+            b = ((y2 - y0) * (gx - x2) + (x0 - x2) * (gy - y2)) / det
+            c = 1.0 - a - b
+            inside = (a >= -1e-9) & (b >= -1e-9) & (c >= -1e-9)
+            cand = np.where(inside, a * z0 + b * z1 + c * z2, np.nan)
+            out = np.fmax(out, cand) if keep_max else np.fmin(out, cand)
+        assert np.array_equal(_rasterize(m.triangles[sel], xs, ys, keep_max), out, equal_nan=True)
+
+
+def test_footprint_falls_back_when_top_faces_overlap():
+    """L'union « de couverture » exige des triangles qui ne se recouvrent pas ; sinon, union robuste."""
+    from nonplanar.heightfield import _footprint
+    a = trimesh.creation.box((10, 10, 2))
+    b = trimesh.creation.box((10, 10, 2))
+    b.apply_translation((5, 0, 0))
+    both = trimesh.util.concatenate([a, b])
+    assert _footprint(both).area == pytest.approx(150.0, abs=1e-4)

@@ -17,7 +17,11 @@ import shapely
 import trimesh
 from shapely.geometry import MultiPolygon, Polygon
 
+from core import progress as _progress
+
 _EDGE_EPS = 1e-9
+_FOOTPRINT_CHUNKS = 16
+_FOOTPRINT_MIN_CHUNK = 500
 
 
 class NotAHeightfieldError(ValueError):
@@ -68,48 +72,96 @@ class Heightfield:
         return self._interp(self.bottom, x, y)
 
 
-def _rasterize(tris: np.ndarray, xs: np.ndarray, ys: np.ndarray, keep_max: bool) -> np.ndarray:
-    """Hauteur z des triangles aux nœuds (ys × xs) ; max (dessus) ou min (dessous)."""
+_PAIR_BUDGET = 2_000_000    # (triangle, nœud) évalués par paquet : borne la mémoire
+_MIN_DET = 1e-14
+
+
+def _rasterize(tris: np.ndarray, xs: np.ndarray, ys: np.ndarray, keep_max: bool,
+               span: tuple[float, float] | None = None) -> np.ndarray:
+    """Hauteur z des triangles aux nœuds (ys × xs) ; max (dessus) ou min (dessous).
+
+    Vectorisé sur les couples (triangle, nœud de sa boîte englobante) : mêmes formules barycentriques
+    que le balayage triangle par triangle, donc mêmes valeurs ; le max/min ne dépend pas de l'ordre.
+    `span` : part [lo, hi] de la barre de l'étape que ce balayage occupe (progression réelle)."""
     out = np.full((len(ys), len(xs)), np.nan)
+    if len(tris) == 0:
+        return out
     dx = xs[1] - xs[0]
     dy = ys[1] - ys[0]
-    for t in tris:
-        (x0, y0, z0), (x1, y1, z1), (x2, y2, z2) = t
-        det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
-        if abs(det) < 1e-14:
-            continue
-        i0 = max(int(np.ceil((min(x0, x1, x2) - xs[0]) / dx - _EDGE_EPS)), 0)
-        i1 = min(int(np.floor((max(x0, x1, x2) - xs[0]) / dx + _EDGE_EPS)), len(xs) - 1)
-        j0 = max(int(np.ceil((min(y0, y1, y2) - ys[0]) / dy - _EDGE_EPS)), 0)
-        j1 = min(int(np.floor((max(y0, y1, y2) - ys[0]) / dy + _EDGE_EPS)), len(ys) - 1)
-        if i0 > i1 or j0 > j1:
-            continue
-        gx, gy = np.meshgrid(xs[i0:i1 + 1], ys[j0:j1 + 1])
-        a = ((y1 - y2) * (gx - x2) + (x2 - x1) * (gy - y2)) / det
-        b = ((y2 - y0) * (gx - x2) + (x0 - x2) * (gy - y2)) / det
+    t = np.asarray(tris, float)
+    x0, y0, z0 = t[:, 0, 0], t[:, 0, 1], t[:, 0, 2]
+    x1, y1, z1 = t[:, 1, 0], t[:, 1, 1], t[:, 1, 2]
+    x2, y2, z2 = t[:, 2, 0], t[:, 2, 1], t[:, 2, 2]
+    det = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2)
+    xmin, xmax = np.minimum(np.minimum(x0, x1), x2), np.maximum(np.maximum(x0, x1), x2)
+    ymin, ymax = np.minimum(np.minimum(y0, y1), y2), np.maximum(np.maximum(y0, y1), y2)
+    i0 = np.maximum(np.ceil((xmin - xs[0]) / dx - _EDGE_EPS), 0).astype(int)
+    i1 = np.minimum(np.floor((xmax - xs[0]) / dx + _EDGE_EPS), len(xs) - 1).astype(int)
+    j0 = np.maximum(np.ceil((ymin - ys[0]) / dy - _EDGE_EPS), 0).astype(int)
+    j1 = np.minimum(np.floor((ymax - ys[0]) / dy + _EDGE_EPS), len(ys) - 1).astype(int)
+    ok = (np.abs(det) >= _MIN_DET) & (i0 <= i1) & (j0 <= j1)
+    idx = np.flatnonzero(ok)
+    w = (i1 - i0 + 1)[idx]
+    h = (j1 - j0 + 1)[idx]
+    cost = np.cumsum(w * h)
+    reduce_at = np.fmax.at if keep_max else np.fmin.at
+    eps = 1e-9
+    start = 0
+    while start < len(idx):
+        base = cost[start - 1] if start else 0
+        stop = max(int(np.searchsorted(cost, base + _PAIR_BUDGET, side="right")), start + 1)
+        sel = idx[start:stop]
+        ww, hh = w[start:stop], h[start:stop]
+        n_pairs = ww * hh
+        tri = np.repeat(sel, n_pairs)
+        first = np.cumsum(n_pairs) - n_pairs
+        local = np.arange(int(n_pairs.sum())) - np.repeat(first, n_pairs)
+        wr = np.repeat(ww, n_pairs)
+        ix = i0[tri] + local % wr
+        iy = j0[tri] + local // wr
+        gx, gy = xs[ix], ys[iy]
+        d = det[tri]
+        a = ((y1[tri] - y2[tri]) * (gx - x2[tri]) + (x2[tri] - x1[tri]) * (gy - y2[tri])) / d
+        b = ((y2[tri] - y0[tri]) * (gx - x2[tri]) + (x0[tri] - x2[tri]) * (gy - y2[tri])) / d
         c = 1.0 - a - b
-        eps = 1e-9
         inside = (a >= -eps) & (b >= -eps) & (c >= -eps)
-        if not inside.any():
-            continue
-        z = a * z0 + b * z1 + c * z2
-        sub = out[j0:j1 + 1, i0:i1 + 1]
-        cand = np.where(inside, z, np.nan)
-        if keep_max:
-            sub[:] = np.fmax(sub, cand)
-        else:
-            sub[:] = np.fmin(sub, cand)
+        z = a * z0[tri] + b * z1[tri] + c * z2[tri]
+        reduce_at(out, (iy[inside], ix[inside]), z[inside])
+        start = stop
+        if span is not None:
+            _progress.report(start, len(idx), span)
     return out
 
 
-def _footprint(mesh: trimesh.Trimesh) -> Polygon | MultiPolygon:
-    """Silhouette en XY : union des triangles tournés vers le haut."""
+def _footprint(mesh: trimesh.Trimesh, span: tuple[float, float] | None = None) -> Polygon | MultiPolygon:
+    """Silhouette en XY : union des triangles tournés vers le haut.
+
+    Les triangles du dessus d'une surface en hauteur se partagent leurs arêtes sans se recouvrir : l'union
+    « de couverture » de GEOS les réunit en ~0,1 s, contre ~6 s pour l'union générale sur 54 000
+    triangles. Elle ne vaut que pour une couverture valide : on le vérifie (l'aire de l'union égale la
+    somme des aires, et le résultat est valide) et, sinon, on retombe sur l'union robuste (triangles élargis de 1e-7 mm), faite par
+    paquets pour garder un compte rendu de progression réel."""
     up = mesh.face_normals[:, 2] > 1e-9
     tris = mesh.triangles[up][:, :, :2]
     polys = shapely.polygons(tris)
     polys = polys[shapely.area(polys) > 1e-12]
-    merged = shapely.union_all(shapely.buffer(polys, 1e-7))
-    merged = shapely.buffer(merged, -1e-7)
+    merged = None
+    try:
+        candidate = shapely.coverage_union_all(polys)
+        if candidate.is_valid and \
+                abs(float(shapely.area(candidate)) - float(shapely.area(polys).sum())) <= 1e-9 * max(1.0, candidate.area):
+            merged = candidate
+    except shapely.errors.GEOSException:
+        pass
+    if merged is None:
+        polys = shapely.buffer(polys, 1e-7)
+        n_chunks = max(1, min(_FOOTPRINT_CHUNKS, len(polys) // _FOOTPRINT_MIN_CHUNK))
+        parts = []
+        for i, chunk in enumerate(np.array_split(polys, n_chunks)):
+            parts.append(shapely.union_all(chunk))
+            if span is not None:
+                _progress.report(i + 1, n_chunks + 1, span)
+        merged = shapely.buffer(shapely.union_all(parts), -1e-7)
     return shapely.simplify(merged, 1e-6)
 
 
@@ -121,14 +173,14 @@ def from_mesh(mesh: trimesh.Trimesh, cell: float = 0.25) -> Heightfield:
     ny = int(round((hi[1] - lo[1]) / cell)) + 1
     xs = np.linspace(lo[0], hi[0], nx)
     ys = np.linspace(lo[1], hi[1], ny)
-    top = _rasterize(mesh.triangles[n[:, 2] > 1e-9], xs, ys, keep_max=True)
-    bottom = _rasterize(mesh.triangles[n[:, 2] < -1e-9], xs, ys, keep_max=False)
+    top = _rasterize(mesh.triangles[n[:, 2] > 1e-9], xs, ys, keep_max=True, span=(0.0, 0.1))
+    bottom = _rasterize(mesh.triangles[n[:, 2] < -1e-9], xs, ys, keep_max=False, span=(0.1, 0.2))
     covered = ~np.isnan(top)
     if not covered.any() or (covered != ~np.isnan(bottom)).any():
         raise NotAHeightfieldError("dessus et dessous ne couvrent pas la même empreinte")
     if (top[covered] - bottom[covered] < -1e-6).any():
         raise NotAHeightfieldError("le dessus passe sous le dessous (surplomb ou cavité)")
-    field = Heightfield(xs, ys, top, bottom, _footprint(mesh))
+    field = Heightfield(xs, ys, top, bottom, _footprint(mesh, span=(0.2, 0.95)))
     if mesh.is_watertight and mesh.volume > 0:
         # Un surplomb ou une cavité laisse du vide entre B et T : le volume intégré dépasse
         # alors celui du maillage.

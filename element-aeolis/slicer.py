@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
+from typing import Callable, Optional
 
 import numpy as np
 import trimesh
@@ -14,6 +15,7 @@ import trimesh
 from . import heightfield as hf
 from . import layers as ly
 from . import toolpath as tp
+from core import progress as _progress
 from file_io import kinematics_description as kin
 from file_io.apex_header import header_block_lines
 from file_io.apex_signature import SIGNATURE, common_meta
@@ -50,6 +52,19 @@ class SliceParams:
     center_xy: tuple[float, float] | None = None   # centre de l'empreinte sur le plateau
 
 
+# Étapes affichées pendant le tranchage Element Aeolis (`main.py steps --algorithm element-aeolis`) ;
+# les libellés accentués sont ceux de l'interface (src/utils/sliceStepLabels.ts), ceux-ci en sont
+# la forme du journal du moteur, sans accents, comme `main.PIPELINE_STEPS`.
+AEOLIS_STEPS: tuple[tuple[str, str], ...] = (
+    ("import", "Import du modele"),
+    ("heightfield", "Modele de surface en hauteur"),
+    ("layer_surfaces", "Surfaces des couches"),
+    ("toolpath2d", "Parois et remplissage"),
+    ("collision", "Simulation de collision"),
+    ("export", "Ecriture du G-code"),
+)
+
+
 @dataclass
 class SliceReport:
     layer_count: int                  # couches principales
@@ -80,7 +95,58 @@ def _header_meta(p: "SliceParams") -> dict:
             "intermediate_layers": p.intermediate_layers}
 
 
-def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tuple[str, SliceReport]:
+class _Stages:
+    """Ouvre les étapes une à une et relaie leur progression RÉELLE (core/progress.py, R-017).
+
+    `open(slug)` termine l'étape en cours (1.0), ouvre la suivante (0.0) et branche les boucles sur sa
+    barre : une boucle appelle `_progress.report(fait, total)`, jamais une durée estimée. Sans
+    rappel, tout est inerte."""
+
+    def __init__(self, progress: Optional[Callable[[str, float], None]]):
+        self.progress = progress
+        self.current: Optional[str] = None
+
+    def open(self, slug: Optional[str]) -> None:
+        _progress.end()
+        if self.progress is None:
+            return
+        if self.current is not None:
+            self.progress(self.current, 1.0)
+        self.current = slug
+        if slug is not None:
+            self.progress(slug, 0.0)
+            _progress.begin(lambda fraction, slug=slug: self.progress(slug, fraction))
+
+    def close(self) -> None:
+        self.open(None)
+
+
+def slice_path(path: str, params: SliceParams | None = None,
+               progress: Optional[Callable[[str, float], None]] = None) -> tuple[str, SliceReport]:
+    """Comme `slice_mesh`, mais lit le fichier (étape « import », avec sa propre barre)."""
+    stages = _Stages(progress)
+    try:
+        stages.open("import")
+        mesh = trimesh.load(path, force="mesh")
+        return slice_mesh(mesh, params, progress=progress, _stages=stages)
+    finally:
+        _progress.end()
+
+
+def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None,
+               progress: Optional[Callable[[str, float], None]] = None,
+               _stages: "_Stages | None" = None) -> tuple[str, SliceReport]:
+    """Tranche `mesh`. `progress(slug, fraction)` reçoit la progression des étapes de `AEOLIS_STEPS` :
+    0 à l'ouverture, des fractions croissantes mesurées sur le travail fait, 1 à la fin."""
+    stages = _stages or _Stages(progress)
+    try:
+        return _slice(mesh, params, stages)
+    finally:
+        stages.close()
+        _progress.end()
+
+
+def _slice(mesh: trimesh.Trimesh, params: SliceParams | None, stages: "_Stages") -> tuple[str, SliceReport]:
     p = params or SliceParams()
     mesh = mesh.copy()
     off = np.zeros(3)
@@ -92,9 +158,12 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
         off[1] = p.center_xy[1] - c[1]
     mesh.apply_translation(off)
 
+    stages.open("heightfield")
     field_ = hf.from_mesh(mesh, p.grid_cell)
+    stages.open("layer_surfaces")
     stack = ly.build(field_, p.layer_height, p.first_layer_height, min_layer=p.min_layer_height,
                      max_layer=p.max_layer_height, intermediate=p.intermediate_layers)
+    _progress.milestone(0.5)
     sequence = stack.sequence()
     last_grid, split_grid = stack.last_grid(), stack.split_grid()
     xs, ys = field_.xs, field_.ys
@@ -102,6 +171,74 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
     w = p.toolpath.line_width
     fil_area = math.pi * (p.filament_diameter / 2) ** 2
 
+    # -- parois et remplissage : une couche après l'autre --------------------------------------
+    stages.open("toolpath2d")
+    gx, gy = np.meshgrid(xs, ys)
+    gxr, gyr = gx.ravel(), gy.ravel()
+    grid_col = stack.sample(gxr, gyr)          # colonnes aux nœuds, calculées une fois pour toutes les couches
+    layers_data: list[tuple[int, int, float, list[np.ndarray]]] = []   # (k, j, vitesse, polylignes 3D)
+    for done, (k, j) in enumerate(sequence):
+        _progress.report(done, len(sequence))
+        mask = stack.active_mask(k, j, last_grid, split_grid)
+        region = field_.footprint.intersection(mask_to_geometry(xs, ys, mask))
+        if region.is_empty or region.area < 1e-3:
+            continue
+        zg = grid_col.layer_z(k, j).reshape(gx.shape)
+        solid_mask = ((field_.top - zg) < p.toolpath.solid_top_mm) | \
+            ((zg - field_.bottom) < p.toolpath.solid_bottom_mm)
+        solid_mask = np.where(np.isnan(field_.top), False, solid_mask) & mask
+        solid = field_.footprint.intersection(mask_to_geometry(xs, ys, solid_mask))
+        speed = p.first_layer_speed if (k == 1 and j == 0) else p.print_speed
+        # L'angle du remplissage alterne d'une couche à l'autre ; compté depuis le HAUT de chaque
+        # colonne pour que la couche du dessus ait partout la même direction (sinon le dessus se
+        # compose de plaques d'orientations différentes là où les colonnes finissent à des rangs
+        # différents).
+        zones = None
+        if j == 0:
+            parity = np.where(np.isnan(last_grid), 0, (last_grid - k) % 2) == 0
+            even = field_.footprint.intersection(mask_to_geometry(xs, ys, parity & mask))
+            odd = field_.footprint.intersection(mask_to_geometry(xs, ys, ~parity & mask))
+            zones = [(even, 45.0), (odd, 135.0)]
+        path = tp.layer_polylines(region, solid, k * 100 + j, p.toolpath, field_.footprint, zones)
+        xy_list = [tp.densify_xy(pl.xy, p.toolpath.max_segment) for pl in path.polylines]
+        xy_all = np.vstack(xy_list) if xy_list else np.zeros((0, 2))
+        z_all = stack.sample(xy_all[:, 0], xy_all[:, 1]).layer_z(k, j) if len(xy_all) else np.zeros(0)
+        polys3d, lo = [], 0
+        for xy in xy_list:
+            pts = np.column_stack([xy, z_all[lo:lo + len(xy)]])
+            lo += len(xy)
+            if len(pts) < 2 or np.isnan(pts[:, 2]).any():
+                continue
+            polys3d.append(pts)
+        layers_data.append((k, j, speed, polys3d))
+
+    # -- collision de la vraie tête -------------------------------------------------------------
+    head_env = hc.load_envelope(p.head_model, p.head_contact_clearance) if p.check_head else None
+    head_rep = hc.HeadReport(checked=head_env is not None,
+                             clearance_slope_deg=head_env.clearance_slope_deg if head_env else 0.0)
+    stages.open("collision")
+    if head_env is not None:
+        total_samples = sum(len(pts[::3]) for _, _, _, polys in layers_data for pts in polys) or 1
+        sampled = 0
+        for k, j, _speed, polys in layers_data:
+            if not polys:
+                continue
+            samp = np.vstack([pts[::3] for pts in polys])
+
+            def printed(x, y, k=k, j=j):
+                col = stack.sample(x, y)
+                return col.layer_z(k, j) - col.layer_thickness(k, j)
+
+            hit, pen = hc.check_points(head_env, field_, None, None, samp[:, :2], samp[:, 2],
+                                       p.head_safety_margin, printed_fn=printed)
+            head_rep.points += len(samp)
+            head_rep.colliding_points += hit
+            head_rep.max_penetration = max(head_rep.max_penetration, pen)
+            sampled += len(samp)
+            _progress.report(sampled, total_samples)
+
+    # -- G-code ----------------------------------------------------------------------------------
+    stages.open("export")
     out: list[str] = [
         SIGNATURE,
         "; apex_nonplanar = 1",
@@ -118,9 +255,6 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
     total_len = 0.0
     thick_min, thick_max = np.inf, 0.0
     below_len = 0.0
-    head_env = hc.load_envelope(p.head_model, p.head_contact_clearance) if p.check_head else None
-    head_rep = hc.HeadReport(checked=head_env is not None,
-                             clearance_slope_deg=head_env.clearance_slope_deg if head_env else 0.0)
 
     def axes6(x: float, y: float, z: float) -> str:
         """Les six axes XYZABC (file_io/gcode_axes.py) ; A, B, C valent 0 sur une machine cartésienne."""
@@ -141,57 +275,42 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
             retracted = False
         cur = dest.copy()
 
-    for k, j in sequence:
-        mask = stack.active_mask(k, j, last_grid, split_grid)
-        region = field_.footprint.intersection(mask_to_geometry(xs, ys, mask))
-        if region.is_empty or region.area < 1e-3:
-            continue
-        gx, gy = np.meshgrid(xs, ys)
-        zg = (stack.z(k, gx.ravel(), gy.ravel()) if j == 0
-              else stack.z_sub(k, j, gx.ravel(), gy.ravel())).reshape(gx.shape)
-        solid_mask = ((field_.top - zg) < p.toolpath.solid_top_mm) | \
-            ((zg - field_.bottom) < p.toolpath.solid_bottom_mm)
-        solid_mask = np.where(np.isnan(field_.top), False, solid_mask) & mask
-        solid = field_.footprint.intersection(mask_to_geometry(xs, ys, solid_mask))
+    zero_axes = " ".join(axes_words({}, lambda v: f"{v:.3f}")[3:])   # « A0.000 B0.000 C0.000 »
+    total_pts = sum(len(pts) for _, _, _, polys in layers_data for pts in polys) or 1
+    written = 0
+    ramp = np.arange(12)[None, :, None]
+    for k, j, speed, polys in layers_data:
         out.append(f"; <layer> {k}" + (f" intermediate {j}" if j else ""))
-        speed = p.first_layer_speed if (k == 1 and j == 0) else p.print_speed
-        zfun = (lambda x, y, k=k: stack.z(k, x, y)) if j == 0 else \
-            (lambda x, y, k=k, j=j: stack.z_sub(k, j, x, y))
-        tfun = (lambda x, y, k=k: stack.thickness(k, x, y)) if j == 0 else \
-            (lambda x, y, k=k, j=j: stack.thickness_sub(k, j, x, y))
-        # L'angle du remplissage alterne d'une couche à l'autre ; compté depuis le HAUT de chaque
-        # colonne pour que la couche du dessus ait partout la même direction (sinon le dessus se
-        # compose de plaques d'orientations différentes là où les colonnes finissent à des rangs
-        # différents).
-        zones = None
-        if j == 0:
-            parity = np.where(np.isnan(last_grid), 0, (last_grid - k) % 2) == 0
-            even = field_.footprint.intersection(mask_to_geometry(xs, ys, parity & mask))
-            odd = field_.footprint.intersection(mask_to_geometry(xs, ys, ~parity & mask))
-            zones = [(even, 45.0), (odd, 135.0)]
-        path = tp.layer_polylines(region, solid, k * 100 + j, p.toolpath, field_.footprint, zones)
-        for pl in path.polylines:
-            pts = tp.densify(pl.xy, stack, k, p.toolpath.max_segment, j)
-            if len(pts) < 2 or np.isnan(pts[:, 2]).any():
-                continue
-            # Dégagement : plus haut point de la couche entre départ et arrivée, plus z_hop.
+        if not polys:
+            continue
+        # Hauteurs de dégagement et épaisseurs de TOUTE la couche en deux appels (les points de départ
+        # et d'arrivée des polylignes sont connus d'avance) : le dégagement d'une polyligne est le plus
+        # haut point de la couche entre la fin de la précédente et son départ.
+        starts = np.array([pts[0, :2] for pts in polys])
+        prev_end = np.array([(cur if i == 0 and cur is not None else polys[i - 1][-1])[:2]
+                             if (i > 0 or cur is not None) else pts[0, :2]
+                             for i, pts in enumerate(polys)])
+        step_ = (starts - prev_end) / 11
+        lines = ramp * step_[:, None, :] + prev_end[:, None, :]
+        lines[:, -1, :] = starts
+        col = stack.sample(lines[:, :, 0].ravel(), lines[:, :, 1].ravel())
+        z_lines = np.nanmax(col.layer_z(k, j).reshape(len(polys), 12), axis=1)
+        mids = [(pts[:-1, :2] + pts[1:, :2]) / 2 for pts in polys]
+        mids_all = np.vstack(mids)
+        mcol = stack.sample(mids_all[:, 0], mids_all[:, 1])
+        t_flat = mcol.layer_thickness(k, j)
+        t_lo = 0
+        f_str = f"{speed * 60:g}"
+        for i, pts in enumerate(polys):
             if cur is not None:
-                line = np.linspace(cur[:2], pts[0, :2], 12)
-                zc = max(float(np.nanmax(zfun(line[:, 0], line[:, 1]))), float(cur[2])) + p.z_hop
+                zc = max(float(z_lines[i]), float(cur[2])) + p.z_hop
             else:
                 zc = float(pts[0, 2]) + p.z_hop
             emit_travel(pts[0], zc)
-            if head_env is not None:
-                samp = pts[::3]
-                hit, pen = hc.check_points(head_env, field_, zfun, tfun, samp[:, :2], samp[:, 2],
-                                           p.head_safety_margin)
-                head_rep.points += len(samp)
-                head_rep.colliding_points += hit
-                head_rep.max_penetration = max(head_rep.max_penetration, pen)
             seg_v = np.diff(pts, axis=0)
             seg_len = np.linalg.norm(seg_v, axis=1)
-            mids = (pts[:-1, :2] + pts[1:, :2]) / 2
-            t_all = tfun(mids[:, 0], mids[:, 1])
+            t_all = t_flat[t_lo:t_lo + len(seg_len)]
+            t_lo += len(seg_len)
             real = t_all > 1e-6
             if real.any():
                 thick_min = min(thick_min, float(t_all[real].min()))
@@ -200,11 +319,13 @@ def slice_mesh(mesh: trimesh.Trimesh, params: SliceParams | None = None) -> tupl
             vols = seg_len * _bead_area(np.maximum(t_all, 0.0), w)
             e_run = e + np.cumsum(p.flow * vols / fil_area)
             total_len += float(seg_len.sum())
-            f_str = f"{speed * 60:g}"
-            for b_, e_ in zip(pts[1:], e_run):
-                out.append(f"G1 {axes6(b_[0], b_[1], b_[2])} E{e_:.5f} F{f_str}")
+            out.extend([f"G1 X{x:.3f} Y{y:.3f} Z{z:.3f} {zero_axes} E{e_:.5f} F{f_str}"
+                        for x, y, z, e_ in zip(pts[1:, 0].tolist(), pts[1:, 1].tolist(), pts[1:, 2].tolist(),
+                                               e_run.tolist())])
             e = float(e_run[-1])
             cur = pts[-1].copy()
+            written += len(pts)
+            _progress.report(written, total_pts)
     cx, cy, cz = (cur[0], cur[1], cur[2]) if cur is not None else (0.0, 0.0, 0.0)
     out.append(f"G0 {axes6(cx, cy, cz + 5)} F{p.travel_speed * 60:g}")
     out.append("M104 S0\nM140 S0")
