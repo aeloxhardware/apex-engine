@@ -23,6 +23,151 @@
    ],
    "type": "object"
   },
+  "AeolisSliceParams": {
+   "additionalProperties": false,
+   "description": "SliceParams(min_layer_height: 'float' = 0.1, max_layer_height: 'float' = 0.25, layer_height: 'float | None' = None, first_layer_height: 'float | None' = None, check_head: 'bool' = True, head_model: 'str | None' = None, head_contact_clearance: 'float' = 3.0, head_safety_margin: 'float' = 0.0, intermediate_layers: 'bool' = True, grid_cell: 'float' = 0.25, toolpath: 'tp.ToolpathParams' = <factory>, filament_diameter: 'float' = 1.75, flow: 'float' = 1.0, print_speed: 'float' = 40.0, travel_speed: 'f",
+   "properties": {
+    "bed_temp": {
+     "default": 50.0,
+     "type": "number"
+    },
+    "center_xy": {
+     "anyOf": [
+      {
+       "maxItems": 2,
+       "minItems": 2,
+       "prefixItems": [
+        {
+         "type": "number"
+        },
+        {
+         "type": "number"
+        }
+       ],
+       "type": "array"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "check_head": {
+     "default": true,
+     "type": "boolean"
+    },
+    "filament_diameter": {
+     "default": 1.75,
+     "type": "number"
+    },
+    "first_layer_height": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "first_layer_speed": {
+     "default": 20.0,
+     "type": "number"
+    },
+    "flow": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "grid_cell": {
+     "default": 0.25,
+     "type": "number"
+    },
+    "head_contact_clearance": {
+     "default": 3.0,
+     "type": "number"
+    },
+    "head_model": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "head_safety_margin": {
+     "default": 0.0,
+     "type": "number"
+    },
+    "intermediate_layers": {
+     "default": true,
+     "type": "boolean"
+    },
+    "layer_height": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "max_layer_height": {
+     "default": 0.25,
+     "type": "number"
+    },
+    "min_layer_height": {
+     "default": 0.1,
+     "type": "number"
+    },
+    "nozzle_temp": {
+     "default": 200.0,
+     "type": "number"
+    },
+    "place_on_bed": {
+     "default": true,
+     "type": "boolean"
+    },
+    "print_speed": {
+     "default": 40.0,
+     "type": "number"
+    },
+    "retract_length": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "retract_speed": {
+     "default": 30.0,
+     "type": "number"
+    },
+    "toolpath": {
+     "$ref": "#/$defs/ToolpathParams",
+     "default": {
+      "infill_density": 0.2,
+      "line_width": 0.4,
+      "max_segment": 0.5,
+      "solid_bottom_mm": 0.6,
+      "solid_top_mm": 0.8,
+      "wall_count": 2
+     }
+    },
+    "travel_speed": {
+     "default": 100.0,
+     "type": "number"
+    },
+    "z_hop": {
+     "default": 0.6,
+     "type": "number"
+    }
+   },
+   "title": "SliceParams",
+   "type": "object"
+  },
   "CollisionOrderParams": {
    "additionalProperties": false,
    "description": "CollisionOrderParams(pose_spacing: 'float' = 3.0, material_spacing: 'float' = 1.5, head_sample_spacing: 'float' = 6.0, margin: 'float' = 1.0, nozzle_contact_clearance: 'float' = 3.0, neighbours: 'int' = 4, support_depth: 'Optional[float]' = 0.3, support_radius: 'float' = 0.6)",
@@ -1325,6 +1470,37 @@
    },
    "type": "object"
   },
+  "ToolpathParams": {
+   "additionalProperties": false,
+   "description": "ToolpathParams(line_width: 'float' = 0.4, wall_count: 'int' = 2, infill_density: 'float' = 0.2, solid_bottom_mm: 'float' = 0.6, solid_top_mm: 'float' = 0.8, max_segment: 'float' = 0.5)",
+   "properties": {
+    "infill_density": {
+     "default": 0.2,
+     "type": "number"
+    },
+    "line_width": {
+     "default": 0.4,
+     "type": "number"
+    },
+    "max_segment": {
+     "default": 0.5,
+     "type": "number"
+    },
+    "solid_bottom_mm": {
+     "default": 0.6,
+     "type": "number"
+    },
+    "solid_top_mm": {
+     "default": 0.8,
+     "type": "number"
+    },
+    "wall_count": {
+     "default": 2,
+     "type": "integer"
+    }
+   },
+   "type": "object"
+  },
   "TravelRoutingParams": {
    "additionalProperties": false,
    "description": "TravelRoutingParams(length_threshold: 'float' = 5.0, lift_height: 'float' = 3.0, max_lift_multiplier: 'float' = 4.0, traverse_samples: 'int' = 1, routing_toolhead_sample_spacing: 'float' = 15.0, routing_grid_cell_size_multiplier: 'float' = 40.0)",
@@ -1361,6 +1537,9 @@
  "additionalProperties": false,
  "description": "Genere par scripts/gen_params.py depuis les dataclasses Python. NE PAS EDITER.",
  "properties": {
+  "AeolisSliceParams": {
+   "$ref": "#/$defs/AeolisSliceParams"
+  },
   "GcodeParams": {
    "$ref": "#/$defs/GcodeParams"
   },

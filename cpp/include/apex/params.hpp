@@ -273,4 +273,39 @@ struct GcodeParams {
     std::optional<double> max_tip_deviation{0.05};
 };
 
+struct ToolpathParams {
+    double line_width{0.4};
+    int wall_count{2};
+    double infill_density{0.2};
+    double solid_bottom_mm{0.6};
+    double solid_top_mm{0.8};
+    double max_segment{0.5};
+};
+
+struct SliceParams {
+    double min_layer_height{0.1};
+    double max_layer_height{0.25};
+    std::optional<double> layer_height{std::nullopt};
+    std::optional<double> first_layer_height{std::nullopt};
+    bool check_head{true};
+    std::optional<std::string> head_model{std::nullopt};
+    double head_contact_clearance{3.0};
+    double head_safety_margin{0.0};
+    bool intermediate_layers{true};
+    double grid_cell{0.25};
+    ToolpathParams toolpath{ToolpathParams{.line_width = 0.4, .wall_count = 2, .infill_density = 0.2, .solid_bottom_mm = 0.6, .solid_top_mm = 0.8, .max_segment = 0.5}};
+    double filament_diameter{1.75};
+    double flow{1.0};
+    double print_speed{40.0};
+    double travel_speed{100.0};
+    double first_layer_speed{20.0};
+    double retract_length{1.0};
+    double retract_speed{30.0};
+    double z_hop{0.6};
+    double nozzle_temp{200.0};
+    double bed_temp{50.0};
+    bool place_on_bed{true};
+    std::optional<std::array<double, 2>> center_xy{std::nullopt};
+};
+
 }  // namespace apex::params

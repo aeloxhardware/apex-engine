@@ -22,5 +22,8 @@ from pipeline.step9_collision_sim import CollisionSimParams  # noqa: F401
 from pipeline.step9b_support_check import SupportCheckParams  # noqa: F401
 from pipeline.step10_adjustment import Step10Params  # noqa: F401
 
+import importlib as _importlib
+AeolisSliceParams = _importlib.import_module("nonplanar.slicer").SliceParams  # Element Aeolis (R-024)
+
 # Racines du contrat UI : ce que l'interface envoie au moteur.
-ROOTS = {"PipelineParams": PipelineParams, "GcodeParams": GcodeParams}
+ROOTS = {"PipelineParams": PipelineParams, "GcodeParams": GcodeParams, "AeolisSliceParams": AeolisSliceParams}

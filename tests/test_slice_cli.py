@@ -164,3 +164,68 @@ def test_steps_command_lists_aeolis_steps(capsys):
 def test_steps_command_rejects_unknown_algorithm():
     with pytest.raises(SystemExit):
         slice_cli.steps_main(["--algorithm", "inconnu"])
+
+
+# -- Element Aeolis par le meme protocole (R-024) ---------------------------------------------------
+def _plate_stl(tmp_path):
+    path = tmp_path / "plaque.stl"
+    trimesh.creation.box(extents=(12, 12, 3)).export(path)
+    return str(path)
+
+
+def test_default_algorithm_is_ardor(tmp_path):
+    req = slice_cli.parse_request(_request(tmp_path))
+    assert req["algorithm"] == "element-ardor"
+
+
+def test_aeolis_request_uses_its_own_params(tmp_path):
+    req = slice_cli.parse_request(_request(tmp_path, algorithm="element-aeolis",
+                                           params={"min_layer_height": 0.08, "toolpath": {"wall_count": 3}}))
+    assert req["algorithm"] == "element-aeolis" and req["gcode_params"] is None
+    assert req["params"].min_layer_height == 0.08 and req["params"].toolpath.wall_count == 3
+    assert req["params"].max_layer_height == 0.25
+
+
+@pytest.mark.parametrize("overrides, fragment", [
+    ({"algorithm": "inconnu"}, "algorithm"),
+    ({"algorithm": "element-aeolis", "gcode_params": {"print_speed": 20}}, "gcode_params"),
+    ({"algorithm": "element-aeolis", "params": {"resolution": 1.0}}, "resolution"),
+])
+def test_invalid_algorithm_requests_are_refused(tmp_path, overrides, fragment):
+    with pytest.raises(slice_cli.InvalidRequest, match=fragment):
+        slice_cli.parse_request(_request(tmp_path, **overrides))
+
+
+def test_slice_aeolis_end_to_end(tmp_path, capsys):
+    request = tmp_path / "req.json"
+    out_dir = tmp_path / "sortie"
+    request.write_text(_request(tmp_path, mesh=_plate_stl(tmp_path), output_dir=str(out_dir),
+                                algorithm="element-aeolis"))
+    assert slice_cli.slice_main(["--request", str(request)]) == 0
+    captured = capsys.readouterr()
+    lines = captured.out.strip().splitlines()
+    assert len(lines) == 1
+    result = json.loads(lines[0])
+    assert result["status"] == "ok" and result["algorithm"] == "element-aeolis"
+    assert os.path.isfile(result["gcode"]) and result["layers"] > 0 and result["warnings"] == []
+    assert open(result["gcode"], encoding="utf-8").readline().startswith("; ")
+    steps = [e for e in _events(captured.err) if e["type"] == "step"]
+    expected = [s["slug"] for s in slice_cli._steps("element-aeolis")]
+    assert [e["slug"] for e in steps if e["fraction"] == 0.0] == expected
+    assert [e["slug"] for e in steps if e["fraction"] == 1.0] == expected
+    assert {e["slug"] for e in steps} == set(expected)
+    assert sorted(os.listdir(out_dir)) == [os.path.basename(result["gcode"])]
+
+
+def test_slice_aeolis_refuses_a_model_that_is_not_a_heightfield(tmp_path, capsys):
+    path = tmp_path / "tore.stl"
+    ring = trimesh.creation.torus(major_radius=8, minor_radius=2)       # a plat, c'est une surface en hauteur
+    ring.apply_transform(trimesh.transformations.rotation_matrix(1.5707963267948966, [1, 0, 0]))   # debout : trou
+    ring.export(path)
+    request = tmp_path / "req.json"
+    request.write_text(_request(tmp_path, mesh=str(path), output_dir=str(tmp_path / "s"),
+                                algorithm="element-aeolis"))
+    assert slice_cli.slice_main(["--request", str(request)]) == slice_cli.EXIT_REFUSED
+    result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert result["status"] == "not_a_heightfield" and "surface en hauteur" in result["message"]
+    assert not os.path.exists(tmp_path / "s" / "tore.gcode")

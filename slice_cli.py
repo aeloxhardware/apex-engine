@@ -1,7 +1,7 @@
 """
 Protocole d'appel du tranchage (apex/integration/RULES.md, §5 ; contrats C2 et C3).
 
-    python main.py steps
+    python main.py steps [--algorithm element-ardor|element-aeolis]
     python main.py slice --request <requete.json>
 
 `requete.json` :
@@ -10,8 +10,10 @@ Protocole d'appel du tranchage (apex/integration/RULES.md, §5 ; contrats C2 et 
       "mesh": "chemin/modele.stl",        # obligatoire
       "output_dir": "chemin/sortie",      # obligatoire, cree si absent
       "output_name": "modele.gcode",      # facultatif (defaut : <nom du maillage>.gcode)
-      "params": { ... },                  # PipelineParams, partiel (schema C1)
-      "gcode_params": { ... }             # GcodeParams, partiel (schema C1)
+      "algorithm": "element-ardor",       # facultatif ; "element-aeolis" : tranchage non planaire
+      "params": { ... },                  # element-ardor : PipelineParams ; element-aeolis : AeolisSliceParams
+                                          #   (partiel, schema C1)
+      "gcode_params": { ... }             # GcodeParams, partiel (element-ardor seulement : refuse avec aeolis)
     }
 Un champ inconnu, a n'importe quel niveau, est une ERREUR (code 2).
 
@@ -21,6 +23,8 @@ Sorties :
     moteur, jamais d'une minuterie. Le journal libre du pipeline est aussi envoye ici ;
   - sortie standard : un seul objet JSON, derniere ligne (le resultat).
 Codes de sortie : 0 reussi ; 2 requete invalide ; 3 modele refuse ; 1 plantage.
+Element Aeolis : etapes de `nonplanar.slicer.AEOLIS_STEPS` ; un maillage qui n'est pas une surface en hauteur est
+refuse avec le statut `not_a_heightfield` (code 3).
 Le G-code est ecrit sous un nom temporaire puis renomme : un G-code present est complet.
 """
 from __future__ import annotations
@@ -40,7 +44,7 @@ from core import progress as _core_progress
 
 EXIT_OK, EXIT_ERROR, EXIT_INVALID, EXIT_REFUSED = 0, 1, 2, 3
 
-_REQUEST_FIELDS = {"contract", "mesh", "output_dir", "output_name", "params", "gcode_params"}
+_REQUEST_FIELDS = {"contract", "mesh", "output_dir", "output_name", "algorithm", "params", "gcode_params"}
 _REQUIRED_FIELDS = ("contract", "mesh", "output_dir")
 
 
@@ -49,6 +53,7 @@ class InvalidRequest(ValueError):
 
 
 ALGORITHMS = ("element-ardor", "element-aeolis")
+DEFAULT_ALGORITHM = "element-ardor"
 
 
 def _steps(algorithm: str = "element-ardor") -> list[dict]:
@@ -130,6 +135,22 @@ def parse_request(text: str) -> dict:
     if name is not None and (os.path.basename(name) != name or name in (".", "..")):
         raise InvalidRequest("output_name : un nom de fichier, sans dossier")
 
+    algorithm = data.get("algorithm", DEFAULT_ALGORITHM)
+    if algorithm not in ALGORITHMS:
+        raise InvalidRequest(f"algorithm : {algorithm!r} inconnu (attendu : {', '.join(ALGORITHMS)})")
+    if algorithm == "element-aeolis":
+        if "gcode_params" in data:
+            raise InvalidRequest("gcode_params : sans objet avec element-aeolis (G-code cartesien, pas de pivot) ; "
+                                 "les reglages d'impression sont dans params")
+        import importlib
+        aeolis = importlib.import_module("nonplanar.slicer")
+        try:
+            params = schema.from_jsonable(aeolis.SliceParams, data.get("params", {}), base=aeolis.SliceParams())
+        except (ValueError, TypeError, KeyError) as exc:
+            raise InvalidRequest(str(exc)) from exc
+        return {"algorithm": algorithm, "mesh": data["mesh"], "output_dir": data["output_dir"],
+                "output_name": name, "params": params, "gcode_params": None}
+
     from file_io.gcode_export import GcodeParams
     from file_io.pivot_length import current_pivot_to_tip
     from main import PipelineParams
@@ -140,7 +161,7 @@ def parse_request(text: str) -> dict:
         gcode_params = schema.from_jsonable(GcodeParams, data.get("gcode_params", {}), base=gcode_base)
     except (ValueError, TypeError, KeyError) as exc:
         raise InvalidRequest(str(exc)) from exc
-    return {"mesh": data["mesh"], "output_dir": data["output_dir"], "output_name": name,
+    return {"algorithm": algorithm, "mesh": data["mesh"], "output_dir": data["output_dir"], "output_name": name,
             "params": params, "gcode_params": gcode_params}
 
 
@@ -179,6 +200,41 @@ def _counts(result) -> dict:
     }
 
 
+def _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, refuse) -> int:
+    """Element Aeolis : meme protocole que le pipeline principal (etapes de `AEOLIS_STEPS`, un objet resultat).
+    Un maillage qui n'est pas une surface en hauteur est un refus type (code 3, `not_a_heightfield`)."""
+    import importlib
+    aeolis = importlib.import_module("nonplanar.slicer")
+    heightfield = importlib.import_module("nonplanar.heightfield")
+    try:
+        with contextlib.redirect_stdout(log):
+            gcode, report = aeolis.slice_path(request["mesh"], request["params"], progress=progress)
+        with open(temp_path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(gcode)
+        os.replace(temp_path, final_path)
+    except heightfield.NotAHeightfieldError as exc:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(temp_path)
+        return refuse("not_a_heightfield", EXIT_REFUSED,
+                      f"Ce modele n'est pas une surface en hauteur, Element Aeolis ne peut pas le trancher : {exc}",
+                      algorithm="element-aeolis")
+    except Exception as exc:  # plantage : code 1, jamais un G-code incomplet
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(temp_path)
+        traceback.print_exc(file=log)
+        return refuse("error", EXIT_ERROR, f"{type(exc).__name__} : {exc}")
+    finally:
+        _core_progress.end()
+    warnings = []
+    if report.head.colliding_points:
+        warnings.append({"code": "head_collisions", "count": int(report.head.colliding_points)})
+    print(_dumps(_clean(_result(
+        "ok", algorithm="element-aeolis", gcode=os.path.abspath(final_path), report=dataclasses.asdict(report),
+        placement_offset_z=report.offset[2], layers=report.layer_count + report.intermediate_layer_count,
+        collisions_detected=report.head.colliding_points, warnings=warnings))), file=real_stdout, flush=True)
+    return EXIT_OK
+
+
 def slice_main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="main.py slice", description="Tranche un modele selon une requete JSON.")
     parser.add_argument("--request", required=True, help="Fichier requete.json.")
@@ -200,9 +256,6 @@ def slice_main(argv: list[str]) -> int:
     if not os.path.isfile(request["mesh"]):
         return refuse("invalid_request", EXIT_INVALID, f"maillage introuvable : {request['mesh']}")
 
-    from main import export_gcode_checked, run_pipeline
-    from pipeline.step1_ingest import MeshIngestError, SurfaceInconsistentError
-
     os.makedirs(request["output_dir"], exist_ok=True)
     name = request["output_name"] or os.path.splitext(os.path.basename(request["mesh"]))[0] + ".gcode"
     final_path = os.path.join(request["output_dir"], name)
@@ -213,6 +266,12 @@ def slice_main(argv: list[str]) -> int:
 
     def progress(slug: str, fraction: float) -> None:
         _emit(log, {"type": "step", "slug": slug, "fraction": float(fraction)})
+
+    if request["algorithm"] == "element-aeolis":
+        return _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, refuse)
+
+    from main import export_gcode_checked, run_pipeline
+    from pipeline.step1_ingest import MeshIngestError, SurfaceInconsistentError
 
     try:
         # Le journal libre du pipeline (print) va sur la sortie d'erreur : la sortie standard ne
