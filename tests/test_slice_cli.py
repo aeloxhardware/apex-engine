@@ -217,14 +217,31 @@ def test_slice_aeolis_end_to_end(tmp_path, capsys):
     assert sorted(os.listdir(out_dir)) == [os.path.basename(result["gcode"])]
 
 
-def test_slice_aeolis_refuses_a_model_that_is_not_a_heightfield(tmp_path, capsys):
+def _standing_torus(tmp_path):
     path = tmp_path / "tore.stl"
     ring = trimesh.creation.torus(major_radius=8, minor_radius=2)       # a plat, c'est une surface en hauteur
     ring.apply_transform(trimesh.transformations.rotation_matrix(1.5707963267948966, [1, 0, 0]))   # debout : trou
     ring.export(path)
+    return path
+
+
+def test_slice_aeolis_slices_a_model_that_is_not_a_heightfield_by_default(tmp_path, capsys):
+    path = _standing_torus(tmp_path)
     request = tmp_path / "req.json"
     request.write_text(_request(tmp_path, mesh=str(path), output_dir=str(tmp_path / "s"),
                                 algorithm="element-aeolis"))
+    assert slice_cli.slice_main(["--request", str(request)]) == 0
+    result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert result["status"] == "ok" and result["report"]["mode"] == "general"
+    assert "surface en hauteur" in result["report"]["fallback_reason"] or "volume" in result["report"]["fallback_reason"]
+    assert os.path.isfile(result["gcode"]) and result["layers"] > 0
+
+
+def test_slice_aeolis_heightfield_mode_still_refuses_it(tmp_path, capsys):
+    path = _standing_torus(tmp_path)
+    request = tmp_path / "req.json"
+    request.write_text(_request(tmp_path, mesh=str(path), output_dir=str(tmp_path / "s"),
+                                algorithm="element-aeolis", params={"mode": "heightfield"}))
     assert slice_cli.slice_main(["--request", str(request)]) == slice_cli.EXIT_REFUSED
     result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert result["status"] == "not_a_heightfield" and "surface en hauteur" in result["message"]

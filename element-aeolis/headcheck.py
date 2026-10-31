@@ -12,6 +12,7 @@ a que le plateau.
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -56,6 +57,20 @@ def load_envelope(path: str | Path | None = None, contact_clearance: float = 3.0
     rr = np.hypot(low[:, 0], low[:, 1])
     slope = np.degrees(np.arctan2(low[:, 2], np.maximum(rr, 1e-9)))
     return HeadEnvelope(low[:, 0], low[:, 1], low[:, 2], float(slope.min()))
+
+
+def parametric_envelope(angle_deg: float, reach: float, radius: float = 25.0, r_step: float = 1.0,
+                        n_az: int = 36) -> HeadEnvelope:
+    """Enveloppe d'une buse décrite par deux réglages d'imprimante, sans modèle 3D.
+
+    `angle_deg` : pente, depuis l'horizontale, de la surface de la buse (la matière voisine peut monter de r·tan α à la
+    distance r de la pointe) ; `reach` : longueur de buse sous le conduit de ventilation (mm), au-delà de laquelle le
+    conduit, plat, est la limite. Hauteur de l'enveloppe à la distance r : min(r·tan α, reach)."""
+    r = np.arange(r_step / 2, radius, r_step)
+    az = (np.arange(n_az) + 0.5) / n_az * 2 * np.pi
+    rr, aa = np.meshgrid(r, az)
+    h = np.minimum(rr * math.tan(math.radians(min(max(angle_deg, 0.0), 89.0))), max(reach, 0.0))
+    return HeadEnvelope((rr * np.cos(aa)).ravel(), (rr * np.sin(aa)).ravel(), h.ravel(), float(angle_deg))
 
 
 def check_points(env: HeadEnvelope, field, z_fn, t_fn, xy: np.ndarray, z_tip: np.ndarray,

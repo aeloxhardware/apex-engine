@@ -20,6 +20,7 @@ from file_io import kinematics_description as kin
 from file_io.apex_header import header_block_lines
 from file_io.apex_signature import SIGNATURE, common_meta
 from file_io.gcode_axes import axes_words
+from . import general as gen
 from . import headcheck as hc
 from .regions import mask_to_geometry
 
@@ -31,8 +32,14 @@ class SliceParams:
     max_layer_height: float = ly.DEFAULT_MAX_LAYER
     layer_height: float | None = None         # épaisseur nominale ; None : 0,2 (0,25 sans inter-couches)
     first_layer_height: float | None = None   # None : 0,2 borné par plancher et plafond
-    check_head: bool = True                   # collision de la vraie tête (buse verticale)
-    head_model: str | None = None             # GLB de la tête ; None : aetheris-4
+    # Buse de l'imprimante (profil d'imprimante, donc interface). Défauts TRÈS BAS : ils ne cassent pas une
+    # imprimante à conduits de ventilation serrés (Anycubic...). À relever pour une tête dégagée.
+    nozzle_reach: float = 2.0                 # « longueur maximale atteignable par la buse » : dénivelé max pointe / matière voisine (mm)
+    nozzle_angle_deg: float = 10.0            # « angle de la buse » : pente max de la surface voisine depuis l'horizontale (°)
+    enforce_nozzle_limits: bool = True        # le moteur « surface en hauteur » n'est gardé que s'il respecte ces limites
+    mode: str = "auto"                        # "auto" | "heightfield" (refuse le reste) | "general" (tranchage général)
+    check_head: bool = True                   # contrôle de la buse (enveloppe des deux réglages ci-dessus)
+    head_model: str | None = None             # GLB d'une vraie tête (remplace l'enveloppe des deux réglages) ; None : réglages
     head_contact_clearance: float = 3.0       # zone de contact buse/cordon exclue du test (mm)
     head_safety_margin: float = 0.0
     intermediate_layers: bool = True          # inter-couches locales là où l'espacement dépasse le plafond
@@ -77,6 +84,9 @@ class SliceReport:
     filament_length: float
     offset: tuple[float, float, float]
     head: hc.HeadReport = field(default_factory=hc.HeadReport)
+    mode: str = "heightfield"         # moteur utilisé : "heightfield" ou "general"
+    fallback_reason: str = ""         # pourquoi le moteur « surface en hauteur » n'a pas été gardé (mode auto)
+    relief_mm: float = 0.0            # amplitude du relief des couches (tranchage général)
 
 
 def _bead_area(t: np.ndarray, w: float) -> np.ndarray:
@@ -84,7 +94,7 @@ def _bead_area(t: np.ndarray, w: float) -> np.ndarray:
     return t * (w - t) + math.pi * t * t / 4.0
 
 
-def _header_meta(p: "SliceParams") -> dict:
+def _header_meta(p: "SliceParams", mode: str = "heightfield") -> dict:
     """Metadonnees du bloc d'en-tete chiffre (R-010) : la machine et sa cinematique, pour que l'apercu
     ne les devine pas d'apres les mots presents."""
     desc = kin.cartesian()
@@ -92,7 +102,8 @@ def _header_meta(p: "SliceParams") -> dict:
             "algorithm_name": "Element Aeolis",
             "machine": desc["machine"], "kinematics_description": desc,
             "min_layer_height": p.min_layer_height, "max_layer_height": p.max_layer_height,
-            "intermediate_layers": p.intermediate_layers}
+            "intermediate_layers": p.intermediate_layers, "aeolis_mode": mode,
+            "nozzle_reach": p.nozzle_reach, "nozzle_angle_deg": p.nozzle_angle_deg}
 
 
 class _Stages:
@@ -158,66 +169,111 @@ def _slice(mesh: trimesh.Trimesh, params: SliceParams | None, stages: "_Stages")
         off[1] = p.center_xy[1] - c[1]
     mesh.apply_translation(off)
 
-    stages.open("heightfield")
-    field_ = hf.from_mesh(mesh, p.grid_cell)
-    stages.open("layer_surfaces")
-    stack = ly.build(field_, p.layer_height, p.first_layer_height, min_layer=p.min_layer_height,
-                     max_layer=p.max_layer_height, intermediate=p.intermediate_layers)
-    _progress.milestone(0.5)
-    sequence = stack.sequence()
-    last_grid, split_grid = stack.last_grid(), stack.split_grid()
-    xs, ys = field_.xs, field_.ys
-    n = stack.count
+    if p.mode not in ("auto", "heightfield", "general"):
+        raise ValueError(f"mode : 'auto', 'heightfield' ou 'general' attendu, pas {p.mode!r}")
     w = p.toolpath.line_width
     fil_area = math.pi * (p.filament_diameter / 2) ** 2
 
-    # -- parois et remplissage : une couche après l'autre --------------------------------------
-    stages.open("toolpath2d")
-    gx, gy = np.meshgrid(xs, ys)
-    gxr, gyr = gx.ravel(), gy.ravel()
-    grid_col = stack.sample(gxr, gyr)          # colonnes aux nœuds, calculées une fois pour toutes les couches
-    layers_data: list[tuple[int, int, float, list[np.ndarray]]] = []   # (k, j, vitesse, polylignes 3D)
-    for done, (k, j) in enumerate(sequence):
-        _progress.report(done, len(sequence))
-        mask = stack.active_mask(k, j, last_grid, split_grid)
-        region = field_.footprint.intersection(mask_to_geometry(xs, ys, mask))
-        if region.is_empty or region.area < 1e-3:
-            continue
-        zg = grid_col.layer_z(k, j).reshape(gx.shape)
-        solid_mask = ((field_.top - zg) < p.toolpath.solid_top_mm) | \
-            ((zg - field_.bottom) < p.toolpath.solid_bottom_mm)
-        solid_mask = np.where(np.isnan(field_.top), False, solid_mask) & mask
-        solid = field_.footprint.intersection(mask_to_geometry(xs, ys, solid_mask))
-        speed = p.first_layer_speed if (k == 1 and j == 0) else p.print_speed
-        # L'angle du remplissage alterne d'une couche à l'autre ; compté depuis le HAUT de chaque
-        # colonne pour que la couche du dessus ait partout la même direction (sinon le dessus se
-        # compose de plaques d'orientations différentes là où les colonnes finissent à des rangs
-        # différents).
-        zones = None
-        if j == 0:
-            parity = np.where(np.isnan(last_grid), 0, (last_grid - k) % 2) == 0
-            even = field_.footprint.intersection(mask_to_geometry(xs, ys, parity & mask))
-            odd = field_.footprint.intersection(mask_to_geometry(xs, ys, ~parity & mask))
-            zones = [(even, 45.0), (odd, 135.0)]
-        path = tp.layer_polylines(region, solid, k * 100 + j, p.toolpath, field_.footprint, zones)
-        xy_list = [tp.densify_xy(pl.xy, p.toolpath.max_segment) for pl in path.polylines]
-        xy_all = np.vstack(xy_list) if xy_list else np.zeros((0, 2))
-        z_all = stack.sample(xy_all[:, 0], xy_all[:, 1]).layer_z(k, j) if len(xy_all) else np.zeros(0)
-        polys3d, lo = [], 0
-        for xy in xy_list:
-            pts = np.column_stack([xy, z_all[lo:lo + len(xy)]])
-            lo += len(xy)
-            if len(pts) < 2 or np.isnan(pts[:, 2]).any():
-                continue
-            polys3d.append(pts)
-        layers_data.append((k, j, speed, polys3d))
+    # -- choix du moteur : « surface en hauteur » si le modèle l'est ET que la buse y passe, sinon général ------
+    stages.open("heightfield")
+    field_ = None
+    fallback_reason = ""
+    if p.mode != "general":
+        try:
+            field_ = hf.from_mesh(mesh, p.grid_cell)
+        except hf.NotAHeightfieldError as exc:
+            if p.mode == "heightfield":
+                raise
+            fallback_reason = str(exc)
+    stack = None
+    if field_ is not None:
+        stages.open("layer_surfaces")
+        stack = ly.build(field_, p.layer_height, p.first_layer_height, min_layer=p.min_layer_height,
+                         max_layer=p.max_layer_height, intermediate=p.intermediate_layers)
+        _progress.milestone(0.5)
+        if p.mode == "auto" and p.enforce_nozzle_limits:
+            excess = gen.surfaces_violation(stack, field_, p.nozzle_angle_deg, p.nozzle_reach)
+            if excess > p.min_layer_height:
+                fallback_reason = (f"les couches de la surface en hauteur dépassent les limites de la buse "
+                                   f"(angle {p.nozzle_angle_deg:g}°, longueur {p.nozzle_reach:g} mm) de {excess:.2f} mm")
+                field_ = stack = None
+    report_mode = "heightfield" if field_ is not None else "general"
+    plan = None
+    if field_ is None:
+        analysis = dict(nozzle_angle_deg=p.nozzle_angle_deg, nozzle_reach=p.nozzle_reach, layer_height=p.layer_height,
+                        first_layer=p.first_layer_height, min_layer=p.min_layer_height, max_layer=p.max_layer_height)
+        if stages.current == "layer_surfaces":
+            # Refus APRES le calcul des surfaces : on reste dans cette étape, sur la seconde moitié de sa barre.
+            with _progress.phase(0.5, 1.0):
+                plan = gen.analyze(mesh, **analysis)
+                gen.compute_regions(plan)
+        else:
+            plan = gen.analyze(mesh, **analysis)
+            stages.open("layer_surfaces")
+            gen.compute_regions(plan)
+        stack, field_ = plan.stack, plan.field
+        sequence = [(k, 0) for k in range(1, plan.count + 1)]
+        n = plan.count
+        stages.open("toolpath2d")
+        layers_data = gen.layer_paths(plan, p, p.first_layer_speed, p.print_speed)
+    else:
+        sequence = stack.sequence()
+        last_grid, split_grid = stack.last_grid(), stack.split_grid()
+        xs, ys = field_.xs, field_.ys
+        n = stack.count
 
-    # -- collision de la vraie tête -------------------------------------------------------------
-    head_env = hc.load_envelope(p.head_model, p.head_contact_clearance) if p.check_head else None
+        # -- parois et remplissage : une couche après l'autre ------------------------------------------
+        stages.open("toolpath2d")
+        gx, gy = np.meshgrid(xs, ys)
+        gxr, gyr = gx.ravel(), gy.ravel()
+        grid_col = stack.sample(gxr, gyr)          # colonnes aux nœuds, calculées une fois pour toutes les couches
+        layers_data = []   # (k, j, vitesse, polylignes 3D)
+        for done, (k, j) in enumerate(sequence):
+            _progress.report(done, len(sequence))
+            mask = stack.active_mask(k, j, last_grid, split_grid)
+            region = field_.footprint.intersection(mask_to_geometry(xs, ys, mask))
+            if region.is_empty or region.area < 1e-3:
+                continue
+            zg = grid_col.layer_z(k, j).reshape(gx.shape)
+            solid_mask = ((field_.top - zg) < p.toolpath.solid_top_mm) | \
+                ((zg - field_.bottom) < p.toolpath.solid_bottom_mm)
+            solid_mask = np.where(np.isnan(field_.top), False, solid_mask) & mask
+            solid = field_.footprint.intersection(mask_to_geometry(xs, ys, solid_mask))
+            speed = p.first_layer_speed if (k == 1 and j == 0) else p.print_speed
+            # L'angle du remplissage alterne d'une couche à l'autre ; compté depuis le HAUT de chaque
+            # colonne pour que la couche du dessus ait partout la même direction (sinon le dessus se
+            # compose de plaques d'orientations différentes là où les colonnes finissent à des rangs
+            # différents).
+            zones = None
+            if j == 0:
+                parity = np.where(np.isnan(last_grid), 0, (last_grid - k) % 2) == 0
+                even = field_.footprint.intersection(mask_to_geometry(xs, ys, parity & mask))
+                odd = field_.footprint.intersection(mask_to_geometry(xs, ys, ~parity & mask))
+                zones = [(even, 45.0), (odd, 135.0)]
+            path = tp.layer_polylines(region, solid, k * 100 + j, p.toolpath, field_.footprint, zones)
+            xy_list = [tp.densify_xy(pl.xy, p.toolpath.max_segment) for pl in path.polylines]
+            xy_all = np.vstack(xy_list) if xy_list else np.zeros((0, 2))
+            z_all = stack.sample(xy_all[:, 0], xy_all[:, 1]).layer_z(k, j) if len(xy_all) else np.zeros(0)
+            polys3d, lo = [], 0
+            for xy in xy_list:
+                pts = np.column_stack([xy, z_all[lo:lo + len(xy)]])
+                lo += len(xy)
+                if len(pts) < 2 or np.isnan(pts[:, 2]).any():
+                    continue
+                polys3d.append(pts)
+            layers_data.append((k, j, speed, polys3d))
+
+    # -- contrôle de la buse -----------------------------------------------------------------------
+    head_env = None
+    if p.check_head:
+        head_env = hc.load_envelope(p.head_model, p.head_contact_clearance) if p.head_model \
+            else hc.parametric_envelope(p.nozzle_angle_deg, p.nozzle_reach)
     head_rep = hc.HeadReport(checked=head_env is not None,
                              clearance_slope_deg=head_env.clearance_slope_deg if head_env else 0.0)
     stages.open("collision")
-    if head_env is not None:
+    if head_env is not None and plan is not None:
+        gen.head_check(plan, layers_data, head_env, p.head_safety_margin, head_rep)
+    elif head_env is not None:
         total_samples = sum(len(pts[::3]) for _, _, _, polys in layers_data for pts in polys) or 1
         sampled = 0
         for k, j, _speed, polys in layers_data:
@@ -242,7 +298,7 @@ def _slice(mesh: trimesh.Trimesh, params: SliceParams | None, stages: "_Stages")
     out: list[str] = [
         SIGNATURE,
         "; apex_nonplanar = 1",
-        *header_block_lines(_header_meta(p)),
+        *header_block_lines(_header_meta(p, report_mode)),
         "G21", "G90", "M82",
         f"M140 S{p.bed_temp:g}", f"M104 S{p.nozzle_temp:g}", "G28",
         f"M190 S{p.bed_temp:g}", f"M109 S{p.nozzle_temp:g}", "G92 E0",
@@ -335,7 +391,8 @@ def _slice(mesh: trimesh.Trimesh, params: SliceParams | None, stages: "_Stages")
     report = SliceReport(
         layer_count=n, intermediate_layer_count=len(sequence) - n,
         fraction_below_min=below_len / total_len if total_len else 0.0, thickness_min=float(thick_min), thickness_max=float(thick_max),
-        slope_max_deg=ly.max_slope_deg(field_, stack, stack.count), head=head_rep, extruded_length=total_len,
-        filament_length=e, offset=(float(off[0]), float(off[1]), float(off[2])),
+        slope_max_deg=plan.slope_deg if plan is not None else ly.max_slope_deg(field_, stack, stack.count),
+        head=head_rep, extruded_length=total_len, filament_length=e, offset=(float(off[0]), float(off[1]), float(off[2])),
+        mode=report_mode, fallback_reason=fallback_reason, relief_mm=plan.relief.amp if plan is not None else 0.0,
     )
     return "\n".join(out) + "\n", report

@@ -25,7 +25,7 @@
   },
   "AeolisSliceParams": {
    "additionalProperties": false,
-   "description": "SliceParams(min_layer_height: 'float' = 0.1, max_layer_height: 'float' = 0.25, layer_height: 'float | None' = None, first_layer_height: 'float | None' = None, check_head: 'bool' = True, head_model: 'str | None' = None, head_contact_clearance: 'float' = 3.0, head_safety_margin: 'float' = 0.0, intermediate_layers: 'bool' = True, grid_cell: 'float' = 0.25, toolpath: 'tp.ToolpathParams' = <factory>, filament_diameter: 'float' = 1.75, flow: 'float' = 1.0, print_speed: 'float' = 40.0, travel_speed: 'f",
+   "description": "SliceParams(min_layer_height: 'float' = 0.1, max_layer_height: 'float' = 0.25, layer_height: 'float | None' = None, first_layer_height: 'float | None' = None, nozzle_reach: 'float' = 2.0, nozzle_angle_deg: 'float' = 10.0, enforce_nozzle_limits: 'bool' = True, mode: 'str' = 'auto', check_head: 'bool' = True, head_model: 'str | None' = None, head_contact_clearance: 'float' = 3.0, head_safety_margin: 'float' = 0.0, intermediate_layers: 'bool' = True, grid_cell: 'float' = 0.25, toolpath: 'tp.Toolpat",
    "properties": {
     "bed_temp": {
      "default": 50.0,
@@ -53,6 +53,10 @@
      "default": null
     },
     "check_head": {
+     "default": true,
+     "type": "boolean"
+    },
+    "enforce_nozzle_limits": {
      "default": true,
      "type": "boolean"
     },
@@ -123,6 +127,18 @@
     },
     "min_layer_height": {
      "default": 0.1,
+     "type": "number"
+    },
+    "mode": {
+     "default": "auto",
+     "type": "string"
+    },
+    "nozzle_angle_deg": {
+     "default": 10.0,
+     "type": "number"
+    },
+    "nozzle_reach": {
+     "default": 2.0,
      "type": "number"
     },
     "nozzle_temp": {

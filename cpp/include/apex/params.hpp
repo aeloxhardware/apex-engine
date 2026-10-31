@@ -287,6 +287,10 @@ struct SliceParams {
     double max_layer_height{0.25};
     std::optional<double> layer_height{std::nullopt};
     std::optional<double> first_layer_height{std::nullopt};
+    double nozzle_reach{2.0};
+    double nozzle_angle_deg{10.0};
+    bool enforce_nozzle_limits{true};
+    std::string mode{"auto"};
     bool check_head{true};
     std::optional<std::string> head_model{std::nullopt};
     double head_contact_clearance{3.0};

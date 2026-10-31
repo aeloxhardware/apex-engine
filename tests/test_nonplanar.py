@@ -93,8 +93,9 @@ def test_overhang_is_refused():
 
 def test_gcode_extrusion_monotone_and_z_inside_part():
     m = wave_plate()
-    gcode, rep = slice_mesh(m, SliceParams(grid_cell=0.5))
-    assert rep.layer_count > 5
+    # Ce test porte sur le moteur « surface en hauteur » : on lève la garde de la buse (sinon repli général).
+    gcode, rep = slice_mesh(m, SliceParams(grid_cell=0.5, enforce_nozzle_limits=False))
+    assert rep.mode == "heightfield" and rep.layer_count > 5
     f = from_mesh(m, cell=0.5)
     last_e, zmax = 0.0, 0.0
     for line in gcode.splitlines():
@@ -156,7 +157,12 @@ def test_head_report_in_slice():
     _, rep = slice_mesh(m, SliceParams(grid_cell=0.5))
     assert rep.head.checked and rep.head.points > 0
     assert rep.head.colliding_points == 0                    # ondulation douce
-    assert 15 < rep.head.clearance_slope_deg < 45
+    assert rep.head.clearance_slope_deg == pytest.approx(SliceParams().nozzle_angle_deg)   # enveloppe des réglages de buse
+    # Une vraie tête (GLB) remplace l'enveloppe des réglages.
+    from nonplanar.headcheck import DEFAULT_HEAD
+    if DEFAULT_HEAD.exists():
+        _, rep = slice_mesh(m, SliceParams(grid_cell=0.5, head_model=str(DEFAULT_HEAD)))
+        assert 15 < rep.head.clearance_slope_deg < 45
 
 
 def test_every_motion_carries_the_six_axes_and_header_describes_kinematics():
@@ -312,3 +318,157 @@ def test_footprint_falls_back_when_top_faces_overlap():
     b.apply_translation((5, 0, 0))
     both = trimesh.util.concatenate([a, b])
     assert _footprint(both).area == pytest.approx(150.0, abs=1e-4)
+
+
+# --------------------------------------------------------------------------------- tranchage général
+
+def cavity_box(outer=30.0, inner=20.0, height=12.0, cavity_h=6.0) -> trimesh.Trimesh:
+    """Boîte fermée creuse : une cavité interne (ni surface en hauteur, ni imprimable par un moteur 2,5D)."""
+    box = trimesh.creation.box([outer, outer, height])
+    box.apply_translation([0, 0, height / 2])
+    hole = trimesh.creation.box([inner, inner, cavity_h])
+    hole.apply_translation([0, 0, height / 2])
+    return box.difference(hole)
+
+
+def test_cone_minorant_matches_brute_force():
+    from nonplanar.general import cone_minorant
+    rng = np.random.default_rng(3)
+    f = np.full((14, 17), np.inf)
+    for _ in range(4):
+        f[rng.integers(0, 14), rng.integers(0, 17)] = rng.uniform(0, 5)
+    step = 0.3
+    got = cone_minorant(f, step)
+    jj, ii = np.indices(f.shape)
+    src = np.argwhere(np.isfinite(f))
+    brute = np.min([f[a, b] + step * np.hypot(jj - a, ii - b) for a, b in src], axis=0)
+    assert (got >= brute - 1e-9).all()                       # le chanfrein surestime la distance euclidienne...
+    src_min = np.min([f[a, b] + 1.0824 * step * np.hypot(jj - a, ii - b) for a, b in src], axis=0)
+    assert (got <= src_min + 1e-9).all()                     # ... d'au plus 8,24 % (1/cos 22,5°)
+    assert (got <= f + 1e-12).all()
+
+
+def test_relief_respects_the_nozzle_limits():
+    from nonplanar.general import build_relief
+    xs = ys = np.arange(0, 40.001, 0.5)
+    X, Y = np.meshgrid(xs, ys)
+    top = 10.0 + 3.0 * np.exp(-((X - 20) ** 2 + (Y - 20) ** 2) / 40.0)          # bosse gaussienne
+    for angle, reach in ((10.0, 2.0), (25.0, 1.0), (45.0, 4.0)):
+        r = build_relief(top, xs, ys, angle, reach, z_bottom=0.0)
+        assert r.d.max() <= 1e-9 and r.d.min() >= -reach - 1e-9
+        assert r.max_gradient <= np.tan(np.radians(angle)) * 1.01
+        # D(q) − D(p) ≤ min(r·tan α, reach) sur des couples tirés au hasard
+        rng = np.random.default_rng(0)
+        a, b = rng.integers(0, len(xs), (2, 400)), rng.integers(0, len(xs), (2, 400))
+        dist = np.hypot(xs[a[0]] - xs[b[0]], ys[a[1]] - ys[b[1]])
+        diff = r.d[a[1], a[0]] - r.d[b[1], b[0]]
+        assert (diff <= np.minimum(dist * np.tan(np.radians(angle)) * 1.01, reach) + 1e-9).all()
+
+
+def test_relief_vanishes_without_nozzle_slack():
+    from nonplanar.general import build_relief
+    xs = ys = np.arange(0, 10.001, 0.5)
+    top = 5.0 + np.outer(np.linspace(0, 1, len(ys)), np.ones(len(xs)))
+    assert np.abs(build_relief(top, xs, ys, 0.0, 2.0, 0.0).d).max() == 0.0     # angle nul : planaire
+    assert np.abs(build_relief(top, xs, ys, 30.0, 0.0, 0.0).d).max() == 0.0    # buse sans longueur : planaire
+
+
+def test_section_region_keeps_cavities_as_holes():
+    from nonplanar.general import section_region
+    m = cavity_box()
+    z = m.vertices[:, 2]
+    r = section_region(m.vertices, m.faces, z - 6.0)         # coupe au milieu de la cavité
+    assert r.area == pytest.approx(30 * 30 - 20 * 20, rel=1e-6)
+    r = section_region(m.vertices, m.faces, z - 2.0)         # sous la cavité : plein
+    assert r.area == pytest.approx(30 * 30, rel=1e-6)
+
+
+def test_cavity_model_is_sliced_by_default_with_the_general_engine():
+    m = cavity_box()
+    gcode, rep = slice_mesh(m, SliceParams())
+    assert rep.mode == "general" and "volume" in rep.fallback_reason
+    assert rep.layer_count >= 55
+    assert rep.head.checked and rep.head.points > 0 and rep.head.colliding_points == 0
+    assert rep.thickness_min >= 0.1 - 1e-6 and rep.thickness_max <= 0.25 + 1e-6
+    zs = [float(l.split(" Z")[1].split()[0]) for l in gcode.splitlines() if l.startswith("G1") and " E" in l and " Z" in l]
+    assert min(zs) == pytest.approx(0.2, abs=1e-3) and max(zs) == pytest.approx(12.0, abs=0.02)
+    assert '"aeolis_mode"' not in gcode                       # le bloc d'en-tête est chiffré, pas en clair
+
+
+def test_general_engine_fills_the_part_volume():
+    from nonplanar.toolpath import ToolpathParams
+    m = cavity_box()
+    _, rep = slice_mesh(m, SliceParams(toolpath=ToolpathParams(infill_density=1.0)))
+    volume = rep.filament_length * np.pi * (1.75 / 2) ** 2
+    assert 0.85 * m.volume < volume < 1.05 * m.volume
+
+
+def test_mode_heightfield_refuses_and_mode_general_accepts_a_heightfield():
+    with pytest.raises(NotAHeightfieldError):
+        slice_mesh(cavity_box(), SliceParams(mode="heightfield"))
+    _, rep = slice_mesh(wave_plate(), SliceParams(mode="general", grid_cell=0.5))
+    assert rep.mode == "general" and rep.fallback_reason == ""
+    with pytest.raises(ValueError):
+        slice_mesh(wave_plate(), SliceParams(mode="inconnu"))
+
+
+def test_default_nozzle_limits_send_a_steep_plate_to_the_general_engine_and_raised_limits_keep_it():
+    m = wave_plate(amp=1.5, mean=3.0)                          # pente maximale environ 25°
+    _, low = slice_mesh(m, SliceParams(grid_cell=0.5))
+    assert low.mode == "general" and "limites de la buse" in low.fallback_reason
+    assert low.slope_max_deg <= SliceParams().nozzle_angle_deg + 1e-6       # les couches respectent l'angle
+    assert low.head.colliding_points == 0
+    _, high = slice_mesh(m, SliceParams(grid_cell=0.5, nozzle_angle_deg=80.0, nozzle_reach=50.0))
+    assert high.mode == "heightfield" and high.head.colliding_points == 0
+    _, off = slice_mesh(m, SliceParams(grid_cell=0.5, enforce_nozzle_limits=False))
+    assert off.mode == "heightfield"                                        # l'ancien comportement reste disponible
+
+
+def wedge_plate(size=20.0, deg=8.0, base=4.0) -> trimesh.Trimesh:
+    """Prisme : dessous plat, dessus en pente douce de `deg` degrés, flancs verticaux."""
+    rise = np.tan(np.radians(deg)) * size
+    verts = np.array([[0, 0, 0], [size, 0, 0], [size, size, 0], [0, size, 0],
+                      [0, 0, base], [size, 0, base + rise], [size, size, base + rise], [0, size, base]], float)
+    faces = np.array([[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5],
+                      [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]])
+    m = trimesh.Trimesh(verts, faces, process=True)
+    m.fix_normals()
+    return m
+
+
+def test_refinement_keeps_the_mesh_watertight_and_the_volume():
+    from nonplanar.general import _refine
+    m = cavity_box()
+    v, f = _refine(m.vertices, m.faces, 0.7)
+    r = trimesh.Trimesh(v, f, process=False)
+    assert len(f) > 10 * len(m.faces)
+    assert r.is_watertight and r.volume == pytest.approx(m.volume, rel=1e-9)   # aucune jonction en T
+    assert np.max(np.linalg.norm(v[f][:, :, :2] - np.roll(v[f][:, :, :2], 1, axis=1), axis=2)) <= 0.7 + 1e-9
+
+
+def test_relief_does_not_lose_material():
+    """Le relief déplace les couches, pas la matière : même quantité de filament avec et sans relief. (Le défaut
+    d'origine, un raffinement à jonctions en T qui ouvrait les contours, faisait tomber death.stl de 113 000 à
+    5 010 mm extrudés ; le test d'étanchéité du raffinement le couvre directement.)"""
+    m = wedge_plate()
+    flat = slice_mesh(m, SliceParams(mode="general", nozzle_angle_deg=0.0))[1]
+    warped = slice_mesh(m, SliceParams(mode="general", nozzle_angle_deg=10.0, nozzle_reach=2.0))[1]
+    assert warped.relief_mm > 0.1 and flat.relief_mm == 0.0
+    assert warped.filament_length == pytest.approx(flat.filament_length, rel=0.06)
+
+
+def test_general_layers_follow_a_gentle_top_and_stay_inside_the_limits():
+    """Plaque à dessus en pente douce (8°) : la pente des couches ne dépasse jamais l'angle de la buse ni leur dénivelé
+    sa longueur, et elles épousent le dessus (écart au dessus bien plus petit que sans relief)."""
+    from nonplanar.general import analyze
+    kw = dict(layer_height=None, first_layer=None, min_layer=0.1, max_layer=0.25)
+    plan = analyze(wedge_plate(), nozzle_angle_deg=10.0, nozzle_reach=2.0, **kw)
+    assert plan.relief.amp > 0.1
+    top_layer = plan.stack.count
+    for k in (top_layer // 2, top_layer):
+        z = plan.stack.z_at(k, plan.relief.d)
+        gy, gx = np.gradient(z, plan.relief.ys, plan.relief.xs)
+        assert np.hypot(gx, gy).max() <= np.tan(np.radians(10.0)) * 1.01
+        assert z.max() - z.min() <= 2.0 + 1e-9
+    flat = analyze(wedge_plate(), nozzle_angle_deg=0.0, nozzle_reach=2.0, **kw)
+    assert flat.relief.amp == 0.0

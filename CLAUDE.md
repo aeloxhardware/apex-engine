@@ -2152,6 +2152,23 @@ pour affichage/validation avant export G-code.
     quand l'utilisateur décide de l'exposer.
     **Progression et vitesse (2026-10-30, `alpha-0.2.3.0.4.0.0.221`).** Étapes : `import`, `heightfield`, `layer_surfaces`, `toolpath2d`, `collision`, `export` (`slicer.AEOLIS_STEPS`, `main.py steps --algorithm element-aeolis`), chacune avec des fractions RÉELLES (`core/progress.py`) ; le tranchage tourne en trois phases pour cela. Plaques de test : 14-37 s → 3-9 s (tableau dans `element-aeolis/README.md`) : colonnes interpolées une fois (`LayerStack.sample`), rastérisation vectorisée (identique au bit), union de couverture pour l'empreinte (écart ~1e-7 mm² avec l'ancienne : dernier chiffre de `E` parfois différent), test d'intersection préparé dans le zigzag. Reste au profil : overlay shapely du remplissage (~2 s sur plate_6), écriture du texte (~1,5 s). **Appelable par `main.py slice --request` depuis `alpha-0.2.3.0.5.0.0.221`** (champ `algorithm: "element-aeolis"`, params = `AeolisSliceParams`, refus `not_a_heightfield` code 3 ; `slice_cli._slice_aeolis`, 7 tests dans `tests/test_slice_cli.py`) ; étapes pour l'interface : R-026.
 
+84b. **Element Aeolis tranche toute géométrie (2026-10-31, demande de l'utilisateur : « Aeolis doit supporter tous les
+    modèles et faire de son mieux pour lisser », `alpha-0.2.3.0.6.0.0.221`).** Le refus « n'est pas une surface en hauteur »
+    (volume intégré ≠ volume du maillage : surplomb, cavité) n'était pas un défaut du moteur mais son domaine. Nouveau
+    moteur `element-aeolis/general.py` (sections planaires déformées par un relief doux, voir son README) utilisé en
+    repli (`SliceParams.mode = "auto"`) ; `report.mode` / `report.fallback_reason` disent lequel. Deux réglages d'imprimante,
+    défauts TRÈS BAS (décision de l'utilisateur : ne pas casser les conduits de ventilation serrés type Anycubic) :
+    `nozzle_angle_deg` = 10° (« Angle de la buse ») et `nozzle_reach` = 2 mm (« Longueur maximale atteignable par la buse »),
+    sens exacts dans le README d'Aeolis (**à faire confirmer par l'utilisateur**). Ils s'appliquent AUSSI au moteur
+    « surface en hauteur » : il n'est gardé que s'il les respecte (`gen.surfaces_violation`, transformée en chanfrein),
+    sinon repli général ; les plaques de test passent donc en général aux défauts (`enforce_nozzle_limits=False` ou 80° /
+    50 mm rendent l'ancien lissage). Garantie sans collision PAR CONSTRUCTION (relief ≤ min(r·tan α, reach)), vérifiée
+    par `head_check` (0 collision sur death, turkish et les 3 modèles à surplomb). **Bug trouvé en mesurant** :
+    `trimesh.remesh.subdivide(face_index=...)` laisse des jonctions en T ; les contours des sections s'ouvraient dès que le
+    relief était actif (death : 5 010 mm extrudés au lieu de ~113 000). Raffinement conforme maison (`_refine`),
+    test d'étanchéité. Leçon : comparer la longueur extrudée entre variantes d'un même modèle, pas seulement les collisions.
+    Limites : un seul relief ancré sur les colonnes les plus hautes ; dessous planaire ; turkish ~90 s ; pente mesurée jusqu'à 48° pour un réglage de 45° (chanfrein).
+
 85. **Famille de noms des algorithmes de tranchage (décision de l'utilisateur, 2026-10-29) : toujours préfixés
     « Element », un dossier `element-xxxx/` chacun.** **Element Ardor** : pipeline principal 5 axes par la méthode de la
     chaleur (le feu ; dossier `element-ardor/`, fait). **Element Aeolis** : non planaire, couches `z = S_k(x,y)` (fait, limite #84). **Element Aequor** :

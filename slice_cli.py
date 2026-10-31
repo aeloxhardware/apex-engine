@@ -202,10 +202,13 @@ def _counts(result) -> dict:
 
 def _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, refuse) -> int:
     """Element Aeolis : meme protocole que le pipeline principal (etapes de `AEOLIS_STEPS`, un objet resultat).
-    Un maillage qui n'est pas une surface en hauteur est un refus type (code 3, `not_a_heightfield`)."""
+    Par defaut (`mode: auto`) tout maillage se tranche : le moteur « surface en hauteur » quand le modele en est une
+    ET que la buse y passe, sinon le tranchage general (`report.mode`, `report.fallback_reason`). Refus type (code 3) :
+    `not_a_heightfield` avec `mode: heightfield` seulement, et `not_sliceable` pour un maillage vide ou ouvert."""
     import importlib
     aeolis = importlib.import_module("nonplanar.slicer")
     heightfield = importlib.import_module("nonplanar.heightfield")
+    general = importlib.import_module("nonplanar.general")
     try:
         with contextlib.redirect_stdout(log):
             gcode, report = aeolis.slice_path(request["mesh"], request["params"], progress=progress)
@@ -217,6 +220,11 @@ def _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, re
             os.remove(temp_path)
         return refuse("not_a_heightfield", EXIT_REFUSED,
                       f"Ce modele n'est pas une surface en hauteur, Element Aeolis ne peut pas le trancher : {exc}",
+                      algorithm="element-aeolis")
+    except general.NotSliceableError as exc:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(temp_path)
+        return refuse("not_sliceable", EXIT_REFUSED, f"Element Aeolis ne peut pas trancher ce modele : {exc}",
                       algorithm="element-aeolis")
     except Exception as exc:  # plantage : code 1, jamais un G-code incomplet
         with contextlib.suppress(FileNotFoundError):

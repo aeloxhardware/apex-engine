@@ -4,6 +4,17 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajouts du 2026-10-31 (le numero reste 2, a confirmer par l'utilisateur : un defaut change le G-code)
+- Element Aeolis tranche TOUTE geometrie (`element-aeolis/general.py`). `AeolisSliceParams` gagne `mode` (`auto` par defaut,
+  `heightfield`, `general`), `nozzle_angle_deg` (10) et `nozzle_reach` (2 mm), les deux reglages de buse de l'imprimante, et
+  `enforce_nozzle_limits` (vrai). Le `report` gagne `mode`, `fallback_reason` et `relief_mm`.
+- **Defaut qui change le G-code (a confirmer)** : avec les defauts de buse tres bas, les surfaces en hauteur dont les couches
+  depassent ces limites (les plaques de `res/test_models/non_planar/`) passent au moteur general ; `enforce_nozzle_limits=false`
+  rend l'ancien resultat. Sans cela, le statut `not_a_heightfield` n'est plus renvoye par defaut : seulement avec
+  `mode: heightfield`. Nouveau refus type (code 3) : `not_sliceable` (maillage vide ou ouvert, aucune section).
+- Le controle de la buse utilise l'enveloppe des deux reglages quand `head_model` est vide (avant : le GLB `aetheris-4`).
+- Interface : exposer les deux reglages de buse dans le profil d'imprimante (R-027).
+
 ## Ajouts du 2026-10-30 (le numero reste 2)
 - Etapes de progression par algorithme (C3) : `main.py steps --algorithm <element-ardor|element-aeolis>` ; la reponse porte
   desormais `algorithm`. Sans option : `element-ardor`, liste inchangee. Element Aeolis : `import`, `heightfield`,
