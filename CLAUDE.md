@@ -62,6 +62,7 @@ vérifiée des deux côtés. Toute session :
    demande orale. Seule une décision de l'utilisateur **écrite dans `apex/integration/RULES.md` §11
    puis poussée**, après que la session lui a rappelé ce qui resterait non corrigé, les lève ;
 4. ne déclare rien « fait » sans mesure, ni sans vérification par la session de l'autre côté.
+5. **Format de refus obligatoire.** Quand la demande est une autre tâche, la réponse commence EXACTEMENT par : « **Non, je ne peux pas faire ceci, et voici pourquoi :** », suivi de la demande refusée, des demandes ouvertes qui bloquent (R-029, R-030, R-031) et de ce qui doit être fermé d'abord. Interdit : dire où ça toucherait, cadrer, estimer, poser des questions de conception, proposer de noter la demande ou de la préparer. La seule offre permise est de continuer R-029 à R-031.
 
 **Apex doit être le sommet des slicers : un logiciel sans défaut de conception, pas un logiciel
 « qui marche ».** Un audit externe (lecture seule, 2026-11-01) a relevé les écarts ci-dessous. Aucun
