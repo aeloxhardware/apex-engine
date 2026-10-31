@@ -59,6 +59,10 @@ class SliceParams:
     center_xy: tuple[float, float] | None = None   # centre de l'empreinte sur le plateau
 
 
+# Types de ligne écrits dans le G-code (`;TYPE:...`, convention de Cura, lue par la plupart des visionneuses) pour
+# colorer l'aperçu : parois extérieure et intérieures, remplissage creux, peau pleine (dessus et dessous).
+LINE_TYPES = {"wall_outer": "WALL-OUTER", "wall_inner": "WALL-INNER", "infill": "FILL", "solid_infill": "SKIN"}
+
 # Étapes affichées pendant le tranchage Element Aeolis (`main.py steps --algorithm element-aeolis`) ;
 # les libellés accentués sont ceux de l'interface (src/utils/sliceStepLabels.ts), ceux-ci en sont
 # la forme du journal du moteur, sans accents, comme `main.PIPELINE_STEPS`.
@@ -215,7 +219,7 @@ def _slice(mesh: trimesh.Trimesh, params: SliceParams | None, stages: "_Stages")
         sequence = [(k, 0) for k in range(1, plan.count + 1)]
         n = plan.count
         stages.open("toolpath2d")
-        layers_data = gen.layer_paths(plan, p, p.first_layer_speed, p.print_speed)
+        layers_data, layer_kinds = gen.layer_paths(plan, p, p.first_layer_speed, p.print_speed)
     else:
         sequence = stack.sequence()
         last_grid, split_grid = stack.last_grid(), stack.split_grid()
@@ -228,6 +232,7 @@ def _slice(mesh: trimesh.Trimesh, params: SliceParams | None, stages: "_Stages")
         gxr, gyr = gx.ravel(), gy.ravel()
         grid_col = stack.sample(gxr, gyr)          # colonnes aux nœuds, calculées une fois pour toutes les couches
         layers_data = []   # (k, j, vitesse, polylignes 3D)
+        layer_kinds = []   # types des polylignes, une liste par entrée de layers_data
         for done, (k, j) in enumerate(sequence):
             _progress.report(done, len(sequence))
             mask = stack.active_mask(k, j, last_grid, split_grid)
@@ -254,14 +259,16 @@ def _slice(mesh: trimesh.Trimesh, params: SliceParams | None, stages: "_Stages")
             xy_list = [tp.densify_xy(pl.xy, p.toolpath.max_segment) for pl in path.polylines]
             xy_all = np.vstack(xy_list) if xy_list else np.zeros((0, 2))
             z_all = stack.sample(xy_all[:, 0], xy_all[:, 1]).layer_z(k, j) if len(xy_all) else np.zeros(0)
-            polys3d, lo = [], 0
-            for xy in xy_list:
+            polys3d, kinds, lo = [], [], 0
+            for pl, xy in zip(path.polylines, xy_list):
                 pts = np.column_stack([xy, z_all[lo:lo + len(xy)]])
                 lo += len(xy)
                 if len(pts) < 2 or np.isnan(pts[:, 2]).any():
                     continue
                 polys3d.append(pts)
+                kinds.append(pl.kind)
             layers_data.append((k, j, speed, polys3d))
+            layer_kinds.append(kinds)
 
     # -- contrôle de la buse -----------------------------------------------------------------------
     head_env = None
@@ -335,10 +342,11 @@ def _slice(mesh: trimesh.Trimesh, params: SliceParams | None, stages: "_Stages")
     total_pts = sum(len(pts) for _, _, _, polys in layers_data for pts in polys) or 1
     written = 0
     ramp = np.arange(12)[None, :, None]
-    for k, j, speed, polys in layers_data:
+    for (k, j, speed, polys), kinds in zip(layers_data, layer_kinds):
         out.append(f"; <layer> {k}" + (f" intermediate {j}" if j else ""))
         if not polys:
             continue
+        last_type = None
         # Hauteurs de dégagement et épaisseurs de TOUTE la couche en deux appels (les points de départ
         # et d'arrivée des polylignes sont connus d'avance) : le dégagement d'une polyligne est le plus
         # haut point de la couche entre la fin de la précédente et son départ.
@@ -362,6 +370,10 @@ def _slice(mesh: trimesh.Trimesh, params: SliceParams | None, stages: "_Stages")
                 zc = max(float(z_lines[i]), float(cur[2])) + p.z_hop
             else:
                 zc = float(pts[0, 2]) + p.z_hop
+            line_type = LINE_TYPES.get(kinds[i], "CUSTOM")
+            if line_type != last_type:                    # une étiquette à chaque changement de type
+                out.append(f";TYPE:{line_type}")
+                last_type = line_type
             emit_travel(pts[0], zc)
             seg_v = np.diff(pts, axis=0)
             seg_len = np.linalg.norm(seg_v, axis=1)

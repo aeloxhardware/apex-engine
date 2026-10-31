@@ -333,7 +333,7 @@ def compute_regions(plan: GeneralPlan) -> None:
 
 
 def layer_paths(plan: GeneralPlan, params, speed_first: float, speed: float):
-    """Parois et remplissage de chaque couche, relevés sur F_k. Rend (k, 0, vitesse, polylignes 3D).
+    """Parois et remplissage de chaque couche, relevés sur F_k. Rend ([(k, 0, vitesse, polylignes 3D)], [types de chaque polyligne par couche]).
 
     Peau pleine : la part de la région absente d'une des `nb` couches du dessous ou d'une des `nt` du dessus."""
     tpar: tp.ToolpathParams = params.toolpath
@@ -343,7 +343,7 @@ def layer_paths(plan: GeneralPlan, params, speed_first: float, speed: float):
     nt = max(1, math.ceil(tpar.solid_top_mm / h))
     regs = plan.regions
     total = len(regs)
-    out = []
+    out, kinds = [], []
     for i, region in enumerate(regs):
         _progress.report(i, total)
         if region.is_empty:
@@ -356,14 +356,16 @@ def layer_paths(plan: GeneralPlan, params, speed_first: float, speed: float):
             solid = _polygons_only(solid.buffer(-0.1).buffer(0.1))
         path = tp.layer_polylines(region, solid, i + 1, tpar, region, None)
         xy_list = [tp.densify_xy(pl.xy, tpar.max_segment) for pl in path.polylines]
-        polys3d = []
-        for xy in xy_list:
+        polys3d, layer_kinds = [], []
+        for pl, xy in zip(path.polylines, xy_list):
             if len(xy) < 2:
                 continue
             z = st.z_at(i + 1, rel.at(xy[:, 0], xy[:, 1]))
             polys3d.append(np.column_stack([xy, z]))
+            layer_kinds.append(pl.kind)
         out.append((i + 1, 0, speed_first if i == 0 else speed, polys3d))
-    return out
+        kinds.append(layer_kinds)
+    return out, kinds
 
 
 def _intersection(regs, idx):

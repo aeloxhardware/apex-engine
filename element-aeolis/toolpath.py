@@ -28,7 +28,7 @@ class ToolpathParams:
 @dataclass
 class Polyline:
     xy: np.ndarray                    # (K, 2)
-    kind: str                         # "wall_outer", "wall_inner", "infill"
+    kind: str                         # "wall_outer", "wall_inner", "infill" (creux), "solid_infill" (peau pleine)
 
 
 @dataclass
@@ -127,11 +127,11 @@ def layer_polylines(region, solid_region, index: int, params: ToolpathParams,
         sparse = inner.difference(solid)
     sparse_spacing = w / max(min(params.infill_density, 1.0), 1e-3)
     zones = angle_zones or [(region, 45.0 if index % 2 else 135.0)]
-    for geom, spacing in ((sparse, sparse_spacing), (solid, w)):
+    for geom, spacing, kind in ((sparse, sparse_spacing, "infill"), (solid, w, "solid_infill")):
         for zone, angle in zones:
             part = geom.intersection(zone.buffer(1e-6)) if zone is not region else geom
             for line in _zigzag(part, spacing, angle):
-                path.polylines.append(Polyline(line, "infill"))
+                path.polylines.append(Polyline(line, kind))
     safe = region.buffer(1e-6)
     for i in range(n_walls - 1, -1, -1):
         ring_geom = outline.buffer(-(i + 0.5) * w)

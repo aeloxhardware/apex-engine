@@ -38,6 +38,13 @@ Conséquence assumée sur les plaques de `res/test_models/non_planar/` : avec le
 71°) dépassent les limites, donc elles passent au moteur général (relief de 2 mm au plus, `report.mode = "general"`).
 Pour retrouver le lissage complet, régler par exemple 80° et 50 mm, ou `enforce_nozzle_limits=False`.
 
+## Types de ligne (`;TYPE:`), pour colorer l'aperçu
+
+Chaque polyligne extrudée est précédée de `;TYPE:WALL-OUTER`, `;TYPE:WALL-INNER`, `;TYPE:FILL` (remplissage creux) ou
+`;TYPE:SKIN` (peau pleine, dessus et dessous), à chaque changement de type (`slicer.LINE_TYPES`, convention de Cura). Les
+déplacements à vide ne portent pas d'étiquette propre : ils suivent celle de la ligne qu'ils précèdent. Pas encore de types
+`BRIDGE`, `SUPPORT` ni `TRAVEL`.
+
 ## Moteur général : sections planaires déformées
 
 Couche k = section du maillage par la surface z = F_k(x,y) = c_k + λ(c_k)·D(x,y) (c_k : plans de pas h ; D ≤ 0 :

@@ -4,6 +4,13 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajout du 2026-11-01 (le numero reste 2) : types de ligne du G-code d'Element Aeolis
+- Chaque polyligne extrudee d'Aeolis est precedee d'une etiquette `;TYPE:<type>` (convention de Cura, ecrite a chaque
+  changement de type, remise a zero a chaque couche) : `WALL-OUTER` (paroi exterieure), `WALL-INNER` (parois interieures),
+  `FILL` (remplissage creux), `SKIN` (peau pleine : dessus et dessous). Les deux moteurs d'Aeolis (surface en hauteur et
+  general) l'ecrivent. Une visionneuse qui ignore les commentaires n'a rien a changer ; l'interface colore l'apercu d'apres
+  ces etiquettes (R-028). Le G-code polaire (Element Ardor) n'en porte pas encore.
+
 ## Ajouts du 2026-10-31 (le numero reste 2, a confirmer par l'utilisateur : un defaut change le G-code)
 - Element Aeolis tranche TOUTE geometrie (`element-aeolis/general.py`). `AeolisSliceParams` gagne `mode` (`auto` par defaut,
   `heightfield`, `general`), `nozzle_angle_deg` (10) et `nozzle_reach` (2 mm), les deux reglages de buse de l'imprimante, et

@@ -472,3 +472,40 @@ def test_general_layers_follow_a_gentle_top_and_stay_inside_the_limits():
         assert z.max() - z.min() <= 2.0 + 1e-9
     flat = analyze(wedge_plate(), nozzle_angle_deg=0.0, nozzle_reach=2.0, **kw)
     assert flat.relief.amp == 0.0
+
+
+def _type_runs(gcode: str):
+    """Pour chaque étiquette ;TYPE: le nombre de mouvements extrudés qui la suivent, par type."""
+    cur, counts = None, {}
+    for line in gcode.splitlines():
+        if line.startswith(";TYPE:"):
+            cur = line[6:]
+        elif line.startswith("; <layer>"):
+            cur = None
+        elif line.startswith("G1") and " X" in line and " E" in line and cur is not None:
+            counts[cur] = counts.get(cur, 0) + 1
+        elif line.startswith("G1") and " X" in line and " E" in line:
+            counts["<sans type>"] = counts.get("<sans type>", 0) + 1
+    return counts
+
+
+@pytest.mark.parametrize("engine", ["heightfield", "general"])
+def test_every_extruded_move_carries_a_line_type(engine):
+    m = wave_plate(amp=0.5, mean=2.0) if engine == "heightfield" else cavity_box()
+    gcode, rep = slice_mesh(m, SliceParams(grid_cell=0.5, enforce_nozzle_limits=False)
+                            if engine == "heightfield" else SliceParams())
+    assert rep.mode == engine
+    counts = _type_runs(gcode)
+    assert "<sans type>" not in counts
+    assert set(counts) <= {"WALL-OUTER", "WALL-INNER", "FILL", "SKIN"}
+    assert {"WALL-OUTER", "WALL-INNER", "SKIN"} <= set(counts)       # parois et peau toujours présentes
+    assert counts["WALL-OUTER"] > 0 and counts.get("FILL", 0) + counts["SKIN"] > counts["WALL-OUTER"] * 0.2
+
+
+def test_solid_infill_is_marked_apart_from_sparse_infill():
+    from shapely.geometry import box
+    from nonplanar import toolpath as tp
+    region = box(0, 0, 20, 20)
+    path = tp.layer_polylines(region, box(0, 0, 20, 10), 3, tp.ToolpathParams(), region)
+    kinds = {pl.kind for pl in path.polylines}
+    assert {"infill", "solid_infill", "wall_outer", "wall_inner"} <= kinds
