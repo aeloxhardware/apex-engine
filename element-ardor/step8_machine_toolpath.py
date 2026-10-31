@@ -902,7 +902,9 @@ def resolve_raw_points(
     # -> B = 168,5 deg). Aucun G-code n'etant encore produit, seule l'etape 9
     # en voyait les effets.
     reference_direction = np.array([0.0, 0.0, 1.0])
-    platform_origin = machine_profile.platform_origin
+    # Tete portant tous les axes rotatifs (Aetheris-4 Gen 1) : aucune singularite polaire.
+    platform_origin = (None if getattr(machine_profile, "kinematics_kind", "polar-bed") == "head-ab"
+                       else machine_profile.platform_origin)
 
     if getattr(machine_profile, "position_coupled_axes", None) and axes:
         # limite #59 : premier axe impose par la position (machine R C Z B)
@@ -915,7 +917,11 @@ def resolve_raw_points(
         )
 
     _progress.milestone(0.85)                # cinematique inverse resolue (l'etape la plus longue, indivisible)
-    if params.free_axis_median_window > 1 and axes:
+    # Filtre median par axe : valable quand UN axe oriente seul (polaire : B). Avec deux rotations de
+    # tete qui se composent (Aetheris-4 Gen 1, A et B), filtrer chaque angle separement ne rend plus la
+    # direction visee : mesure l_shape, 1 360 orientations inatteignables avec le filtre, 0 sans.
+    if (params.free_axis_median_window > 1 and axes
+            and getattr(machine_profile, "kinematics_kind", "polar-bed") != "head-ab"):
         resolved_angles, residual_errors = _median_filter_free_axes(
             resolved_angles, raw_points, axes, machine_profile, reference_direction,
             params.free_axis_median_window,

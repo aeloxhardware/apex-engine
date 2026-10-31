@@ -104,6 +104,47 @@ def apex_polar(params, machine=None) -> dict:
                 "note": "Y est imposé par la position du point (la tête ne balaie qu'un demi-plan)"}}
 
 
+def apex_gantry_ab(params, machine=None) -> dict:
+    """Aetheris-4 Gen 1 : portique X, Y, Z et deux rotations A (autour de X), B (autour de Y) portees par la tete.
+
+    Le firmware ne fait aucune cinematique : X Y Z A B sont les positions des axes physiques, pivot compense
+    par le slicer (`file_io/xyzab_kinematics.py`). Ordre de montage, plages et pivot : A CONFIRMER sur la
+    machine ; ils sont lus dans `params` (pivot, signes) et dans le `MachineProfile` (ordre et plages)."""
+    L = float(params.pivot_to_tip)
+    order = ["A", "B"]
+    ranges = {"A": [-90.0, 90.0], "B": [-90.0, 90.0]}
+    vec = {"A": [1, 0, 0], "B": [0, 1, 0]}
+    if machine is not None and len(getattr(machine, "rotation_axes", [])) == 2:
+        order = []
+        for spec in machine.rotation_axes:      # A = axe X (ISO), B = axe Y ; l'ordre de la liste est l'ordre de montage
+            letter = "A" if abs(float(spec.axis[0])) > 0.5 else "B"
+            ranges[letter] = [float(spec.angle_range_deg[0]), float(spec.angle_range_deg[1])]
+            order.append(letter)
+    origin_txt = "centre commun de rotation de la tete (a `pivot_to_tip` au-dessus de la pointe a A = B = 0)"
+    sign = {"A": float(getattr(params, "a_sign", 1.0)), "B": float(getattr(params, "b_sign", 1.0))}
+    lin = lambda l, a, pos: {"letter": l, "type": "linear", "side": "tool", "axis": a, "range": None,   # noqa: E731
+                             "positive": pos}
+    rot = lambda l: {"letter": l, "type": "rotary", "side": "tool", "axis": vec[l], "origin": origin_txt,   # noqa: E731
+                     "range": ranges[l], "positive": f"main droite autour de {'X' if l == 'A' else 'Y'} "
+                                                     f"(signe emis : {sign[l]:+g})"}
+    axes = [lin("X", [1, 0, 0], "la tête va vers +X"), lin("Y", [0, 1, 0], "la tête va vers +Y"),
+            lin("Z", [0, 0, 1], "la tête monte"), rot("A"), rot("B"), _unused("C")]
+    return {"schema": SCHEMA, "machine": "aetheris-4-gen1", "units": {"linear": "mm", "angular": "deg"},
+            "word_order": "XYZABC", "frame": "repère machine droit, Z vers le haut, plateau fixe",
+            "axes": axes, "chain": {"bed": [], "tool": ["X", "Y", "Z"] + order},
+            "tool_offset": [0, 0, -L], "part_origin": [0, 0, 0], "coupling": None,
+            "conventions": {
+                "rotation": ROTATION_RULE,
+                "tool_offset_from": "centre commun de rotation de la tête",
+                "pivot_compensation": "le G-code commande le point du chariot : à A = B = 0 il est la pointe ; "
+                                      "sinon X Y Z = pointe − (chaîne(angles) − chaîne(0)), "
+                                      "chaîne = R_1(o_1 + R_2 o_2), o_2 = (0, 0, −L)",
+                "pivot_to_tip": L, "a_sign": sign["A"], "b_sign": sign["B"], "z_reference": "tip",
+                "rotation_order": order,
+                "position_coupled_axes": [],
+                "note": "ordre de montage de A et B, pivot et plages à confirmer sur la machine"}}
+
+
 def validate(desc: dict) -> None:
     """Refuse une description incohérente (`ValueError`) : six axes XYZABC exactement une fois, chaînes
     qui ne citent que des axes utilisés du bon côté, vecteurs d'axe unitaires, pivot des axes rotatifs."""

@@ -2177,6 +2177,39 @@ pour affichage/validation avant export G-code.
     VÉRIFIÉES : chercher les antériorités avant tout usage public. Les identifiants techniques (`nonplanar/`,
     `nonplanar-heightfield/1`) ne changent pas ; le nom affiché voyage dans `meta.algorithm_name` du bloc chiffré.
 
+86. **Aetheris-4 Gen 1 : portique XYZ + A, B portees par la tete (2026-10-31, demande de l'utilisateur ; les deux machines sont gardees).**
+    - **Constat qui l'a motive** : sur la polaire, le plateau centre (UI) donne B = 0 sur l'arche de `turkish.stl` (= `0021.stl`) ;
+      C etant impose par la position, un surplomb qui penche vers l'interieur est inatteignable (limite #59). Mesure : modele
+      decale a 141-315 mm de l'axe, B median 34-36 deg sur l'arche ; centre, B median 0,0 deg (comme le G-code de l'utilisateur).
+    - **Cinematique** (`file_io/xyzab_kinematics.py`) : chaine de rotations de tete, A autour de X et B autour de Y (ISO,
+      main droite), `axes[0]` = parent. Le firmware ne fait AUCUNE cinematique : le slicer ecrit le point du chariot,
+      `fw = pointe - (chaine(angles) - chaine(0))`, chaine = o0 + R1(o1 + R2 o2), o2 = (0,0,-L). A angles nuls le point commande EST la
+      pointe (`z_reference = tip`). Cas par defaut : un centre commun (o0 = o1 = 0).
+    - **A CONFIRMER SUR LA MACHINE, rien n'est mesure** : ordre de montage (`order="AB"` = A parent, par defaut), L
+      (`pivot_to_tip`, 46 mm = valeur de la polaire), eventuels decalages distincts (`pivot_offsets`), plages (defaut THEORIQUE A +-180, B +-90 : sphere
+      complete sans ambiguite), signes, taille du plateau, vitesses angulaires (celles de B).
+    - **Profil** : `main.aetheris4_gen1_profile`, `MachineProfile.kinematics_kind = "head-ab"`, `position_coupled_axes = []`.
+      step8 n'y detecte aucune singularite polaire ; step9, step5b, step10 marchaient deja (la tete tourne autour de la pointe).
+    - **Piege n°1, la redondance de branche** : avec B sur +-180 chaque direction a DEUX solutions, (A, B) et (A+180, 180-B), et
+      l'IK saute de l'une a l'autre (turkish : sauts de B de 186 deg au 99e centile, G-code de 7,4 millions de mouvements, p50 de B a -148).
+      B sur +-90 rend la solution unique ; A reste sur +-180 (angle deroule a l'export). Apres : sauts au 99e centile 29 et 25 deg.
+    - **LIMITE NON TRAITEE, verrou de cardan** : pres de B = +-90 (tete horizontale vers +-X) A est indetermine et saute (l_shape : 27 % des
+      points extrudes a |B| > 80 deg, sauts de A de 174 deg au 99e centile ; turkish : p99 29 deg). Avec l'ordre `BA` la singularite passe
+      a +-Y. Remede a ecrire : heriter A pres du pole (comme la singularite polaire, limite #19), ou choisir l'ordre / l'orientation de la pièce.
+    - **Piege n°2** : le filtre median par axe (`free_axis_median_window = 9`, limite #63), valable pour B seul,
+      CASSE la direction quand A et B se composent : l_shape 1 360 orientations inatteignables avec, 0 sans ; turkish 128 573 avec, 0 sans.
+      Ignore pour `head-ab`. Test : `test_gen1_pipeline_reaches_every_orientation_with_full_ranges`.
+    - **Export** (`file_io/gcode_export_xyzab.py`, Python) : six lettres XYZABC, pointe relevee de h/2, mouvements decoupes pour que la
+      pointe suive la droite (le firmware interpole X Y Z A B lineairement), retraction et degagement le long de l'axe du corps.
+      **Non fait** : ralentissement aux limites de vitesse / acceleration de A et B, `travel_check`, contour de la vraie tete sous le
+      plateau, estimation de temps du firmware, version native (C++), plateau rectangulaire (disque de step9). Plus lent que l'export polaire natif.
+    - **Mesures** (profil par defaut : A +-180, B +-90, sans modele de tete pour l_shape) : l_shape 0 orientation inatteignable,
+      0 collision non resolue, 0 pointe sous le plateau ; turkish (= 0021.stl) 671 385 points, **0 orientation inatteignable**
+      (polaire centree : 92 210), 2 640 collisions detectees, toutes resolues, G-code de 1,27 million de mouvements (polaire : 0,75),
+      A de -79 a 43 deg et B de -35 a 40 deg (1er au 99e centile) : la tete s'incline reellement. Export Python : ~10 s pour 13 000 points.
+      Matiere sans appui (step9b), couverture de l'arche, temps reel : NON mesures.
+    - Tests : `tests/test_gen1_xyzab.py` (13).
+
 ## Détail de `core/mesh_types.py` (dataclasses partagées)
 
 Aucune logique de calcul dans ce fichier — uniquement des contrats de données.

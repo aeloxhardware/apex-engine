@@ -364,6 +364,11 @@ class MachineProfile:
     # `position_coupled_axes` est non vide : l'angle couplé est celui qui
     # oriente cette direction vers le point.
     radial_direction: Optional[Vec3] = None
+    # Famille de cinematique. "polar-bed" : plateau tournant (axes[0] = plateau, singularite a
+    # l'axe, G-code R C Z B) = Aetheris-4 polaire. "head-ab" : portique XYZ fixe, TOUS les axes
+    # rotatifs sont portes par la tete et tournent autour de la pointe (compensee dans le G-code) :
+    # Aetheris-4 Gen 1, pas de singularite polaire, plateau fixe a `platform_origin`.
+    kinematics_kind: str = "polar-bed"
 
 
 # ---------------------------------------------------------------------------

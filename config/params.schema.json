@@ -567,6 +567,10 @@
      ],
      "default": null
     },
+    "kinematics_kind": {
+     "default": "polar-bed",
+     "type": "string"
+    },
     "max_angular_acceleration": {
      "default": 0.0,
      "type": "number"
@@ -802,6 +806,7 @@
      "$ref": "#/$defs/MachineProfile",
      "default": {
       "build_volume": null,
+      "kinematics_kind": "polar-bed",
       "max_angular_acceleration": 22.689280275926283,
       "max_angular_velocity": 29.08940264298949,
       "nozzle_diameter": 0.4,

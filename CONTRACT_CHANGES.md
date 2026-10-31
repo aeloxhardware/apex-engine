@@ -4,6 +4,16 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajout du 2026-10-31 (le numero reste 2) : machine Aetheris-4 Gen 1 (XYZ + A, B de tete)
+- `MachineProfile` gagne `kinematics_kind` : `polar-bed` (defaut, Aetheris-4 polaire R C Z B, inchange) ou `head-ab`
+  (portique XYZ, deux rotations A autour de X et B autour de Y PORTEES PAR LA TETE, plateau fixe, aucune cinematique dans le
+  firmware). Avec `head-ab`, le G-code est `G00 X Y Z A B C E F` (`file_io/gcode_export_xyzab.py`), pivot compense par le
+  slicer ; l'en-tete decrit la machine `aetheris-4-gen1` (`apex-kinematics/1`, chaine outil `X Y Z` + A, B dans l'ordre de montage).
+- Profil pret a l'emploi : `main.aetheris4_gen1_profile(order, a_range, b_range, platform_radius)` / `main.machine_profile_for("aetheris-4-gen1")`.
+  Ordre de montage, plages, pivot (`pivot_to_tip`), decalages entre centres (`pivot_offsets`) et signes (`a_sign`, `b_sign`)
+  sont des PARAMETRES A CONFIRMER SUR LA MACHINE.
+- Interface : exposer le choix de machine et ces reglages dans le profil d'imprimante (a ouvrir en demande dans `REQUESTS.md`).
+
 ## Ajout du 2026-11-01 (le numero reste 2) : types de ligne du G-code d'Element Aeolis
 - Chaque polyligne extrudee d'Aeolis est precedee d'une etiquette `;TYPE:<type>` (convention de Cura, ecrite a chaque
   changement de type, remise a zero a chaque couche) : `WALL-OUTER` (paroi exterieure), `WALL-INNER` (parois interieures),

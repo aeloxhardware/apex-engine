@@ -182,6 +182,48 @@ def _default_machine_profile() -> MachineProfile:
     )
 
 
+def aetheris4_gen1_profile(order: str = "AB", a_range=(-180.0, 180.0), b_range=(-90.0, 90.0),
+                           platform_radius: Optional[float] = None) -> MachineProfile:
+    """
+    Aetheris-4 Gen 1 : portique XYZ, deux rotations A (autour de X) et B (autour de Y) PORTEES PAR LA
+    TETE (convention ISO), plateau fixe, aucune cinematique dans le firmware (le slicer compense le pivot,
+    `file_io/xyzab_kinematics.py`). Aucun axe couple a la position : les deux angles orientent librement.
+
+    A CONFIRMER SUR LA MACHINE (l'utilisateur ne les connait pas, 2026-10-31) : `order` (« AB » : A est le
+    parent, le plus proche du chariot ; « BA » l'inverse), les plages (defaut THEORIQUE A +-180, B +-90 :
+    couvre la sphere SANS ambiguite ; avec B sur +-180 chaque direction a deux solutions (A, B) et
+    (A+180, 180-B) et l'IK saute de l'une a l'autre, mesure : sauts de 186 deg sur B), la taille du plateau (None : disque par defaut de step9), le
+    pivot (`GcodeParams.pivot_to_tip`). Limites de vitesse angulaire : celles de B de la polaire, a remplacer.
+    """
+    if sorted(order) != ["A", "B"]:
+        raise ValueError(f"order doit etre 'AB' ou 'BA', recu {order!r}")
+    spec = {"A": RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=tuple(float(v) for v in a_range)),
+            "B": RotationAxisSpec(axis=np.array([0.0, 1.0, 0.0]), angle_range_deg=tuple(float(v) for v in b_range))}
+    base = _default_machine_profile()
+    return MachineProfile(
+        rotation_axes=[spec[c] for c in order],
+        platform_origin=np.array([0.0, 0.0, 0.0]),
+        nozzle_model=base.nozzle_model,
+        toolhead_id=base.toolhead_id,
+        nozzle_diameter=base.nozzle_diameter,
+        max_angular_velocity=base.max_angular_velocity,
+        max_angular_acceleration=base.max_angular_acceleration,
+        platform_radius=platform_radius,
+        position_coupled_axes=[],
+        radial_direction=None,
+        kinematics_kind="head-ab",
+    )
+
+
+def machine_profile_for(name: str) -> MachineProfile:
+    """Profil par nom : « aetheris-4 » (polaire R C Z B, defaut) ou « aetheris-4-gen1 » (XYZ + A B de tete)."""
+    if name == "aetheris-4":
+        return _default_machine_profile()
+    if name == "aetheris-4-gen1":
+        return aetheris4_gen1_profile()
+    raise ValueError(f"machine inconnue : {name!r} (attendu 'aetheris-4' ou 'aetheris-4-gen1')")
+
+
 @dataclass
 class PipelineParams:
     """
@@ -376,6 +418,13 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
     from file_io.pivot_length import current_pivot_to_tip
     from pipeline import step9_collision_sim as s9
     machine, sim = params.machine_profile, params.collision
+    if getattr(machine, "kinematics_kind", "polar-bed") == "head-ab":
+        # Aetheris-4 Gen 1 : XYZ + A B de tete (file_io/gcode_export_xyzab.py).
+        from file_io.gcode_export import toolpath_arrays as _arrays
+        from file_io.gcode_export_xyzab import GcodeParamsXYZAB, export_gcode_xyzab, params_from_gcode_params
+        gp = (params_from_gcode_params(gcode_params) if gcode_params is not None
+              else GcodeParamsXYZAB(strict=True))
+        return export_gcode_xyzab(_arrays(toolpath), machine, gp, out_path)
     if pivot_to_tip is None:
         pivot_to_tip, _origin = current_pivot_to_tip()
     head_zlow = None
