@@ -152,6 +152,22 @@ def test_head_clears_gentle_surface_but_hits_a_steep_wall():
     assert hit == 0
 
 
+def test_head_check_on_a_part_lower_than_the_head_does_not_crash():
+    """Pièce plus basse que tout point de l'enveloppe : aucun contact possible, pas de min() sur tableau vide."""
+    from nonplanar.headcheck import check_points
+    env = _head_envelope()
+
+    class F:
+        xs = np.linspace(0, 10, 11)
+        ys = np.linspace(0, 10, 11)
+        top = np.full((11, 11), 0.4)
+        bottom = np.zeros((11, 11))
+
+    t = lambda x, y: np.full_like(x, 0.2)                # noqa: E731
+    assert check_points(env, F(), lambda x, y: np.full_like(x, 0.4), t,
+                        np.array([[5.0, 5.0]]), np.array([0.4])) == (0, 0.0)
+
+
 def test_head_report_in_slice():
     m = wave_plate(amp=0.5, mean=2.0)
     _, rep = slice_mesh(m, SliceParams(grid_cell=0.5))

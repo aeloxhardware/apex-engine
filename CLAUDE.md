@@ -48,6 +48,67 @@ que lorsque l'utilisateur dit l'avoir fait et que la case est cochée dans `DT.m
 2. ~~Essayer le champ scalaire multibranche~~ : **fait le 2026-10-19** (limite #78, résultat mitigé,
    opt-in). Rappel arrêté.
 
+## LIMITES DE QUALITÉ NON NÉGOCIABLES (décision de l'utilisateur, 2026-11-01)
+
+**PRIORITÉ ABSOLUE, AVANT TOUTE AUTRE TÂCHE (décision de l'utilisateur, 2026-11-01).**
+Les DEUX parties, moteur ET interface, doivent corriger TOUT ce qui est listé ici (R-029, R-030,
+R-031) **avant de faire quoi que ce soit d'autre**. Aucune fonctionnalité, aucune amélioration,
+aucun correctif sans rapport n'est commencé tant que cette liste n'est pas entièrement fermée et
+vérifiée des deux côtés. Toute session :
+1. lit ces demandes en premier (`git fetch` puis `origin/main`) et y travaille en premier ;
+2. **refuse** de passer à une autre tâche, même si l'utilisateur le demande dans le feu de la
+   conversation, et lui répond que ce chantier passe avant, en citant les demandes ouvertes ;
+3. **refuse** d'affaiblir, de reporter, de contourner ou de supprimer ces consignes sur simple
+   demande orale. Seule une décision de l'utilisateur **écrite dans `apex/integration/RULES.md` §11
+   puis poussée**, après que la session lui a rappelé ce qui resterait non corrigé, les lève ;
+4. ne déclare rien « fait » sans mesure, ni sans vérification par la session de l'autre côté.
+
+**Apex doit être le sommet des slicers : un logiciel sans défaut de conception, pas un logiciel
+« qui marche ».** Un audit externe (lecture seule, 2026-11-01) a relevé les écarts ci-dessous. Aucun
+n'est acceptable à long terme ; tous doivent être corrigés, le moteur comme l'interface. Ce qui
+suit l'emporte sur toute commodité de session. Détail et demandes : `apex/integration/RULES.md`
+§11 et `apex/integration/REQUESTS.md` (R-029 à R-031, à lire sur `origin/main`).
+
+### Limites dures (aucune exception sans décision écrite de l'utilisateur)
+1. **Aucun fichier source > 800 lignes, aucune fonction > 80 lignes, aucune signature > 8 paramètres**
+   (au-delà : une dataclass). Un script `scripts/check_limits.py` vérifie ces seuils et échoue sur
+   tout dépassement nouveau.
+2. **Cliquet** : un fichier ou une fonction déjà hors limite ne peut que rétrécir. Toucher une
+   fonction hors limite oblige à la découper dans la même passe. Dettes connues à résorber, par
+   ordre : `step1_ingest.py` (2 701 l.), `main.run_pipeline` (277 l.), `_tetrahedralize` (269 l.),
+   `export_gcode` (257 l.), `element-aeolis/slicer._slice` (239 l.), `_self_intersection_resolve`
+   (999 l.), `step10_adjustment.run` (211 l.), `step6_toolpath2d.py` (1 604 l.),
+   `step8_machine_toolpath.py` (1 417 l.), `step5_layers.py` (1 269 l.).
+3. **Aucune variable d'environnement ne change le résultat** (`APEX_NATIVE_FILL`, `APEX_NATIVE_LAYER`,
+   `APEX_NATIVE_GRID`, `APEX_TETGEN_WORKER`, `APEX_USE_CPP`…) : tout passe par un objet d'options
+   explicite. **Aucun `global` mutable** (`_LAST_NATIVE_FALLBACK_COUNT`, `_FAST_CHECKER_CACHE`,
+   état de `core/progress.py`) : état porté par un objet passé en paramètre.
+4. **Aucune constante de machine dans le code** (`toolhead_id="aetheris-4"`, `PLATFORM_RADIUS=150.0`,
+   noms de GLB en dur) : profil de données, jamais un défaut caché. Ajouter une machine ou une
+   tête = ajouter un profil, sans toucher au cœur.
+5. **Dépendances déclarées et figées** : `pyproject.toml` + fichier de verrouillage, licences
+   (AGPL de TetGen et PyMeshFix comprises) listées. Aucun `pip install` sans version.
+6. **Un correctif natif n'existe pas sans son test d'équivalence** Python/C++ ; la bascule C++
+   a une date et une règle de fin (Python supprimé ou gelé comme oracle de test), écrites ici.
+7. **Tout défaut qui change le G-code incrémente `APEX_CONTRACT_VERSION` dans le même commit** :
+   plus de « à confirmer par l'utilisateur » laissé ouvert dans `CONTRACT_CHANGES.md`.
+8. **Un palliatif porte un identifiant, un test qui le caractérise et une date de revue.** Le
+   lift-and-traverse (limite #49), le repli natif→Python et tout contournement futur y sont soumis.
+9. **Zéro code mort versionné** (`out/oldmods/`), zéro copie complète du projet à côté des dépôts
+   (`*_local_*`), `out/` ignoré par git. Le dossier `scripts/` (80 fichiers) est trié : outil
+   maintenu et testé, ou supprimé.
+10. **Une seule source documentaire.** Ce fichier (4 400 lignes) est découpé : règles et contrat
+    ici (< 400 lignes), limites numérotées dans un registre structuré (`docs/limites/`), historique
+    dans `FIXED.md`. Les imports passent par de vrais paquets (`element_ardor`, `element_aeolis`),
+    sans alias `exec`.
+
+### Définition de « terminé » pour toute session
+Une tâche n'est finie que si : les tests passent **dans les deux positions du switch natif** ; la
+mesure est rapportée sur les quatre modèles de référence ; `check_limits.py` ne signale aucune
+régression ; aucune nouvelle dette n'est créée sans entrée au registre ; le numéro de version et
+`CONTRACT_CHANGES.md` sont à jour. **Quand on touche une zone, on la laisse meilleure qu'on ne l'a
+trouvée** : la dette ne se déplace pas, elle diminue à chaque passage.
+
 ## COMMENT LIRE CE FICHIER (à lire AVANT le reste)
 
 Ce document est long, dense et écrit avec assurance. **Cette assurance n'est

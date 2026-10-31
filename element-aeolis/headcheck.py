@@ -86,6 +86,8 @@ def check_points(env: HeadEnvelope, field, z_fn, t_fn, xy: np.ndarray, z_tip: np
     # Un point de la tête plus haut que toute la pièce ne peut toucher aucune surface imprimée.
     reach = float(np.nanmax(field.top) - np.nanmin(field.bottom)) + margin
     keep = env.h <= reach
+    if not keep.any():          # pièce plus basse que la tête : rien ne peut toucher (min() d'un tableau vide)
+        return 0, 0.0
     env = HeadEnvelope(env.dx[keep], env.dy[keep], env.h[keep], env.clearance_slope_deg)
     colliding, worst = 0, 0.0
     x0, x1, y0, y1 = field.xs[0], field.xs[-1], field.ys[0], field.ys[-1]
