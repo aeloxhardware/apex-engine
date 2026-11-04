@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apex-engine"
+description = "Moteur de tranchage d'Apex (Element Ardor, Element Aeolis) : G-code non planaire pour imprimante 4/5 axes."
+readme = "README.md"
+requires-python = ">=3.13"
+# Licence du projet : voir LICENSE. Licences des dépendances : docs/LICENCES_DEPENDANCES.md (TetGen et PyMeshFix : AGPL-3.0).
+version = "0.2.3"   # semver = <public>.<global>.<majeur> de config/APEX_VERSION (voir apex/integration/RULES.md §9)
+# Dépendances que le code de production importe (mesuré par analyse du code, 2026-11-04). rtree et manifold3d ne sont pas
+# importés directement : trimesh en dépend (lancer de rayons et opérations booléennes).
+dependencies = [
+  "numpy",
+  "scipy",
+  "trimesh",
+  "shapely",
+  "networkx",
+  "tetgen",
+  "rtree",
+  "manifold3d",
+  "contourpy",
+  "potpourri3d",
+  "cryptography",
+  "pymeshfix",
+]
+
+[project.optional-dependencies]
+# libigl : importé paresseusement par element-ardor/skin/surface_paths.py (chemin facultatif).
+igl = ["libigl"]
+# Outils de mesure et de visualisation du dossier scripts/, jamais utilisés par le moteur.
+scripts = ["matplotlib", "pillow", "plotly", "pymeshlab"]
+# Tests et construction du noyau natif (cpp/).
+dev = ["pytest", "pybind11", "cmake", "ninja"]
+# Outil pour régénérer requirements.lock (non figé lui-même) : pip-compile --generate-hashes --allow-unsafe --extra dev --extra scripts --extra igl -o requirements.lock pyproject.toml
+lock = ["pip-tools"]
+
+[tool.setuptools]
+py-modules = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

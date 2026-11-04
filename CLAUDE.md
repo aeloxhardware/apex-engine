@@ -74,6 +74,11 @@ suit l'emporte sur toute commodité de session. Détail et demandes : `apex/inte
 1. **Aucun fichier source > 800 lignes, aucune fonction > 80 lignes, aucune signature > 8 paramètres**
    (au-delà : une dataclass). Un script `scripts/check_limits.py` vérifie ces seuils et échoue sur
    tout dépassement nouveau.
+   **Fait le 2026-11-04** : `scripts/limits_baseline.json` liste la dette (14 fichiers, 49 fonctions,
+   15 signatures à cette date) ; `python scripts/check_limits.py --update` la resserre, `--report` la
+   publie. `out/` est ignoré par git et `out/oldmods/` supprimé (R-030 point 7).
+   Prototypes et anciens modules : archivés dans la branche `archives` (voir `docs/ARCHIVES.md`),
+   retirés de `main` le 2026-11-04 (14 `prototype_local_retriangulation*.py`, `out/oldmods/`).
 2. **Cliquet** : un fichier ou une fonction déjà hors limite ne peut que rétrécir. Toucher une
    fonction hors limite oblige à la découper dans la même passe. Dettes connues à résorber, par
    ordre : `step1_ingest.py` (2 701 l.), `main.run_pipeline` (277 l.), `_tetrahedralize` (269 l.),
@@ -448,6 +453,10 @@ précompilées disponibles pour chacune, y compris `tetgen` dont la wheel est
 `cp312-abi3` mais compatible ABI3 avec 3.14). Recréer l'environnement :
 `python -m venv .venv` puis `.venv\Scripts\python.exe -m pip install
 trimesh scipy tetgen rtree manifold3d networkx shapely pytest`.
+
+**Dépendances déclarées et figées (2026-11-04, R-030 point 5)** : `pyproject.toml` liste ce que le code importe ; `requirements.lock`
+(`pip-compile --generate-hashes`) fige les versions avec empreintes (`pip install --require-hashes -r requirements.lock`) ;
+licences : `docs/LICENCES_DEPENDANCES.md` (généré par `scripts/gen_licences.py`, vérifié en CI). La liste ci-dessous est historique.
 
 **Dépendances Python requises** (installer via pip) :
 ```
@@ -2220,7 +2229,7 @@ pour affichage/validation avant export G-code.
     moteur `element-aeolis/general.py` (sections planaires déformées par un relief doux, voir son README) utilisé en
     repli (`SliceParams.mode = "auto"`) ; `report.mode` / `report.fallback_reason` disent lequel. Deux réglages d'imprimante,
     défauts TRÈS BAS (décision de l'utilisateur : ne pas casser les conduits de ventilation serrés type Anycubic) :
-    `nozzle_angle_deg` = 10° (« Angle de la buse ») et `nozzle_reach` = 2 mm (« Longueur maximale atteignable par la buse »),
+    `nozzle_angle_deg` = 10° (« Angle maximum buse-paroi », ex-« Angle de la buse » renommé le 2026-11-04) et `nozzle_reach` = 2 mm (« Longueur maximale atteignable par la buse »),
     sens exacts dans le README d'Aeolis (**à faire confirmer par l'utilisateur**). Ils s'appliquent AUSSI au moteur
     « surface en hauteur » : il n'est gardé que s'il les respecte (`gen.surfaces_violation`, transformée en chanfrein),
     sinon repli général ; les plaques de test passent donc en général aux défauts (`enforce_nozzle_limits=False` ou 80° /
@@ -2900,6 +2909,12 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
     La grille de repli n'est **délibérément pas portée** : elle sert 0,14 %
     des points ; la porter serait du code à maintenir et une occasion de
     diverger pour rien.
+    **CORRECTION (2026-11-04) : elle a été portée depuis** (`GridSolver` dans
+    `cpp/src/core/kinematics.cpp`, `GridFallback`, compteur `grid_fallbacks`). Le Python
+    (`_resolve_axis_angles_via_grid_search`) ne sert plus que dans le mode d'essai
+    `APEX_NATIVE_GRID=0`, donc d'oracle ; test d'équivalence
+    `test_native_grid_fallback_matches_python_grid_search` (vert avec le noyau natif).
+    Il disparaît avec le Python (objectif B, RULES §11.3).
 
     > **Leçon de méthode, valable au-delà de ce cas** : sur un chemin
     > SÉQUENTIEL, une stratégie de repli « tout ou rien » est fragile de façon
