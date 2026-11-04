@@ -51,8 +51,7 @@ def apply_variant(params: PipelineParams, name: str) -> None:
     elif name == "continuous":      # parois continues, Step6Params.continuous_rings (2026-10-01)
         params.toolpath2d.continuous_rings = True
     elif name in ("native_fill", "continuous_native"):   # pas 15 : parois/remplissage Clipper2
-        from pipeline import step6_toolpath2d
-        step6_toolpath2d._NATIVE_FILL = True
+        params.toolpath2d.native_fill = True
         params.toolpath2d.continuous_rings = True
     elif name == "corder":          # step5b : ordre contraint par la tete
         from pipeline.step5b_collision_order import CollisionOrderParams

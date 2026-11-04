@@ -19,6 +19,8 @@ porte donc sur le contenu, jamais sur l'ordre.
 
 from __future__ import annotations
 
+import dataclasses
+
 import numpy as np
 import pytest
 
@@ -1978,12 +1980,9 @@ def test_schedule_native_matches_python(restore_switch, case):
     # le milieu d'une arete de la boite symetrique tombe a 7e-8 de la ligne x=0 de la grille de
     # faces, a egale distance de deux triangles de couleurs differentes -- une egalite que les deux
     # implementations departagent a leur facon (tolerance de frontiere declaree, apex/scheduling.hpp).
-    native_fill = s6._NATIVE_FILL
-    s6._NATIVE_FILL = False
-    try:
-        mesh_data, tet_mesh, regions, field, layers = _pipeline_through_step6(mesh, platform_z=-5.0)
-    finally:
-        s6._NATIVE_FILL = native_fill
+    mesh_data, tet_mesh, regions, field, layers = _pipeline_through_step6(
+        mesh, platform_z=-5.0,
+        step6_params=s6.Step6Params(nozzle_width=0.4, wall_count=2, infill_density=0.3, native_fill=False))
     params = s7.Step7Params()
     color_map = None
     if case == "two_tone":
@@ -2318,14 +2317,8 @@ def test_step6_native_layers_match_per_layer_path(restore_switch):
     assert s6._fill_layers_native(layers, mesh_data, overhang, base, {}) is not None
 
     def both(params):
-        flag = s6._NATIVE_LAYER
-        try:
-            s6._NATIVE_LAYER = False
-            ref = s6.run(layers, mesh_data, overhang, params)
-            s6._NATIVE_LAYER = True
-            return ref, s6.run(layers, mesh_data, overhang, params)
-        finally:
-            s6._NATIVE_LAYER = flag
+        ref = s6.run(layers, mesh_data, overhang, dataclasses.replace(params, native_layer=False))
+        return ref, s6.run(layers, mesh_data, overhang, dataclasses.replace(params, native_layer=True))
 
     def length(polys):
         return sum(float(np.linalg.norm(np.diff(p[:, :2], axis=0), axis=1).sum()) for p in polys)
@@ -2413,7 +2406,7 @@ def test_native_grid_fallback_matches_python_grid_search(restore_switch, monkeyp
     colineaires a l'axe externe. Seul +Z est une tangence qui met l'analytique en echec (B = 0) ;
     -Z (B = 180, dans la plage [0, 185]) se resout analytiquement : mesure sur la machine reelle,
     43 repli sur 43 pour +Z, 0 sur 43 pour -Z. Les points -Z servent donc de controle : ils ne doivent
-    PAS se replier. `APEX_NATIVE_GRID=0` (variable de module) rend le repli Python, point par point.
+    PAS se replier. `Step8Params.native_grid_fallback=False` rend le repli Python, point par point.
     """
     import pipeline.step8_machine_toolpath as step8
 
@@ -2423,11 +2416,10 @@ def test_native_grid_fallback_matches_python_grid_search(restore_switch, monkeyp
         raw_points[index].desired_direction = np.array([0.0, 0.0, 1.0 if index % 14 == 0 else -1.0])
         plus_z += index % 14 == 0
 
-    monkeypatch.setattr(step8, "_NATIVE_GRID_FALLBACK", False)
     _cpp.set_enabled(True)
-    python_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
+    python_grid = step8._resolve_all_axis_angles(
+        raw_points, axes, reference, origin, dataclasses.replace(params, native_grid_fallback=False))
     python_count = step8._LAST_NATIVE_FALLBACK_COUNT
-    monkeypatch.setattr(step8, "_NATIVE_GRID_FALLBACK", True)
     native_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
     native_count = step8._LAST_NATIVE_FALLBACK_COUNT
 
@@ -2445,9 +2437,8 @@ def test_native_grid_fallback_with_three_axes(restore_switch, monkeypatch):
     raw_points, _axes, reference, origin, params = _ik_fixture(axes, seed=404, count=200)
     for index in range(0, 200, 9):
         raw_points[index].desired_direction = np.array([0.0, 0.0, 1.0])
-    monkeypatch.setattr(step8, "_NATIVE_GRID_FALLBACK", False)
     _cpp.set_enabled(True)
-    python_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
-    monkeypatch.setattr(step8, "_NATIVE_GRID_FALLBACK", True)
+    python_grid = step8._resolve_all_axis_angles(
+        raw_points, axes, reference, origin, dataclasses.replace(params, native_grid_fallback=False))
     native_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
     _assert_ik_equivalent(python_grid, native_grid)
