@@ -32,7 +32,9 @@ igl = ["libigl"]
 # Outils de mesure et de visualisation du dossier scripts/, jamais utilisés par le moteur.
 scripts = ["matplotlib", "pillow", "plotly", "pymeshlab"]
 # Tests et construction du noyau natif (cpp/).
-dev = ["pytest", "pybind11", "cmake", "ninja", "pip-tools"]
+dev = ["pytest", "pybind11", "cmake", "ninja"]
+# Outil pour régénérer requirements.lock (non figé lui-même) : pip-compile --generate-hashes --allow-unsafe --extra dev --extra scripts --extra igl -o requirements.lock pyproject.toml
+lock = ["pip-tools"]
 
 [tool.setuptools]
 py-modules = []
