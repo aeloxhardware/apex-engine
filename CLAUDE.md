@@ -454,6 +454,10 @@ précompilées disponibles pour chacune, y compris `tetgen` dont la wheel est
 `python -m venv .venv` puis `.venv\Scripts\python.exe -m pip install
 trimesh scipy tetgen rtree manifold3d networkx shapely pytest`.
 
+**Dépendances déclarées et figées (2026-11-04, R-030 point 5)** : `pyproject.toml` liste ce que le code importe ; `requirements.lock`
+(`pip-compile --generate-hashes`) fige les versions avec empreintes (`pip install --require-hashes -r requirements.lock`) ;
+licences : `docs/LICENCES_DEPENDANCES.md` (généré par `scripts/gen_licences.py`, vérifié en CI). La liste ci-dessous est historique.
+
 **Dépendances Python requises** (installer via pip) :
 ```
 trimesh scipy tetgen rtree manifold3d networkx shapely pytest
