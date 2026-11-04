@@ -2905,6 +2905,12 @@ ce sont des **contraintes de forme** sur le code qui sera écrit de toute façon
     La grille de repli n'est **délibérément pas portée** : elle sert 0,14 %
     des points ; la porter serait du code à maintenir et une occasion de
     diverger pour rien.
+    **CORRECTION (2026-11-04) : elle a été portée depuis** (`GridSolver` dans
+    `cpp/src/core/kinematics.cpp`, `GridFallback`, compteur `grid_fallbacks`). Le Python
+    (`_resolve_axis_angles_via_grid_search`) ne sert plus que dans le mode d'essai
+    `APEX_NATIVE_GRID=0`, donc d'oracle ; test d'équivalence
+    `test_native_grid_fallback_matches_python_grid_search` (vert avec le noyau natif).
+    Il disparaît avec le Python (objectif B, RULES §11.3).
 
     > **Leçon de méthode, valable au-delà de ce cas** : sur un chemin
     > SÉQUENTIEL, une stratégie de repli « tout ou rien » est fragile de façon
