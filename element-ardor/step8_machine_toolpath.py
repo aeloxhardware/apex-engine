@@ -32,7 +32,6 @@ Sortie : (ToolpathMachine, list[Step8Diagnostic]).
 
 from __future__ import annotations
 
-import os
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -71,6 +70,9 @@ class ToolpathResolutionError(Exception):
 
 @dataclass
 class Step8Params:
+    # Repli par grille porte en natif (kinematics.cpp, GridSolver). False rend le repli Python,
+    # point par point (mesure d'equivalence, tests). R-030 point 3 : plus de variable d'environnement.
+    native_grid_fallback: bool = True
     # Nombre d'echantillons par axe pour la recherche du plus proche voisin
     # (composed_rotation_angles_and_directions) - cout total = ~samples**N.
     ik_samples_per_axis: int = 10
@@ -156,13 +158,8 @@ def _layer_normal(local_frame: tuple[np.ndarray, np.ndarray, np.ndarray]) -> np.
     return normal / norm
 
 
-# Repli par grille porte en natif (cpp/src/core/kinematics.cpp, GridSolver) : `APEX_NATIVE_GRID=0`
-# rend le repli Python, point par point (mesure d'equivalence, tests).
-_NATIVE_GRID_FALLBACK = os.environ.get("APEX_NATIVE_GRID", "1") != "0"
-
-
 def _native_grid_args(params: "Step8Params") -> tuple[int, float, int]:
-    if not _NATIVE_GRID_FALLBACK:
+    if not params.native_grid_fallback:
         return (0, 0.0, 0)
     return (int(params.ik_samples_per_axis), float(params.ik_refine_step_multiplier), int(params.ik_refine_iterations))
 

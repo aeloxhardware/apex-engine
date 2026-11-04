@@ -68,6 +68,8 @@ struct LayerParams {
 };
 
 struct Step6Params {
+    bool native_fill{true};
+    bool native_layer{true};
     double nozzle_width{0.4};
     int wall_count{2};
     double infill_density{0.2};
@@ -113,6 +115,7 @@ struct ColorMap {
 };
 
 struct Step8Params {
+    bool native_grid_fallback{true};
     int ik_samples_per_axis{10};
     int ik_refine_iterations{8};
     double ik_refine_step_multiplier{0.5};
@@ -226,10 +229,10 @@ struct PipelineParams {
     SegmentationParams segmentation{SegmentationParams{.direction_candidate_count = 26, .max_angle_from_direction_deg = 45.0, .max_region_merge_angle_deg = std::nullopt, .platform_z = std::nullopt, .platform_contact_tolerance = 0.5, .rotation_axes = std::nullopt, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
     FieldSolverParams field_solver{FieldSolverParams{.resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .platform_anchor_weight = 1000000.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .heat_method_time_factor = 100.0, .radial_tilt_origin = std::nullopt, .heat_project_reachable = true}};
     LayerParams layers{LayerParams{.layer_height_base = 0.2, .weld_tolerance_factor = 1e-06, .split_disjoint_clusters = std::nullopt, .isovalue_order = true}};
-    Step6Params toolpath2d{Step6Params{.nozzle_width = 0.4, .wall_count = 2, .infill_density = 0.2, .infill_pattern = InfillPattern::CROSSED_ZIGZAG, .bridge_contour_ratio_threshold = 0.05, .bridge_anchor_extra_walls = 2, .degenerate_area_ratio = 1e-06, .out_of_plane_interpolation_power = 2.0, .split_rings_into_runs = true, .split_open_polylines = false, .continuous_rings = true, .run_split_min_amplitude = 0.05, .spiral_axis_origin = std::nullopt, .spiral_alternation_threshold = std::nullopt, .spiral_peak_spacing = std::nullopt, .spiral_randomization_threshold = 0.5, .spiral_seed = 0}};
+    Step6Params toolpath2d{Step6Params{.native_fill = true, .native_layer = true, .nozzle_width = 0.4, .wall_count = 2, .infill_density = 0.2, .infill_pattern = InfillPattern::CROSSED_ZIGZAG, .bridge_contour_ratio_threshold = 0.05, .bridge_anchor_extra_walls = 2, .degenerate_area_ratio = 1e-06, .out_of_plane_interpolation_power = 2.0, .split_rings_into_runs = true, .split_open_polylines = false, .continuous_rings = true, .run_split_min_amplitude = 0.05, .spiral_axis_origin = std::nullopt, .spiral_alternation_threshold = std::nullopt, .spiral_peak_spacing = std::nullopt, .spiral_randomization_threshold = 0.5, .spiral_seed = 0}};
     Step7Params scheduling{Step7Params{.surface_color_distance = 0.5, .hole_cost_model = HoleCostModel{.reheat_penalty = 1.0, .adhesion_risk_weight = 1.0}, .purge_cost_model = PurgeCostModel{.volume_per_purge = 1.0, .time_per_purge = 1.0}, .max_open_holes = 4, .escape_direction_count = 16, .rotation_axes = std::nullopt, .deadline_ray_samples = 24}};
     std::optional<ColorMap> color_map{std::nullopt};
-    Step8Params machine_toolpath{Step8Params{.ik_samples_per_axis = 10, .ik_refine_iterations = 8, .ik_refine_step_multiplier = 0.5, .singularity_radius_epsilon = 0.001, .travel_feedrate = 0.0, .default_feedrate = 1000.0, .max_unreachable_angular_error_deg = 5.0, .clamp_angle_rates = false, .free_axis_median_window = 9, .per_point_normal = true, .per_point_normal_nodal = false}};
+    Step8Params machine_toolpath{Step8Params{.native_grid_fallback = true, .ik_samples_per_axis = 10, .ik_refine_iterations = 8, .ik_refine_step_multiplier = 0.5, .singularity_radius_epsilon = 0.001, .travel_feedrate = 0.0, .default_feedrate = 1000.0, .max_unreachable_angular_error_deg = 5.0, .clamp_angle_rates = false, .free_axis_median_window = 9, .per_point_normal = true, .per_point_normal_nodal = false}};
     CollisionSimParams collision{CollisionSimParams{.path_sampling_step = 2.0, .safety_margin = 1.0, .printed_part_margin = -0.15, .max_adjustment_iterations = 3, .grid_cell_size_multiplier = 4.0, .toolhead_sample_spacing = 5.0, .nozzle_contact_clearance = 3.0, .fast_kdtree = true, .fast_densify_step = 0.25}};
     Step10Params adjustment{Step10Params{.max_adjustment_iterations = 3, .reorientation_samples_per_axis = 12, .max_direction_deviation_deg = 45.0, .excluded_range_half_width_deg = 15.0, .rate_limit_neighbor_margin = 1, .orientation_support_min_residual_deg = std::nullopt}};
     bool height_clamp{false};

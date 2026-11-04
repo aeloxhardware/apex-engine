@@ -857,6 +857,7 @@
       "ik_refine_step_multiplier": 0.5,
       "ik_samples_per_axis": 10,
       "max_unreachable_angular_error_deg": 5.0,
+      "native_grid_fallback": true,
       "per_point_normal": true,
       "per_point_normal_nodal": false,
       "singularity_radius_epsilon": 0.001,
@@ -978,6 +979,8 @@
       "degenerate_area_ratio": 1e-06,
       "infill_density": 0.2,
       "infill_pattern": "crossed_zigzag",
+      "native_fill": true,
+      "native_layer": true,
       "nozzle_width": 0.4,
       "out_of_plane_interpolation_power": 2.0,
       "run_split_min_amplitude": 0.05,
@@ -1229,7 +1232,7 @@
   },
   "Step6Params": {
    "additionalProperties": false,
-   "description": "Step6Params(nozzle_width: 'float' = 0.4, wall_count: 'int' = 2, infill_density: 'float' = 0.2, infill_pattern: 'InfillPattern' = <InfillPattern.CROSSED_ZIGZAG: 'crossed_zigzag'>, bridge_contour_ratio_threshold: 'float' = 0.05, bridge_anchor_extra_walls: 'int' = 2, degenerate_area_ratio: 'float' = 1e-06, out_of_plane_interpolation_power: 'float | None' = None, split_rings_into_runs: 'bool' = False, split_open_polylines: 'bool' = False, continuous_rings: 'bool' = False, run_split_min_amplitude: 'f",
+   "description": "Step6Params(native_fill: 'bool' = True, native_layer: 'bool' = True, nozzle_width: 'float' = 0.4, wall_count: 'int' = 2, infill_density: 'float' = 0.2, infill_pattern: 'InfillPattern' = <InfillPattern.CROSSED_ZIGZAG: 'crossed_zigzag'>, bridge_contour_ratio_threshold: 'float' = 0.05, bridge_anchor_extra_walls: 'int' = 2, degenerate_area_ratio: 'float' = 1e-06, out_of_plane_interpolation_power: 'float | None' = None, split_rings_into_runs: 'bool' = False, split_open_polylines: 'bool' = False, cont",
    "properties": {
     "bridge_anchor_extra_walls": {
      "default": 2,
@@ -1260,6 +1263,14 @@
       "oscillating_spiral"
      ],
      "type": "string"
+    },
+    "native_fill": {
+     "default": true,
+     "type": "boolean"
+    },
+    "native_layer": {
+     "default": true,
+     "type": "boolean"
     },
     "nozzle_width": {
      "default": 0.4,
@@ -1402,7 +1413,7 @@
   },
   "Step8Params": {
    "additionalProperties": false,
-   "description": "Step8Params(ik_samples_per_axis: 'int' = 10, ik_refine_iterations: 'int' = 8, ik_refine_step_multiplier: 'float' = 0.5, singularity_radius_epsilon: 'float' = 0.001, travel_feedrate: 'float' = 0.0, default_feedrate: 'float' = 1000.0, max_unreachable_angular_error_deg: 'float' = 5.0, clamp_angle_rates: 'bool' = False, free_axis_median_window: 'int' = 9, per_point_normal: 'bool' = True, per_point_normal_nodal: 'bool' = False)",
+   "description": "Step8Params(native_grid_fallback: 'bool' = True, ik_samples_per_axis: 'int' = 10, ik_refine_iterations: 'int' = 8, ik_refine_step_multiplier: 'float' = 0.5, singularity_radius_epsilon: 'float' = 0.001, travel_feedrate: 'float' = 0.0, default_feedrate: 'float' = 1000.0, max_unreachable_angular_error_deg: 'float' = 5.0, clamp_angle_rates: 'bool' = False, free_axis_median_window: 'int' = 9, per_point_normal: 'bool' = True, per_point_normal_nodal: 'bool' = False)",
    "properties": {
     "clamp_angle_rates": {
      "default": false,
@@ -1431,6 +1442,10 @@
     "max_unreachable_angular_error_deg": {
      "default": 5.0,
      "type": "number"
+    },
+    "native_grid_fallback": {
+     "default": true,
+     "type": "boolean"
     },
     "per_point_normal": {
      "default": true,

@@ -6,6 +6,7 @@ remplissage, et le temps de step6 dans les deux modes.
 Usage : APEX_USE_CPP=1 .venv/Scripts/python.exe -u scripts/check_native_fill.py <stl>
 """
 import os
+import dataclasses
 import sys
 import time
 
@@ -44,9 +45,8 @@ def main():
 
     out = {}
     for native in (False, True):
-        s6._NATIVE_FILL = native
         t0 = time.time()
-        res = s6.run(layers, *args)
+        res = s6.run(layers, args[0], args[1], dataclasses.replace(args[2], native_fill=native))
         out[native] = (res, time.time() - t0)
     (ref, t_ref), (nat, t_nat) = out[False], out[True]
     dl, dp = [], 0

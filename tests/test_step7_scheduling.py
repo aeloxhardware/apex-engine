@@ -43,6 +43,7 @@ def _pipeline_through_step6(
     resolution: float = 1.5,
     platform_z: float = -5.0,
     layer_height_base: float = 2.0,
+    step6_params: "Step6Params | None" = None,
 ):
     import tempfile
     import os
@@ -67,7 +68,7 @@ def _pipeline_through_step6(
     )
     layers = toolpath_run(
         layers, mesh_data, overhang_map,
-        Step6Params(nozzle_width=0.4, wall_count=2, infill_density=0.3),
+        step6_params or Step6Params(nozzle_width=0.4, wall_count=2, infill_density=0.3),
     )
     return mesh_data, tet_mesh, regions, field, layers
 

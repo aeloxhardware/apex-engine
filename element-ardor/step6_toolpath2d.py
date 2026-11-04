@@ -71,6 +71,9 @@ class InfillPattern(Enum):
 
 @dataclass
 class Step6Params:
+    # R-030 pt 3 : False = shapely / couche par couche ; sans effet si le noyau natif est inactif (#82).
+    native_fill: bool = True
+    native_layer: bool = True
     nozzle_width: float = 0.4
     wall_count: int = 2
     infill_density: float = 0.2          # dans (0, 1]
@@ -1330,14 +1333,12 @@ _STEP6_THREADS = None
 # (Clipper2 au lieu de shapely/GEOS). PAS au bit pres - meme offset en
 # onglet, autre arithmetique et autre point de depart d'anneau -, d'ou
 # l'option. ACTIVE PAR DEFAUT quand le noyau natif est actif (2026-10-26) :
-# APEX_NATIVE_FILL=0 rend shapely. Mesure sur les 4 modeles (limite #82).
-# Les ponts restent en Python.
-_NATIVE_FILL = os.environ.get("APEX_NATIVE_FILL", "1") == "1"
+# `Step6Params.native_fill=False` rend shapely (limite #82). Les ponts restent en Python.
 _NATIVE_PATTERN_CODES = {InfillPattern.LINES: 0, InfillPattern.GRID: 1, InfillPattern.CROSSED_ZIGZAG: 2}
 
 
-def _native_fill_module():
-    if not _NATIVE_FILL:
+def _native_fill_module(params: "Step6Params"):
+    if not params.native_fill:
         return None
     from core import _cpp
     module = _cpp.module() if _cpp.enabled() else None
@@ -1412,8 +1413,7 @@ def run(
 
 # Remplissage de couches ENTIERES en natif (cpp/src/core/step6_layer.cpp) : classification,
 # pont, parois/remplissage Clipper2, offset hors-plan, decoupage en troncons, en parallele.
-# APEX_NATIVE_LAYER=0 rend le chemin couche par couche de Python.
-_NATIVE_LAYER = os.environ.get("APEX_NATIVE_LAYER", "1") == "1"
+# `Step6Params.native_layer=False` rend le chemin couche par couche de Python.
 _NATIVE_CHUNKS = 20      # tranches de couches du chemin natif (une fraction de progression par tranche)
 _NATIVE_MIN_CHUNK = 32   # jamais moins : un appel natif trop court ne parallelise plus
 
@@ -1421,8 +1421,8 @@ _NATIVE_MIN_CHUNK = 32   # jamais moins : un appel natif trop court ne paralleli
 def _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank):
     """Liste de Layer avec `toolpath_2d` rempli, ou None si le chemin natif ne s'applique pas
     (noyau inactif, motif non natif, kd-tree sans version native)."""
-    module = _native_fill_module()
-    if (not _NATIVE_LAYER or module is None or not hasattr(module, "fill_layers")
+    module = _native_fill_module(params)
+    if (not params.native_layer or module is None or not hasattr(module, "fill_layers")
             or params.infill_pattern not in _NATIVE_PATTERN_CODES or not layers):
         return None
     kdtree = getattr(mesh_data.kdtree, "_native", None)
@@ -1530,13 +1530,13 @@ def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, pa
 
             if bridge_direction is not None:
                 generated = _reorient_bridge_toolpath(outer, holes, bridge_direction, params)
-            elif _native_fill_module() is not None and params.infill_pattern in _NATIVE_PATTERN_CODES:
+            elif _native_fill_module(params) is not None and params.infill_pattern in _NATIVE_PATTERN_CODES:
                 sweep_angle = (
                     _infill_angle_for_layer(layer, isovalue_rank)
                     if params.infill_pattern is InfillPattern.CROSSED_ZIGZAG
                     else 0.0
                 )
-                valid, infill, offset_walls = _native_fill_module().fill_region(
+                valid, infill, offset_walls = _native_fill_module(params).fill_region(
                     outer, holes, params.nozzle_width, params.wall_count, params.degenerate_area_ratio,
                     params.infill_density, _NATIVE_PATTERN_CODES[params.infill_pattern], sweep_angle,
                 )

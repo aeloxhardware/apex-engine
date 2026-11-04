@@ -89,8 +89,7 @@ def test_native_step6_chunks_match_a_single_call(monkeypatch):
             assert loop_begin[-1] == len(point_begin) - 1 and point_begin[-1] == len(points)
             return [[np.array([[sweep[i], float(points[point_begin[loop_begin[i]], 2]), 0.0]])] for i in range(len(frames))]
 
-    monkeypatch.setattr(s6, "_native_fill_module", lambda: FakeModule)
-    monkeypatch.setattr(s6, "_NATIVE_LAYER", True)
+    monkeypatch.setattr(s6, "_native_fill_module", lambda params: FakeModule)
     mesh_data = type("M", (), {"kdtree": type("K", (), {"_native": object()})()})()
     overhang = type("O", (), {"is_bridge": np.zeros(3, bool), "bridge_span_direction": np.zeros((3, 3))})()
     params = s6.Step6Params()
