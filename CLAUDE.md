@@ -74,6 +74,9 @@ suit l'emporte sur toute commodité de session. Détail et demandes : `apex/inte
 1. **Aucun fichier source > 800 lignes, aucune fonction > 80 lignes, aucune signature > 8 paramètres**
    (au-delà : une dataclass). Un script `scripts/check_limits.py` vérifie ces seuils et échoue sur
    tout dépassement nouveau.
+   **Fait le 2026-11-04** : `scripts/limits_baseline.json` liste la dette (14 fichiers, 49 fonctions,
+   15 signatures à cette date) ; `python scripts/check_limits.py --update` la resserre, `--report` la
+   publie. `out/` est ignoré par git et `out/oldmods/` supprimé (R-030 point 7).
 2. **Cliquet** : un fichier ou une fonction déjà hors limite ne peut que rétrécir. Toucher une
    fonction hors limite oblige à la découper dans la même passe. Dettes connues à résorber, par
    ordre : `step1_ingest.py` (2 701 l.), `main.run_pipeline` (277 l.), `_tetrahedralize` (269 l.),

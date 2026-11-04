@@ -35,3 +35,6 @@ research/
 # CONFIDENTIEL (methode brevetable, decision de l utilisateur du 2026-10-07) : jamais versionne.
 Methode_calibration_*.docx
 config/pivot_to_tip.json.tmp
+
+# Sorties generees (journaux, G-code, GIF, mesures) : jamais versionnees (R-030 point 7)
+out/
