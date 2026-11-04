@@ -6,7 +6,7 @@ Protocole d'appel du tranchage (apex/integration/RULES.md, §5 ; contrats C2 et 
 
 `requete.json` :
     {
-      "contract": 1,                      # APEX_CONTRACT_VERSION, obligatoire
+      "contract": 3,                      # APEX_CONTRACT_VERSION, obligatoire
       "mesh": "chemin/modele.stl",        # obligatoire
       "output_dir": "chemin/sortie",      # obligatoire, cree si absent
       "output_name": "modele.gcode",      # facultatif (defaut : <nom du maillage>.gcode)

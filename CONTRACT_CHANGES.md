@@ -4,6 +4,19 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 3 (2026-11-04) : INCOMPATIBLE, le numero passe de 2 a 3
+Decision de l'utilisateur (2026-11-04) : les defauts de buse tres bas d'Element Aeolis sont GARDES, pour eliminer des
+defauts (conduits de ventilation serres, collisions). Un defaut qui change le G-code produit incremente le contrat
+(`apex/integration/RULES.md` §4.1 et §11.1) : le numero passe donc de 2 a 3.
+- **Ce qui change pour un meme modele** : avec `nozzle_angle_deg = 10`, `nozzle_reach = 2 mm` et `enforce_nozzle_limits = vrai`,
+  les surfaces en hauteur dont les couches depassent ces limites (les plaques de `res/test_models/non_planar/`) passent au
+  moteur general d'Element Aeolis ; `enforce_nozzle_limits = false` (ou 80° et 50 mm) rend l'ancien G-code.
+- **Libelle renomme** : « Angle de la buse » devient **« Angle maximum buse-paroi »** (le nom du champ `nozzle_angle_deg` et son
+  sens ne changent pas : pente maximale, depuis l'horizontale, de la surface deja imprimee autour de la pointe).
+- **Ce que le consommateur doit faire** : l'interface passe `APEX_CONTRACT_VERSION` a 3 (`src/utils/engineContract.ts`), relance
+  `schema:sync` et affiche le nouveau libelle. Une requete portant `contract: 2` est refusee (code 2).
+- Rien d'autre ne change dans le schema (les deux reglages et `mode` existent deja).
+
 ## Ajout du 2026-11-01 (le numero reste 2) : types de ligne du G-code d'Element Aeolis
 - Chaque polyligne extrudee d'Aeolis est precedee d'une etiquette `;TYPE:<type>` (convention de Cura, ecrite a chaque
   changement de type, remise a zero a chaque couche) : `WALL-OUTER` (paroi exterieure), `WALL-INNER` (parois interieures),
@@ -11,11 +24,11 @@ Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le 
   general) l'ecrivent. Une visionneuse qui ignore les commentaires n'a rien a changer ; l'interface colore l'apercu d'apres
   ces etiquettes (R-028). Le G-code polaire (Element Ardor) n'en porte pas encore.
 
-## Ajouts du 2026-10-31 (le numero reste 2, a confirmer par l'utilisateur : un defaut change le G-code)
+## Ajouts du 2026-10-31 (le numero reste 2 ; CONFIRMES le 2026-11-04 par l'utilisateur, le defaut qui change le G-code fait passer le contrat a 3, voir plus haut)
 - Element Aeolis tranche TOUTE geometrie (`element-aeolis/general.py`). `AeolisSliceParams` gagne `mode` (`auto` par defaut,
   `heightfield`, `general`), `nozzle_angle_deg` (10) et `nozzle_reach` (2 mm), les deux reglages de buse de l'imprimante, et
   `enforce_nozzle_limits` (vrai). Le `report` gagne `mode`, `fallback_reason` et `relief_mm`.
-- **Defaut qui change le G-code (a confirmer)** : avec les defauts de buse tres bas, les surfaces en hauteur dont les couches
+- **Defaut qui change le G-code (confirme le 2026-11-04 : contrat 3)** : avec les defauts de buse tres bas, les surfaces en hauteur dont les couches
   depassent ces limites (les plaques de `res/test_models/non_planar/`) passent au moteur general ; `enforce_nozzle_limits=false`
   rend l'ancien resultat. Sans cela, le statut `not_a_heightfield` n'est plus renvoye par defaut : seulement avec
   `mode: heightfield`. Nouveau refus type (code 3) : `not_sliceable` (maillage vide ou ouvert, aucune section).

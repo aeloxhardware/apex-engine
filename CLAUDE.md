@@ -2225,7 +2225,7 @@ pour affichage/validation avant export G-code.
     moteur `element-aeolis/general.py` (sections planaires déformées par un relief doux, voir son README) utilisé en
     repli (`SliceParams.mode = "auto"`) ; `report.mode` / `report.fallback_reason` disent lequel. Deux réglages d'imprimante,
     défauts TRÈS BAS (décision de l'utilisateur : ne pas casser les conduits de ventilation serrés type Anycubic) :
-    `nozzle_angle_deg` = 10° (« Angle de la buse ») et `nozzle_reach` = 2 mm (« Longueur maximale atteignable par la buse »),
+    `nozzle_angle_deg` = 10° (« Angle maximum buse-paroi », ex-« Angle de la buse » renommé le 2026-11-04) et `nozzle_reach` = 2 mm (« Longueur maximale atteignable par la buse »),
     sens exacts dans le README d'Aeolis (**à faire confirmer par l'utilisateur**). Ils s'appliquent AUSSI au moteur
     « surface en hauteur » : il n'est gardé que s'il les respecte (`gen.surfaces_violation`, transformée en chanfrein),
     sinon repli général ; les plaques de test passent donc en général aux défauts (`enforce_nozzle_limits=False` ou 80° /

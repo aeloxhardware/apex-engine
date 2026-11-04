@@ -25,7 +25,7 @@ Aeolis tranche **n'importe quel maillage fermé** (surplombs, cavités, pièces 
 
 | réglage (`SliceParams`) | libellé | défaut | sens |
 |---|---|---:|---|
-| `nozzle_angle_deg` | Angle de la buse | 10° | pente maximale, depuis l'horizontale, de la surface DÉJÀ imprimée autour de la pointe (0° = épaule plate, 90° = aiguille) |
+| `nozzle_angle_deg` | Angle maximum buse-paroi | 10° | pente maximale, depuis l'horizontale, de la surface DÉJÀ imprimée autour de la pointe (0° = épaule plate, 90° = aiguille) |
 | `nozzle_reach` | Longueur maximale atteignable par la buse | 2 mm | longueur de buse sous le conduit de ventilation = dénivelé maximal toléré entre la pointe et la matière voisine plus haute |
 
 Défauts bas : ils ne cassent pas une imprimante à conduits de ventilation serrés (Anycubic...). À relever pour une tête
