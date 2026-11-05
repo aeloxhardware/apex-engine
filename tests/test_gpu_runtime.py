@@ -21,13 +21,15 @@ def test_gpu_status_always_has_a_reason_when_unavailable():
     assert _cpp.gpu_enabled() is False or st["ok"]
 
 
-def test_gpu_switch_is_off_by_default(monkeypatch):
-    monkeypatch.delenv("APEX_USE_GPU", raising=False)
+def test_gpu_switch_is_off_by_default():
+    from core.runtime import RuntimeOptions
+    previous_options = _cpp.configure(RuntimeOptions(use_cpp=True))   # options par defaut : use_gpu eteint
     previous = _cpp.set_gpu_enabled(None)
     try:
         assert _cpp.gpu_enabled() is False
     finally:
         _cpp.set_gpu_enabled(previous)
+        _cpp.configure(previous_options)
 
 
 def _require_gpu():

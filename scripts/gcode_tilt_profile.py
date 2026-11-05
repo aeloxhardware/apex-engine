@@ -25,6 +25,7 @@ import numpy as np
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, ROOT)
+from core.runtime import configure_from_environment; configure_from_environment()  # point d'entree : options d'execution
 
 from file_io.gcode_export import firmware_to_machine, parse_gcode  # noqa: E402
 

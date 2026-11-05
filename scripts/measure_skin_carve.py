@@ -26,6 +26,7 @@ from scipy.spatial import cKDTree
 
 ROOT = __import__("os").path.dirname(__import__("os").path.dirname(__import__("os").path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from core.runtime import configure_from_environment; configure_from_environment()  # point d'entree : options d'execution
 
 import importlib  # noqa: E402
 

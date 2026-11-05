@@ -23,6 +23,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from core.runtime import configure_from_environment; configure_from_environment()  # point d'entree : options d'execution
 
 from main import PipelineParams  # noqa: E402
 from pipeline.step9b_support_check import SupportCheckParams  # noqa: E402
@@ -172,7 +173,7 @@ def main() -> None:
     row = {
         "model": os.path.basename(model), "variant": variant, "resolution": params.resolution,
         "layer_height_base": params.layers.layer_height_base,
-        "apex_use_cpp": os.environ.get("APEX_USE_CPP", "0"),
+        "apex_use_cpp": "1" if __import__("core._cpp", fromlist=["_cpp"]).options().use_cpp else "0",
         "seconds": round(elapsed, 1), "layers": len(result.layers), "points": len(pts),
         "layer_thickness_measured": round(_layer_thickness(result), 4),
         "tested": rep.tested_extruded_points, "unsupported": len(rep.events),

@@ -5,6 +5,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from core.runtime import configure_from_environment; configure_from_environment()  # point d'entree : options d'execution
 
 import numpy as np  # noqa: E402
 

@@ -1946,13 +1946,13 @@ class _TetgenNamedConflictError(RuntimeError):
 def _native_tetgen_worker_path() -> Optional[str]:
     """
     Executable C++ `apex_tetgen_worker` (cpp/third_party/tetgen, AGPL-3.0),
-    quand il est construit. `APEX_TETGEN_WORKER=0` le desactive (retour au
+    quand il est construit. `RuntimeOptions.tetgen_worker=False` le desactive (retour au
     worker Python, identique). Absence = jamais une erreur.
     """
-    if os.environ.get("APEX_TETGEN_WORKER", "1") == "0":
+    if not _cpp.options().tetgen_worker:
         return None
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    dirs = [os.environ.get("APEX_CPP_LIB_DIR", ""), os.path.join(root, "cpp", "lib")]
+    dirs = [_cpp.options().lib_dir or "", os.path.join(root, "cpp", "lib")]
     for d in dirs:
         for name in ("apex_tetgen_worker", "apex_tetgen_worker.exe"):
             path = os.path.join(d, name) if d else ""
@@ -2009,7 +2009,7 @@ class _NativeTetgen:
                 completed = subprocess.run(
                     [exe, input_path, output_path], stdout=out_f, stderr=err_f
                 )
-            log_path = os.environ.get("APEX_TETGEN_LOG")
+            log_path = _cpp.options().tetgen_log
             if log_path:  # temps par phase de TetGen, pour la mesure
                 with open(log_path, "ab") as log_f, open(stdout_path, "rb") as o, open(
                     stderr_path, "rb"

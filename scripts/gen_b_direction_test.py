@@ -28,6 +28,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from core.runtime import configure_from_environment; configure_from_environment()  # point d'entree : options d'execution
 
 from file_io.gcode_export import GcodeParams, machine_to_firmware  # noqa: E402
 from file_io.pivot_length import current_pivot_to_tip  # noqa: E402

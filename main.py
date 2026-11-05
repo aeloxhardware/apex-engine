@@ -694,6 +694,8 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
 
 def main(argv: Optional[list[str]] = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
+    from core.runtime import configure_from_environment
+    configure_from_environment()           # point d'entree : seul endroit qui lit l'environnement
     if argv and argv[0] in ("slice", "steps"):
         # Protocole d'appel du tranchage (apex/integration/RULES.md, §5 ; contrats C2 et C3).
         import slice_cli

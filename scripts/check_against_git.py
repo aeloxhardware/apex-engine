@@ -13,6 +13,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from core.runtime import configure_from_environment; configure_from_environment()  # point d'entree : options d'execution
 
 import main as apex_main  # noqa: E402
 import pipeline.step6_toolpath2d as s6  # noqa: E402

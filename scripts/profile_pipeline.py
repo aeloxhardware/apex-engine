@@ -15,6 +15,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+from core.runtime import configure_from_environment; configure_from_environment()  # point d'entree : options d'execution
 
 from main import PipelineParams  # noqa: E402
 from scripts.export_slicing_preview import run_slicing_only  # noqa: E402

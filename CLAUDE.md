@@ -85,10 +85,17 @@ suit l'emporte sur toute commodité de session. Détail et demandes : `apex/inte
    `export_gcode` (257 l.), `element-aeolis/slicer._slice` (239 l.), `_self_intersection_resolve`
    (999 l.), `step10_adjustment.run` (211 l.), `step6_toolpath2d.py` (1 604 l.),
    `step8_machine_toolpath.py` (1 417 l.), `step5_layers.py` (1 269 l.).
-3. **Aucune variable d'environnement ne change le résultat** (`APEX_NATIVE_FILL`, `APEX_NATIVE_LAYER`,
-   `APEX_NATIVE_GRID`, `APEX_TETGEN_WORKER`, `APEX_USE_CPP`…) : tout passe par un objet d'options
-   explicite. **Aucun `global` mutable** (`_LAST_NATIVE_FALLBACK_COUNT`, `_FAST_CHECKER_CACHE`,
-   état de `core/progress.py`) : état porté par un objet passé en paramètre.
+3. **Aucune variable d'environnement ne change le résultat** ; tout passe par un objet d'options
+   explicite. **Aucun `global` mutable** : état porté par un objet passé en paramètre.
+   **Passe 1 (2026-11-04)** : `APEX_NATIVE_FILL/LAYER/GRID` sont devenues `Step6Params.native_fill`/`native_layer` et
+   `Step8Params.native_grid_fallback`. **Passe 2 (2026-11-05)** : `core/runtime.py` (`RuntimeOptions`, immuable) porte
+   `use_cpp`, `use_gpu`, `grid_mode`, `lib_dir`, `tetgen_worker`, `tetgen_log` ; la bibliothèque (`core/`, `element-*/`,
+   `file_io/`, `config/`) ne lit plus `os.environ` (test `tests/test_runtime_options.py`). Seuls les POINTS D'ENTRÉE
+   (`main.py`, `conftest.py`, scripts) lisent l'environnement, par `configure_from_environment()`. Le module natif se
+   charge à la première utilisation, après `configure`. **Dette ouverte (passe 3)** : l'objet est encore installé dans
+   l'état de module de `core/_cpp.py` (`_options`, `_forced`, `_gpu_forced`) au lieu d'être passé aux étapes ;
+   restent aussi `_LAST_NATIVE_FALLBACK_COUNT`, `_FAST_CHECKER_CACHE` et l'état de `core/progress.py`. Le protocole
+   `slice_cli` ne transporte pas encore ces options dans la requête.
 4. **Aucune constante de machine dans le code** (`toolhead_id="aetheris-4"`, `PLATFORM_RADIUS=150.0`,
    noms de GLB en dur) : profil de données, jamais un défaut caché. Ajouter une machine ou une
    tête = ajouter un profil, sans toucher au cœur.
