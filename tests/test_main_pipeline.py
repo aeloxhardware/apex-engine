@@ -360,7 +360,9 @@ def test_support_check_wired_in_both_orchestrators():
     import main as main_module
     import scripts.export_slicing_preview as preview_module
 
-    main_source = inspect.getsource(main_module.run_pipeline)
+    # run_pipeline delegue a des fonctions d'etape (R-030, decoupage) : step9b vit dans `_refine_toolpath`
+    assert "_refine_toolpath(" in inspect.getsource(main_module.run_pipeline)
+    main_source = inspect.getsource(main_module._refine_toolpath)
     preview_source = inspect.getsource(preview_module.run_slicing_only)
 
     for name, source in (("run_pipeline", main_source), ("run_slicing_only", preview_source)):
@@ -382,5 +384,7 @@ def test_support_check_runs_before_collision_sim():
 
     import main as main_module
 
-    source = inspect.getsource(main_module.run_pipeline)
-    assert source.index("support_check_run(") < source.index("collision_run(")
+    run_source = inspect.getsource(main_module.run_pipeline)
+    assert run_source.index("_refine_toolpath(") < run_source.index("_collision_stage(")
+    assert "support_check_run(" in inspect.getsource(main_module._refine_toolpath)
+    assert "collision_run(" in inspect.getsource(main_module._collision_stage)

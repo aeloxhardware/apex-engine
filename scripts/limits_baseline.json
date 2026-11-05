@@ -56,7 +56,6 @@
  "fn:file_io/gcode_export.py::export_gcode#1": 257,
  "fn:file_io/visualization_export.py::export_parts_glb#1": 101,
  "fn:file_io/visualization_export.py::export_visualization_glb#1": 83,
- "fn:main.py::run_pipeline#1": 277,
  "fn:scripts/diagnose_contour_overflow.py::main#1": 101,
  "fn:scripts/export_layer_order_gif.py::main#1": 86,
  "fn:scripts/export_slicing_preview.py::run_slicing_only#1": 158,
