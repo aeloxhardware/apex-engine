@@ -35,7 +35,7 @@ class SkinParams:
     max_iter: int = 8                      # tours de la boucle de rognage
     loop_sampling: float = 2.0             # un point teste tous les N mm pendant la boucle (le P5 final teste tous)
     exclusion_rounds: int = 3
-    plate_radius: Optional[float] = None   # defaut : rayon du plateau de la machine, sinon 150 mm
+    plate_radius: Optional[float] = None   # defaut : rayon du plateau du profil de machine (obligatoire si absent)
     face_sample: Optional[int] = None      # n'evaluer qu'un echantillon de faces (mesure) ; None = toutes
     head_sample_spacing: float = 5.0       # echantillonnage de la tete pour l'accessibilite P2 (mm) ; P5 verifie tout apres
     workers: Optional[int] = None          # processus du calcul d'accessibilite (None = coeurs, 8 au plus)
@@ -62,6 +62,10 @@ def body_from_layers(layers: list[Layer]) -> list[dict]:
         lines = [s6._lift_to_3d(np.asarray(p, dtype=float), layer.local_frame) for p in layer.toolpath_2d if len(p)]
         out.append({"isovalue": float(layer.isovalue), "toolpath_3d": lines})
     return out
+
+
+def _missing_plate_radius():
+    raise ValueError("rayon du plateau inconnu : ni plate_radius ni platform_radius du profil de machine")
 
 
 def run(
@@ -91,7 +95,7 @@ def run(
         if log:
             print(f"[skin] {msg}", flush=True)
 
-    plate_r = params.plate_radius or getattr(machine, "platform_radius", None) or 150.0
+    plate_r = params.plate_radius or getattr(machine, "platform_radius", None) or _missing_plate_radius()
     offset = np.zeros(3)
     t0 = time.time()
     filled = timed("remplissage du corps (etape 6)", s6.run, layers, mesh_data, overhang_map, toolpath2d_params)

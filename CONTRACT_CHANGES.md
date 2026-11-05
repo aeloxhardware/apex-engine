@@ -4,6 +4,12 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajout du 2026-11-05 (le numero reste 3) : profils de machine en donnees (R-030 point 4)
+- Le profil par defaut vient de `config/machines/aetheris-4.json`. Le defaut de classe de `MachineProfile.toolhead_id`
+  passe de `"aetheris-4"` a `""` dans `config/params.schema.json` ; le profil effectivement utilise par defaut est
+  identique valeur pour valeur (testé), donc le G-code ne change pas. Un profil partiel qui omettrait `toolhead_id`
+  part du profil par defaut, pas du defaut de classe.
+
 ## Ajout du 2026-11-04 (le numero reste 3) : options natives explicites (R-030 point 3)
 - `Step6Params` gagne `native_fill` et `native_layer`, `Step8Params` gagne `native_grid_fallback` (tous vrais par defaut).
   Ils remplacent les variables d'environnement `APEX_NATIVE_FILL`, `APEX_NATIVE_LAYER` et `APEX_NATIVE_GRID`, qui n'ont plus

@@ -101,6 +101,12 @@ suit l'emporte sur toute commodité de session. Détail et demandes : `apex/inte
 4. **Aucune constante de machine dans le code** (`toolhead_id="aetheris-4"`, `PLATFORM_RADIUS=150.0`,
    noms de GLB en dur) : profil de données, jamais un défaut caché. Ajouter une machine ou une
    tête = ajouter un profil, sans toucher au cœur.
+   **Fait le 2026-11-05** : profils dans `config/machines/<id>.json` (+ `index.json` qui nomme le profil par défaut,
+   `README.md` qui source chaque valeur), chargés par `config/machine_profiles.py` ; `main._default_machine_profile`,
+   `MachineProfile.toolhead_id` (défaut `""`), step9/step10 (`PLATFORM_RADIUS` supprimé : rayon inconnu = plateau sans
+   bord, prudent), `skin/chain` (erreur explicite sans rayon) et `element-aeolis/headcheck.DEFAULT_HEAD` n'ont plus
+   de valeur de machine en dur. Test : `tests/test_machine_profiles.py`. Reste `PLATFORM_HALF_HEIGHT` (0,5 mm,
+   épaisseur du disque modèle) dans step9, à passer dans le profil avec la passe sur les monolithes.
 5. **Dépendances déclarées et figées** : `pyproject.toml` + fichier de verrouillage, licences
    (AGPL de TetGen et PyMeshFix comprises) listées. Aucun `pip install` sans version.
 6. **Un correctif natif n'existe pas sans son test d'équivalence** Python/C++ ; la bascule C++

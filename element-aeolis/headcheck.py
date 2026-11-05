@@ -19,7 +19,11 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
-DEFAULT_HEAD = Path(__file__).resolve().parent.parent / "res" / "3d" / "toolheads" / "aetheris-4" / "aetheris-4.glb"
+from config.machine_profiles import default_machine_id, load_machine_profile  # noqa: E402
+from file_io.mesh_loader import toolhead_path  # noqa: E402
+
+# Tete du profil de machine par defaut (config/machines/) : aucun nom de tete dans le code.
+DEFAULT_HEAD = Path(toolhead_path(load_machine_profile(default_machine_id()).toolhead_id))
 
 
 @dataclass

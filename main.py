@@ -127,59 +127,14 @@ def ensure_toolhead(machine_profile: MachineProfile) -> None:
 
 
 def _default_machine_profile() -> MachineProfile:
-    """
-    Cinematique par defaut = la machine actuelle documentee dans CLAUDE.md
-    (plateau C tour complet + tete B in [0,180], perpendiculaires) - UN
-    exemple d'usage concret parmi d'autres cinematiques possibles (limite
-    de conception #18 de CLAUDE.md), pas la reference figee du type
-    MachineProfile lui-meme.
+    """Profil que nomme `config/machines/index.json` (donnees, pas du code : R-030 point 4), avec sa tete
+    chargee si le modele existe (repli sur `nozzle_model=None` et journal, jamais un crash : step9 degrade en
+    `nozzle_model_checked=False`)."""
+    from config.machine_profiles import default_machine_id, load_machine_profile
 
-    Charge aetheris-4.glb comme nozzle_model si present ; repli sur None
-    (log, pas de crash) sinon - step9 degrade gracieusement dans ce cas
-    (`nozzle_model_checked=False`), voir CLAUDE.md.
-    """
-    import os
-
-    platform_axis = np.array([0.0, 0.0, 1.0])
-    head_axis = np.array([1.0, 0.0, 0.0])
-
-    nozzle_model = None
-    try:
-        from file_io.mesh_loader import load_toolhead_by_id
-
-        nozzle_model = load_toolhead_by_id("aetheris-4")
-    except Exception as exc:  # pragma: no cover - chemin de repli, pas une logique testee
-        print(f"[main] Avertissement : echec du chargement de la tete aetheris-4 ({exc}) - "
-              f"simulation de collision desactivee (nozzle_model=None).", file=sys.stderr)
-
-    return MachineProfile(
-        rotation_axes=[
-            RotationAxisSpec(axis=platform_axis, angle_range_deg=(0.0, 360.0)),
-            RotationAxisSpec(axis=head_axis, angle_range_deg=(0.0, 185.0)),
-        ],
-        platform_origin=np.array([0.0, 0.0, 0.0]),
-        nozzle_model=nozzle_model,
-        nozzle_diameter=0.4,
-        # Limites de la tete (axe B). Fichier RRF ACTIF : config.g (confirme par
-        # l'utilisateur, 2026-10-06), M203 B100000 (/min) = 1667 deg/s et M201 B1300
-        # = 1300 deg/s2 (unites supposees en degres). 4axisinput.g (360 deg/s,
-        # 2000 deg/s2) et les valeurs de 2026-09-28 (750, 300) ne sont pas actifs.
-        # Le profil n'a qu'une valeur pour tous les axes de rotation ; C, couple a la
-        # position, n'est jamais lisse (limite #59) : elles ne s'appliquent qu'a B.
-        # Non modelises : Y (600 deg/s, 4000 deg/s2) et Z (6,7 mm/s, 70 mm/s2).
-        max_angular_velocity=float(np.radians(1666.7)),
-        max_angular_acceleration=float(np.radians(1300.0)),
-        # Machine ACTUELLE : R C Z B, pas d'axe Y -- C est impose par la
-        # position du point (limite #59). +R = -Y a angles nuls : B > 0 (axe
-        # X) penche la normale de couche vers -Y, c'est-a-dire vers +R (le
-        # surplomb s'etend vers l'exterieur, convention verifiee avec
-        # l'utilisateur, cf. scripts/gen_elbow_tube_gcode.py). Apres l'upgrade
-        # (axe lineaire de plus) : position_coupled_axes=[].
-        position_coupled_axes=[0],
-        radial_direction=np.array([0.0, -1.0, 0.0]),
-        # Plateau de 300 mm de diametre (utilisateur, 2026-09-29).
-        platform_radius=150.0,
-    )
+    profile = load_machine_profile(default_machine_id())
+    ensure_toolhead(profile)
+    return profile
 
 
 @dataclass

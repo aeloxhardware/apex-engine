@@ -1,0 +1,46 @@
+{
+  "rotation_axes": [
+    {
+      "axis": [
+        0.0,
+        0.0,
+        1.0
+      ],
+      "angle_range_deg": [
+        0.0,
+        360.0
+      ]
+    },
+    {
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "angle_range_deg": [
+        0.0,
+        185.0
+      ]
+    }
+  ],
+  "platform_origin": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "toolhead_id": "aetheris-4",
+  "nozzle_diameter": 0.4,
+  "max_angular_velocity": 29.08940264298949,
+  "max_angular_acceleration": 22.689280275926283,
+  "build_volume": null,
+  "z_clearance_min": 0.0,
+  "platform_radius": 150.0,
+  "position_coupled_axes": [
+    0
+  ],
+  "radial_direction": [
+    0.0,
+    -1.0,
+    0.0
+  ]
+}

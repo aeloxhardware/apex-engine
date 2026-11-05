@@ -598,7 +598,12 @@ def _check_static_obstacle(
     return safety_margin - min_distance
 
 
-PLATFORM_RADIUS = 150.0      # mm, ordre de grandeur d'un plateau, faute de mieux fourni
+def _platform_radius(radius: Optional[float]) -> float:
+    """Rayon du plateau d'apres le profil de machine. Inconnu (`None`) = plateau sans bord, hypothese
+    prudente (plus de collisions signalees, jamais moins) : aucune valeur de machine n'est inventee ici."""
+    return float("inf") if radius is None else float(radius)
+
+
 PLATFORM_HALF_HEIGHT = 0.5   # mm, moitie de l'epaisseur du disque (cylinder(height=1.0))
 # SURFACE du plateau a z = platform_origin.z (corrige le 2026-10-06) : les pieces posent a
 # z = platform_z (step3) et l'export G-code compte le plateau en z = 0. Le disque
@@ -621,7 +626,7 @@ def _check_platform_disc(
     Meme raisonnement que la limite #27 (boucle point-capsule vectorisee) :
     le plateau n'est pas une geometrie arbitraire recue de l'exterieur, c'est
     une primitive que CE fichier synthetise lui-meme
-    (`_platform_mesh_at_angle`). Lui appliquer une requete de proximite
+    (jadis un maillage de disque). Lui appliquer une requete de proximite
     maillage generique fait payer le prix d'un cas general dont on n'a pas
     besoin. Cout mesure sur le modele de tete reel (1540 points de test) :
     53.02 ms par appel via `on_surface`, contre une fraction de milliseconde
@@ -635,7 +640,7 @@ def _check_platform_disc(
     circulaire, jamais moins conservatrice.
 
     Le disque est suppose d'axe Z et centre sur `platform_origin` (exactement
-    ce que construit `_platform_mesh_at_angle`, dont la geometrie ne depend
+    ce que construisait l'ancien maillage de disque, dont la geometrie ne dependait
     d'aucun angle - voir sa docstring).
     """
     if platform_origin is None:
@@ -645,7 +650,7 @@ def _check_platform_disc(
     radial = np.hypot(local[:, 0], local[:, 1])
     # Distance a un cylindre plein : ecart radial hors du rayon, ecart axial
     # hors de la demi-epaisseur, combines - nulle a l'interieur (penetration).
-    radius = PLATFORM_RADIUS if platform_radius is None else float(platform_radius)
+    radius = _platform_radius(platform_radius)
     dr = np.maximum(radial - radius, 0.0)
     dz = np.maximum(np.abs(local[:, 2] - PLATFORM_CENTER_OFFSET) - PLATFORM_HALF_HEIGHT, 0.0)
     min_distance = float(np.hypot(dr, dz).min())
@@ -653,29 +658,6 @@ def _check_platform_disc(
     if min_distance >= safety_margin:
         return None
     return safety_margin - min_distance
-
-
-def _platform_mesh_at_angle(
-    machine_profile: MachineProfile, axis_angles: list[float]
-) -> Optional[trimesh.Trimesh]:
-    """
-    Plateau approxime par un disque plat positionne selon l'angle courant
-    du premier axe de rotation (si applicable) - aucune geometrie de
-    plateau reelle n'est fournie a ce stade (contrairement a nozzle_model),
-    donc une primitive simple plutot qu'une hypothese de forme non verifiee.
-    None si aucune information de plateau n'est disponible (pas d'origine,
-    pas d'axe de rotation) : le test est alors simplement saute (pas
-    d'evenement produit), sans faux positif ni exception.
-    """
-    if machine_profile.platform_origin is None or not machine_profile.rotation_axes:
-        return None
-
-    disc = trimesh.creation.cylinder(
-        radius=PLATFORM_RADIUS, height=PLATFORM_HALF_HEIGHT * 2.0, sections=32
-    )
-    disc.apply_translation(np.asarray(machine_profile.platform_origin, dtype=float)
-                           + np.array([0.0, 0.0, PLATFORM_CENTER_OFFSET]))
-    return disc
 
 
 # ---------------------------------------------------------------------------
@@ -843,7 +825,7 @@ def _platform_disc_batch(verts_block: np.ndarray, machine_profile: MachineProfil
     local = verts_block[near] - origin
     radial = np.hypot(local[..., 0], local[..., 1])
     radius_value = getattr(machine_profile, "platform_radius", None)
-    radius = PLATFORM_RADIUS if radius_value is None else float(radius_value)
+    radius = _platform_radius(radius_value)
     dr = np.maximum(radial - radius, 0.0)
     dz = np.maximum(np.abs(local[..., 2] - PLATFORM_CENTER_OFFSET) - PLATFORM_HALF_HEIGHT, 0.0)
     minimum = np.hypot(dr, dz).min(axis=1)
@@ -896,7 +878,7 @@ def fast_batch_events(checker: "FastCollisionChecker", toolpath: ToolpathMachine
         checker.native, np.ascontiguousarray(checker.samples, dtype=float), np.ascontiguousarray(units),
         np.ascontiguousarray(positions), np.ascontiguousarray(angles), np.asarray(indices, dtype=np.int64),
         float(checker.reach), None if origin is None else np.asarray(origin, dtype=float),
-        float(PLATFORM_RADIUS if radius is None else radius), float(PLATFORM_HALF_HEIGHT),
+        _platform_radius(radius), float(PLATFORM_HALF_HEIGHT),
         float(PLATFORM_CENTER_OFFSET), float(checker.params.safety_margin))
     events: list[CollisionEvent] = []
     for k, point_idx in enumerate(indices):

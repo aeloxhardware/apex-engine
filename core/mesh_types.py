@@ -342,15 +342,15 @@ class MachineProfile:
     nozzle_model: Any = None         # maillage 3D tête (buse + porte-buse + carriage proche)
     # Identifiant du modele de tete (dossier de `res/3d/toolheads/<id>/<id>.glb`), lie au profil
     # d'imprimante (R-020). Jamais un chemin : il traverse le contrat, le moteur le resout chez lui.
-    toolhead_id: str = "aetheris-4"
+    toolhead_id: str = ""            # aucun defaut cache : le profil de `config/machines/` le fixe
     nozzle_diameter: float = 0.4
     max_angular_velocity: float = 0.0     # rad/s
     max_angular_acceleration: float = 0.0
     build_volume: Optional["AABB"] = None
     z_clearance_min: float = 0.0
     # Rayon du plateau (mm). Machine actuelle : 300 mm de diametre
-    # (utilisateur, 2026-09-29). None = inconnu : step9 retombe sur son disque
-    # par defaut et aucun refus de taille n'est applique.
+    # (utilisateur, 2026-09-29), fixee par le profil. None = inconnu : step9 suppose un
+    # plateau sans bord (prudent) et aucun refus de taille n'est applique.
     platform_radius: Optional[float] = None
     # Axes dont l'angle est IMPOSÉ PAR LA POSITION du point (limite #59) :
     # quand la tête ne se déplace que dans un demi-plan (machine actuelle : R et

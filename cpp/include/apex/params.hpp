@@ -159,7 +159,7 @@ struct MachineProfile {
     std::vector<RotationAxisSpec> rotation_axes{std::vector<RotationAxisSpec>{}};
     std::vector<double> platform_origin{};
     // nozzle_model : donnee d'execution, non transcrite
-    std::string toolhead_id{"aetheris-4"};
+    std::string toolhead_id{""};
     double nozzle_diameter{0.4};
     double max_angular_velocity{0.0};
     double max_angular_acceleration{0.0};

@@ -629,7 +629,7 @@
      "type": "array"
     },
     "toolhead_id": {
-     "default": "aetheris-4",
+     "default": "",
      "type": "string"
     },
     "z_clearance_min": {

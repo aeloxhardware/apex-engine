@@ -242,7 +242,7 @@ def reorient_coupled_tiers(
         # Coeur de la boucle en natif (memes candidats, memes paliers, meme
         # propagation) ; seule la reconstruction des points reste ici.
         from pipeline.step9_collision_sim import (
-            PLATFORM_CENTER_OFFSET, PLATFORM_HALF_HEIGHT, PLATFORM_RADIUS,
+            PLATFORM_CENTER_OFFSET, PLATFORM_HALF_HEIGHT, _platform_radius,
         )
         axis_units = np.array([np.asarray(a.axis, dtype=float) / np.linalg.norm(a.axis) for a in axes])
         radius = getattr(machine_profile, "platform_radius", None)
@@ -253,7 +253,7 @@ def reorient_coupled_tiers(
             np.asarray(tiers_deg, dtype=float), np.ascontiguousarray(samples, dtype=float),
             checker.native, float(checker.reach),
             None if origin is None else np.asarray(origin, dtype=float),
-            float(PLATFORM_RADIUS if radius is None else radius), float(PLATFORM_HALF_HEIGHT),
+            _platform_radius(radius), float(PLATFORM_HALF_HEIGHT),
             float(PLATFORM_CENTER_OFFSET), float(sim_params.safety_margin), float(lo), float(hi),
             float(full_mm), float(taper_mm),
             np.asarray(sorted(set(contact_indices)), dtype=np.int64),
@@ -617,7 +617,7 @@ def _try_local_reorientation(
     if coupled_case and context.angles is not None and context.fast_checker is not None:
         # Chemin natif (memes candidats par ecart croissant ; tri stable, la ou
         # np.argsort ne garantit pas l'ordre des ex aequo).
-        from pipeline.step9_collision_sim import PLATFORM_CENTER_OFFSET, PLATFORM_HALF_HEIGHT, PLATFORM_RADIUS
+        from pipeline.step9_collision_sim import PLATFORM_CENTER_OFFSET, PLATFORM_HALF_HEIGHT, _platform_radius
         axis_units = np.array([np.asarray(a.axis, dtype=float) / np.linalg.norm(a.axis) for a in axes])
         radius = getattr(machine_profile, "platform_radius", None)
         origin = machine_profile.platform_origin
@@ -632,7 +632,7 @@ def _try_local_reorientation(
             np.ascontiguousarray(context.toolhead_samples, dtype=float), context.fast_checker.native,
             float(context.fast_checker.reach),
             None if origin is None else np.asarray(origin, dtype=float),
-            float(PLATFORM_RADIUS if radius is None else radius), float(PLATFORM_HALF_HEIGHT),
+            _platform_radius(radius), float(PLATFORM_HALF_HEIGHT),
             float(PLATFORM_CENTER_OFFSET), float(sim_params.safety_margin),
         )
         return None if found is None else [float(v) for v in found]
