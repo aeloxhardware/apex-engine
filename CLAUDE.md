@@ -84,7 +84,7 @@ suit l'emporte sur toute commodité de session. Détail et demandes : `apex/inte
    ordre : `step1_ingest.py` (2 701 l.), ~~`main.run_pipeline` (277 l.)~~ (**fait le 2026-11-05** : fonctions d'étape
    `_ingest_and_field`, `_layers_and_fill`, `_machine_toolpath`, `_refine_toolpath`, `_collision_stage` dans `main.py`), `_tetrahedralize` (269 l.),
    `export_gcode` (257 l.), `element-aeolis/slicer._slice` (239 l.), `_self_intersection_resolve`
-   (999 l.), `step10_adjustment.run` (211 l.), `step6_toolpath2d.py` (1 604 l.),
+   (999 l.), ~~`step10_adjustment.run` (211 l.)~~ (**fait le 2026-11-05** : boucle déplacée dans `step10_loop.py`, fichier ramené à 755 l.), `step6_toolpath2d.py` (1 604 l.),
    `step8_machine_toolpath.py` (1 417 l.), `step5_layers.py` (1 269 l.).
 3. **Aucune variable d'environnement ne change le résultat** ; tout passe par un objet d'options
    explicite. **Aucun `global` mutable** : état porté par un objet passé en paramètre.
