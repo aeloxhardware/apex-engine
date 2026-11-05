@@ -13,6 +13,9 @@
 namespace tetranet {
 namespace {
 
+// M_PI n'existe pas sous MSVC sans _USE_MATH_DEFINES : constante locale, portable.
+constexpr double kPi = 3.14159265358979323846;
+
 using Clock = std::chrono::steady_clock;
 double since(Clock::time_point t) { return std::chrono::duration<double>(Clock::now() - t).count(); }
 
@@ -273,7 +276,7 @@ struct Winding {
                 }
             } else { stack[sp++] = nd.left; stack[sp++] = nd.right; }
         }
-        return total / (4.0 * M_PI);
+        return total / (4.0 * kPi);
     }
 };
 
@@ -669,7 +672,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
             V3 u = p[c] - p[e[0]]; u = u - ev * dot(u, ev);
             V3 w = p[d] - p[e[0]]; w = w - ev * dot(w, ev);
             double den = norm(u) * norm(w);
-            if (den > 0) mind = std::min(mind, std::acos(std::max(-1.0, std::min(1.0, dot(u, w) / den))) * 180.0 / M_PI);
+            if (den > 0) mind = std::min(mind, std::acos(std::max(-1.0, std::min(1.0, dot(u, w) / den))) * 180.0 / kPi);
         }
         static const int fc[4][3] = {{0, 1, 2}, {0, 1, 3}, {0, 2, 3}, {1, 2, 3}};
         for (auto& f : fc) {

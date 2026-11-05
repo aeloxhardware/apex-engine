@@ -4,6 +4,12 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajout du 2026-11-04 (le numero reste 3) : options natives explicites (R-030 point 3)
+- `Step6Params` gagne `native_fill` et `native_layer`, `Step8Params` gagne `native_grid_fallback` (tous vrais par defaut).
+  Ils remplacent les variables d'environnement `APEX_NATIVE_FILL`, `APEX_NATIVE_LAYER` et `APEX_NATIVE_GRID`, qui n'ont plus
+  aucun effet. Les valeurs par defaut etant celles d'avant, le G-code produit ne change pas : pas de hausse du contrat.
+  Le consommateur n'a rien a faire (champs optionnels) ; `schema:sync` les fait apparaitre.
+
 ## Contrat 3 (2026-11-04) : INCOMPATIBLE, le numero passe de 2 a 3
 Decision de l'utilisateur (2026-11-04) : les defauts de buse tres bas d'Element Aeolis sont GARDES, pour eliminer des
 defauts (conduits de ventilation serres, collisions). Un defaut qui change le G-code produit incremente le contrat
