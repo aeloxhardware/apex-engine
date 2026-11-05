@@ -47,16 +47,18 @@ def main():
     a, k = captured["args"], captured["kwargs"]
 
     out = {}
+    _real_extract = s5._extract_closed_contours
     for native in (False, True, False, True):
         _cpp.set_enabled(native)
-        before = s5._NATIVE_OUTLINE_FALLBACKS
+        stats = s5.OutlineStats()
+        s5._extract_closed_contours = lambda v, f, _s=None, _stats=stats: _real_extract(v, f, _stats)
         t0 = time.time()
         layers = real_run(*a, **k)
         dt = time.time() - t0
         out.setdefault(native, []).append(dt)
         out[("layers", native)] = layers
         if native:
-            out["fallbacks"] = s5._NATIVE_OUTLINE_FALLBACKS - before
+            out["fallbacks"] = stats.native_fallbacks
     lp, ln = out[("layers", False)], out[("layers", True)]
     assert len(lp) == len(ln), (len(lp), len(ln))
     same = all(

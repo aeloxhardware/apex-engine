@@ -172,18 +172,17 @@ def test_empty_index_yields_empty_results(native, restore_switch):
 # Pas 2 : cinematique inverse N axes (step8)
 # ---------------------------------------------------------------------------
 
-def _resolve_both_ways(raw_points, axes, reference_direction, platform_origin, params):
-    """Resout la meme trajectoire par les deux chemins, dans le meme processus."""
-    from pipeline.step8_machine_toolpath import _resolve_all_axis_angles
+def _resolve_both_ways(raw_points, axes, reference_direction, platform_origin, params, telemetry=None):
+    """Resout la meme trajectoire par les deux chemins, dans le meme processus (`telemetry` : chemin natif)."""
+    from pipeline.step8_machine_toolpath import IkTelemetry, _resolve_all_axis_angles
 
-    import pipeline.step8_machine_toolpath as step8
-
-    results = {}
+    telemetry, results = telemetry or IkTelemetry(), {}
     for native in (False, True):
         previous = _cpp.set_enabled(native)
         try:
             results[native] = _resolve_all_axis_angles(
-                raw_points, axes, reference_direction, platform_origin, params
+                raw_points, axes, reference_direction, platform_origin, params,
+                telemetry if native else None,
             )
         finally:
             _cpp.set_enabled(previous)
@@ -192,7 +191,7 @@ def _resolve_both_ways(raw_points, axes, reference_direction, platform_origin, p
             # comparer Python a lui-meme et le test serait vert sans avoir
             # rien teste. C'est exactement le trou qui a masque, un temps,
             # le fait que le chemin natif n'etait pas emprunte du tout.
-            assert step8._LAST_NATIVE_FALLBACK_COUNT is not None, (
+            assert telemetry.native_fallback_count is not None, (
                 "le chemin natif n'a pas ete emprunte du tout"
             )
     return results[False], results[True]
@@ -309,11 +308,12 @@ def test_ik_resumes_after_grid_fallback(restore_switch):
     for index in (0, 37, 149):
         raw_points[index].desired_direction = up
 
-    py_result, cpp_result = _resolve_both_ways(raw_points, axes, reference, origin, params)
+    tel = step8.IkTelemetry()
+    py_result, cpp_result = _resolve_both_ways(raw_points, axes, reference, origin, params, tel)
 
-    assert step8._LAST_NATIVE_FALLBACK_COUNT >= 3, (
+    assert tel.native_fallback_count >= 3, (
         "les cibles +Z doivent declencher le repli grille ; sans repli, ce test "
-        f"n'exerce pas la reprise (count={step8._LAST_NATIVE_FALLBACK_COUNT})"
+        f"n'exerce pas la reprise (count={tel.native_fallback_count})"
     )
     _assert_ik_equivalent(py_result, cpp_result)
 
@@ -1533,9 +1533,9 @@ def test_boundary_loops_match_trimesh_outline(restore_switch):
             v, f, _ = ex.extract(float(iso), 1e-6)
             expected = _outline_python(v, f)
             _cpp.set_enabled(True)
-            before = s5._NATIVE_OUTLINE_FALLBACKS
-            got = s5._extract_closed_contours(v, f)
-            native_used += int(s5._NATIVE_OUTLINE_FALLBACKS == before)
+            stats = s5.OutlineStats()
+            got = s5._extract_closed_contours(v, f, stats)
+            native_used += int(stats.native_fallbacks == 0)
             assert len(got) == len(expected)
             for a, b in zip(got, expected):
                 assert np.array_equal(a, b)
@@ -2417,11 +2417,11 @@ def test_native_grid_fallback_matches_python_grid_search(restore_switch, monkeyp
         plus_z += index % 14 == 0
 
     _cpp.set_enabled(True)
+    tel_py, tel_nat = step8.IkTelemetry(), step8.IkTelemetry()
     python_grid = step8._resolve_all_axis_angles(
-        raw_points, axes, reference, origin, dataclasses.replace(params, native_grid_fallback=False))
-    python_count = step8._LAST_NATIVE_FALLBACK_COUNT
-    native_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
-    native_count = step8._LAST_NATIVE_FALLBACK_COUNT
+        raw_points, axes, reference, origin, dataclasses.replace(params, native_grid_fallback=False), tel_py)
+    native_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params, tel_nat)
+    python_count, native_count = tel_py.native_fallback_count, tel_nat.native_fallback_count
 
     # garde anti-faux-vert : exactement les points +Z se replient (et le repli est bien exerce)
     assert plus_z >= 20 and python_count == plus_z and native_count == python_count, (plus_z, python_count, native_count)

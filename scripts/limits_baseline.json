@@ -7,7 +7,7 @@
  "file:element-ardor/step5_layers.py": 1269,
  "file:element-ardor/step6_toolpath2d.py": 1604,
  "file:element-ardor/step7_scheduling.py": 897,
- "file:element-ardor/step8_machine_toolpath.py": 1414,
+ "file:element-ardor/step8_machine_toolpath.py": 1411,
  "file:element-ardor/step9_collision_sim.py": 1040,
  "file:tests/test_cpp_equivalence.py": 2444,
  "file:tests/test_step1_ingest.py": 1230,

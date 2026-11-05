@@ -92,10 +92,12 @@ suit l'emporte sur toute commodité de session. Détail et demandes : `apex/inte
    `use_cpp`, `use_gpu`, `grid_mode`, `lib_dir`, `tetgen_worker`, `tetgen_log` ; la bibliothèque (`core/`, `element-*/`,
    `file_io/`, `config/`) ne lit plus `os.environ` (test `tests/test_runtime_options.py`). Seuls les POINTS D'ENTRÉE
    (`main.py`, `conftest.py`, scripts) lisent l'environnement, par `configure_from_environment()`. Le module natif se
-   charge à la première utilisation, après `configure`. **Dette ouverte (passe 3)** : l'objet est encore installé dans
-   l'état de module de `core/_cpp.py` (`_options`, `_forced`, `_gpu_forced`) au lieu d'être passé aux étapes ;
-   restent aussi `_LAST_NATIVE_FALLBACK_COUNT`, `_FAST_CHECKER_CACHE` et l'état de `core/progress.py`. Le protocole
-   `slice_cli` ne transporte pas encore ces options dans la requête.
+   charge à la première utilisation, après `configure`. **Passe 3 (2026-11-05, début)** : `_LAST_NATIVE_FALLBACK_COUNT`
+   (step8) devient `IkTelemetry` et `_NATIVE_OUTLINE_FALLBACKS` (step5) devient `OutlineStats`, passés par l'appelant.
+   **Dette ouverte** : l'objet d'options est encore installé dans l'état de module de `core/_cpp.py` (`_options`,
+   `_forced`, `_gpu_forced`) au lieu d'être passé aux étapes ; restent `_FAST_CHECKER_CACHE` (step9, partagé avec
+   step10 : exige un objet-cache passé par `main.run_pipeline`, donc de découper cette fonction de 277 lignes d'abord)
+   et l'état de `core/progress.py`. Le protocole `slice_cli` ne transporte pas encore ces options dans la requête.
 4. **Aucune constante de machine dans le code** (`toolhead_id="aetheris-4"`, `PLATFORM_RADIUS=150.0`,
    noms de GLB en dur) : profil de données, jamais un défaut caché. Ajouter une machine ou une
    tête = ajouter un profil, sans toucher au cœur.

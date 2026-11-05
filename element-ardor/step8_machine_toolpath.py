@@ -959,13 +959,11 @@ def resolve_raw_points(
     return ToolpathMachine(points=points, layer_ids=np.asarray(raw_points.layer_id, dtype=np.int64).copy()), diagnostics
 
 
-#: Issue du dernier appel a `_resolve_all_axis_angles` : `None` = chemin
-#: Python (interrupteur eteint ou aucun point), sinon NOMBRE de points ayant
-#: exige le repli grille cote Python (0 = natif de bout en bout).
-#: Existe pour que les tests d'equivalence puissent VERIFIER que le natif a
-#: bien produit le resultat - sans quoi un repli silencieux rendrait le test
-#: vert en ne comparant que Python a lui-meme (trou reellement rencontre).
-_LAST_NATIVE_FALLBACK_COUNT: Optional[int] = None
+@dataclass
+class IkTelemetry:
+    """Observation de la resolution IK, passee par l'appelant (tests d'equivalence). `native_fallback_count` :
+    `None` = chemin Python, sinon nombre de points ayant exige le repli grille (0 = natif de bout en bout)."""
+    native_fallback_count: Optional[int] = None
 
 
 def _resolve_all_axis_angles_native(
@@ -974,6 +972,7 @@ def _resolve_all_axis_angles_native(
     reference_direction: np.ndarray,
     platform_origin: Optional[np.ndarray],
     params: Step8Params,
+    telemetry: Optional[IkTelemetry] = None,
 ) -> tuple[list[list[float]], list[float]]:
     """
     Chemin natif, avec REPRISE apres chaque repli.
@@ -992,8 +991,6 @@ def _resolve_all_axis_angles_native(
     89,5 s contre 89,7 s, soit rien). La chaine `previous_angles` est passee
     explicitement d'un segment au suivant, donc l'equivalence est preservee.
     """
-    global _LAST_NATIVE_FALLBACK_COUNT
-
     native = _cpp.module()
     positions, directions = _point_arrays(raw_points)
     axes_spec = [(np.asarray(spec.axis, dtype=float), *spec.angle_range_deg) for spec in axes]
@@ -1045,7 +1042,8 @@ def _resolve_all_axis_angles_native(
         previous_angles = angles
         cursor += resolved_count + 1
 
-    _LAST_NATIVE_FALLBACK_COUNT = fallback_count
+    if telemetry is not None:
+        telemetry.native_fallback_count = fallback_count
     return resolved_angles, residual_errors
 
 
@@ -1082,6 +1080,7 @@ def _resolve_all_axis_angles_coupled(
     reference_direction: np.ndarray,
     machine_profile: MachineProfile,
     params: Step8Params,
+    telemetry: Optional[IkTelemetry] = None,
 ) -> tuple[list[list[float]], list[float]]:
     """
     IK quand le premier axe est IMPOSE PAR LA POSITION (machine actuelle :
@@ -1113,7 +1112,7 @@ def _resolve_all_axis_angles_coupled(
 
     if _cpp.enabled() and raw_points:
         return _resolve_all_axis_angles_coupled_native(
-            raw_points, axes, outer_axis, reference_direction, machine_profile, params
+            raw_points, axes, outer_axis, reference_direction, machine_profile, params, telemetry
         )
 
     resolved_angles: list[list[float]] = []
@@ -1154,6 +1153,7 @@ def _resolve_all_axis_angles_coupled_native(
     reference_direction: np.ndarray,
     machine_profile: MachineProfile,
     params: Step8Params,
+    telemetry: Optional[IkTelemetry] = None,
 ) -> tuple[list[list[float]], list[float]]:
     """
     Pas 17 du portage C++ (CLAUDE.md limite #56) : meme calcul que la boucle
@@ -1172,7 +1172,6 @@ def _resolve_all_axis_angles_coupled_native(
     Les produits scalaires vectorises peuvent differer d'un ULP des produits
     scalaires point par point de la boucle Python.
     """
-    global _LAST_NATIVE_FALLBACK_COUNT
     native = _cpp.module()
     positions, targets = _point_arrays(raw_points)
     targets = targets / np.maximum(np.linalg.norm(targets, axis=1), 1e-12)[:, None]
@@ -1196,7 +1195,6 @@ def _resolve_all_axis_angles_coupled_native(
     local_targets = _rodrigues_rotate(targets, outer_axis, np.radians(-c))
     inner_axes = axes[1:]
     inner_spec = [(np.asarray(spec.axis, dtype=float), *spec.angle_range_deg) for spec in inner_axes]
-
     # blocs de lignes (natif) et lignes isolees (repli), concatenes une fois :
     # aucune conversion ligne par ligne (0,26 s sur death @ 0,8)
     inner_blocks: list[np.ndarray] = []
@@ -1227,7 +1225,8 @@ def _resolve_all_axis_angles_coupled_native(
         inner_blocks.append(np.asarray(list(inner), dtype=float).reshape(1, width))
         previous = list(inner_blocks[-1][-1])
         cursor = k + 1
-    _LAST_NATIVE_FALLBACK_COUNT = fallback_count
+    if telemetry is not None:
+        telemetry.native_fallback_count = fallback_count
 
     inner_matrix = np.concatenate(inner_blocks, axis=0) if inner_blocks else np.zeros((0, width))
     angles = np.column_stack([c, inner_matrix.reshape(n, width)])
@@ -1244,6 +1243,7 @@ def _resolve_all_axis_angles(
     reference_direction: np.ndarray,
     platform_origin: Optional[np.ndarray],
     params: Step8Params,
+    telemetry: Optional[IkTelemetry] = None,
 ) -> tuple[list[list[float]], list[float]]:
     """
     Resout l'angle de chaque axe pour TOUS les points de la trajectoire.
@@ -1266,12 +1266,9 @@ def _resolve_all_axis_angles(
     une chaine `previous_angles` differente divergerait silencieusement.
     Ce cas n'est jamais atteint sur la machine a 2 axes orthogonaux actuelle.
     """
-    global _LAST_NATIVE_FALLBACK_COUNT
-    _LAST_NATIVE_FALLBACK_COUNT = None
-
     if _cpp.enabled() and raw_points:
         return _resolve_all_axis_angles_native(
-            raw_points, axes, reference_direction, platform_origin, params
+            raw_points, axes, reference_direction, platform_origin, params, telemetry
         )
 
     resolved_angles: list[list[float]] = []

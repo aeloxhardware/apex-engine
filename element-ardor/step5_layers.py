@@ -528,12 +528,13 @@ def _weld_vertices(
 # Decision 3 - Contours fermes via trace de bord (trimesh.outline())
 # ---------------------------------------------------------------------------
 
-# Nombre de couches ou le trace natif a rendu la main a trimesh (bord
-# non-variete) - mesure du taux de repli, verifie par les tests d'equivalence.
-_NATIVE_OUTLINE_FALLBACKS = 0
+@dataclass
+class OutlineStats:
+    """Observation passee par l'appelant : couches ou le trace natif a rendu la main a trimesh."""
+    native_fallbacks: int = 0
 
 
-def _extract_closed_contours(vertices: np.ndarray, faces: np.ndarray) -> list[np.ndarray]:
+def _extract_closed_contours(vertices, faces, stats: Optional[OutlineStats] = None) -> list[np.ndarray]:
     """
     Extrait les boucles de contour fermees du patch triangule (vertices,
     faces), via le trace de bord de trimesh. `process=False` : on ne laisse
@@ -560,12 +561,11 @@ def _extract_closed_contours(vertices: np.ndarray, faces: np.ndarray) -> list[np
 
     # Pas 14 du portage C++ : trace de bord natif, identique a outline() dans le
     # cas des boucles simples ; None = bord non-variete -> trimesh ci-dessous.
-    global _NATIVE_OUTLINE_FALLBACKS
     if _cpp.enabled() and hasattr(_cpp.module(), "boundary_loops"):
         loops = _cpp.module().boundary_loops(np.ascontiguousarray(faces, dtype=np.int64), len(vertices))
         if loops is not None:
             return [vertices[loop] for loop in loops if len(loop) >= 4]
-        _NATIVE_OUTLINE_FALLBACKS += 1
+        stats and setattr(stats, "native_fallbacks", stats.native_fallbacks + 1)
 
     try:
         mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
