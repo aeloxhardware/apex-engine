@@ -38,6 +38,16 @@ class SkinZoneParams:
     face_batch: int = FACE_BATCH
 
 
+@dataclass(frozen=True)
+class ZoneSampling:
+    """Echantillonnage et execution de `compute` : `face_sample` (nombre de faces evaluees, None = toutes),
+    `seed` de l'echantillon, `surface` (sommets, faces) imposee, `workers` (processus)."""
+    face_sample: Optional[int] = None
+    seed: int = 0
+    surface: object = None
+    workers: Optional[int] = None
+
+
 @dataclass
 class SkinZones:
     vertices: np.ndarray        # (V,3) surface re-decoupee
@@ -161,13 +171,26 @@ def _access_chunk(ids: np.ndarray):
     return plate, last
 
 
-def _last_accessible(head, centers, angles, axes, solid, isovalues, face_ids, margin, batch, workers):
+@dataclass(frozen=True)
+class _AccessInputs:
+    """Donnees partagees (fork) par les calculs d'accessibilite par face."""
+    head: np.ndarray
+    centers: np.ndarray
+    angles: np.ndarray
+    axes: list
+    solid: object
+    isovalues: np.ndarray
+    margin: float
+    batch: int
+
+
+def _last_accessible(inputs: _AccessInputs, face_ids, workers):
     """(plateau, dernier moment accessible) par face de `face_ids` : la tete posee sur la face, buse vers -n, ne doit
     ni entrer dans le plateau ni, tant que la face n'est pas portee, dans la piece. Faces independantes : reparties
     sur des processus (fork ; la memoire est partagee, rien n'est copie)."""
     import os
-    _ACCESS.update(head=head, centers=centers, angles=angles, axes=axes, solid=solid, isovalues=isovalues,
-                   margin=margin, batch=batch)
+    batch = inputs.batch
+    _ACCESS.update(vars(inputs))
     workers = workers if workers is not None else max(1, min(8, (os.cpu_count() or 2)))
     if workers <= 1 or len(face_ids) < 4 * batch or not hasattr(os, "fork"):
         return _access_chunk(face_ids)
@@ -186,14 +209,13 @@ def compute(
     machine: MachineProfile,
     sim: CollisionSimParams,
     params: Optional[SkinZoneParams] = None,
-    face_sample: Optional[int] = None,
-    seed: int = 0,
-    surface=None,
-    workers: Optional[int] = None,
+    sampling: Optional["ZoneSampling"] = None,
 ) -> SkinZones:
     """Statut de chaque face de la surface. `face_sample` : n'evaluer qu'un echantillon (graine fixe) de faces
     hors plateau ; les autres gardent `evaluated=False` et le statut 1 (jamais retenues)."""
     params = params or SkinZoneParams()
+    sampling = sampling or ZoneSampling()
+    face_sample, seed, surface, workers = sampling.face_sample, sampling.seed, sampling.surface, sampling.workers
     verts = tet_mesh.tet_vertices
     isovalues = np.sort(np.unique(np.asarray(isovalues, dtype=float)))
     solid = PrintedSolid(verts, tet_mesh.tetrahedra, scalar_field.values)
@@ -243,8 +265,9 @@ def compute(
     head = np.vstack([head, head + sim.safety_margin * hn, head - sim.safety_margin * hn])   # marge de securite
     reach = candidates[status[candidates] == STATUS_RETAINED]
     last_all = np.full(len(faces), -1)
-    plate, last = _last_accessible(head, centers, angles, axes, solid, isovalues, reach, sim.safety_margin,
-                                   params.face_batch, workers)
+    plate, last = _last_accessible(
+        _AccessInputs(head, centers, angles, axes, solid, isovalues, sim.safety_margin, params.face_batch),
+        reach, workers)
     last_all[reach] = last
     status[reach[plate]] = STATUS_PLATE
     blocked = np.zeros(len(faces), bool)
@@ -365,12 +388,29 @@ def partition(z: SkinZones, edge_face_angle: float = EDGE_FACE_ANGLE_DEG, facet_
             tree = cKDTree(trim_pts)
             near = np.minimum(tree.query(tri.reshape(-1, 3))[0].reshape(-1, 3).min(axis=1), tree.query(centers)[0])
             status[(status == 0) & (near <= trim_radius)] = STATUS_OBJECT
-    return _partition_core(surf_vertices, faces, surf_phi, normals, angles, status, moment, last, areas, isovalues,
-                           edge_face_angle, facet_smoothing, micro_inradius)
+    return _partition_core(
+        _PartitionInput(surf_vertices, faces, surf_phi, normals, angles, status, moment, last, areas, isovalues),
+        edge_face_angle, facet_smoothing, micro_inradius)
 
 
-def _partition_core(surf_vertices, faces, surf_phi, normals, angles, status, moment, last, areas, isovalues,
-                    edge_face_angle, facet_smoothing, micro_inradius) -> dict:
+@dataclass(frozen=True)
+class _PartitionInput:
+    """Surface analysee et statuts par face (entree de `_partition_core`)."""
+    surf_vertices: np.ndarray
+    faces: np.ndarray
+    surf_phi: np.ndarray
+    normals: np.ndarray
+    angles: np.ndarray
+    status: np.ndarray
+    moment: np.ndarray
+    last: np.ndarray
+    areas: np.ndarray
+    isovalues: np.ndarray
+
+
+def _partition_core(inp: _PartitionInput, edge_face_angle, facet_smoothing, micro_inradius) -> dict:
+    surf_vertices, faces, surf_phi, normals, angles = inp.surf_vertices, inp.faces, inp.surf_phi, inp.normals, inp.angles
+    status, moment, last, areas, isovalues = inp.status, inp.moment, inp.last, inp.areas, inp.isovalues
     n_faces = len(faces)
     kept = np.flatnonzero(status == 0)
     adj = face_adjacency(faces[kept]).tocoo()

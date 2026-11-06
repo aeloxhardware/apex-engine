@@ -50,7 +50,7 @@ def main():
     print(f"{stl}: {len(tm.tetrahedra)} tetra, {len(layers)} couches, phi max {field.values.max():.1f} ({time.time()-t0:.0f} s)", flush=True)
     t1 = time.time()
     z = sz.compute(tm, field, isovalues, p.machine_profile, p.collision,
-                   sz.SkinZoneParams(head_tolerance_deg=tolerance), face_sample=n_sample)
+                   sz.SkinZoneParams(head_tolerance_deg=tolerance), sz.ZoneSampling(face_sample=n_sample))
     sel = np.flatnonzero(z.evaluated)
     area = z.areas[sel].sum()
     print(f"{len(z.faces)} faces ({z.areas.sum():.0f} mm2) ; echantillon {len(sel)} faces ({time.time()-t1:.0f} s)")

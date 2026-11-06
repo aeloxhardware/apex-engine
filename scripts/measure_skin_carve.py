@@ -76,7 +76,7 @@ def main():
 
     t1 = time.time()
     if mode == "p2":
-        z = sz.compute(tm, field, isovalues, p.machine_profile, p.collision, face_sample=int(opts.get("faces", 300)))
+        z = sz.compute(tm, field, isovalues, p.machine_profile, p.collision, sz.SkinZoneParams(), sz.ZoneSampling(face_sample=int(opts.get("faces", 300))))
         keep = z.retained
     else:
         solid = sz.PrintedSolid(tm.tet_vertices, tm.tetrahedra, field.values)

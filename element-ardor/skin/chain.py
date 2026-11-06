@@ -108,7 +108,8 @@ def run(
     z = timed("P2 accessibilite", zones.compute, tet_mesh, scalar_field, isovalues, machine, sim,
               zones.SkinZoneParams(head_tolerance_deg=params.head_tolerance_deg,
                                    head_sample_spacing=params.head_sample_spacing),
-              params.face_sample, surface=(mesh_data.vertices, mesh_data.faces), workers=params.workers)
+              zones.ZoneSampling(face_sample=params.face_sample, surface=(mesh_data.vertices, mesh_data.faces),
+                                 workers=params.workers))
     loop_sim = replace(sim, path_sampling_step=params.loop_sampling)
     full_sim = replace(sim, path_sampling_step=0.0)
     trim: list = []

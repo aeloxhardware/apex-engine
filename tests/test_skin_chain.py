@@ -35,7 +35,7 @@ def result(heat):
 
 def test_zone_statuses_partition_the_surface(heat):
     p, _md, tm, _om, field, layers = heat
-    z = sz.compute(tm, field, np.unique([l.isovalue for l in layers]), p.machine_profile, p.collision, face_sample=200)
+    z = sz.compute(tm, field, np.unique([l.isovalue for l in layers]), p.machine_profile, p.collision, sampling=sz.ZoneSampling(face_sample=200))
     skin = sz.partition(z)
     st = skin["status"]
     assert set(np.unique(st)) <= set(sz.STATUS_NAMES)
