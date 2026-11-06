@@ -291,29 +291,99 @@ def _orient_triangle_batch(
     return np.where(flip[:, None, None], tri_flipped, tri)
 
 
+def _march_cap_batch(
+    pts: np.ndarray, vals: np.ndarray, above: np.ndarray, n_above: np.ndarray, reference_direction: np.ndarray,
+    isovalue: float,
+) -> np.ndarray:
+    """Cas "cap" (n_above in (1,3), 1 triangle/tet) pour les lignes deja filtrees. Retourne (3*Mc,3)."""
+    lone_is_above = n_above == 1
+    match = above == lone_is_above[:, None]
+    lone_idx = np.argmax(match, axis=1)
+    rest_idx = _CAP_EXCLUDE_TABLE[lone_idx]  # (Mc,3)
+
+    mc = len(pts)
+    rows_c = np.arange(mc)
+    lone_pt = pts[rows_c, lone_idx]
+    lone_val = vals[rows_c, lone_idx]
+    rest_pt = np.take_along_axis(pts, rest_idx[:, :, None], axis=1)  # (Mc,3,3)
+    rest_val = np.take_along_axis(vals, rest_idx, axis=1)  # (Mc,3)
+
+    # Aplati la dimension "3 aretes par tet" dans la dimension batch (ordre C tet-majeur/arete-mineur ;
+    # alignement verifie sur 7129 tetraedres synthetiques contre l'oracle scalaire, 0 ecart).
+    rest_pt_flat = rest_pt.reshape(3 * mc, 3)
+    rest_val_flat = rest_val.reshape(3 * mc)
+    lone_pt_rep = np.repeat(lone_pt, 3, axis=0)
+    lone_val_rep = np.repeat(lone_val, 3)
+    lone_is_above_rep = np.repeat(lone_is_above, 3)
+
+    # Direction d'interpolation identique au scalaire :
+    #   lone_is_above=True  -> from=rest, to=lone
+    #   lone_is_above=False -> from=lone, to=rest
+    from_pt = np.where(lone_is_above_rep[:, None], rest_pt_flat, lone_pt_rep)
+    from_val = np.where(lone_is_above_rep, rest_val_flat, lone_val_rep)
+    to_pt = np.where(lone_is_above_rep[:, None], lone_pt_rep, rest_pt_flat)
+    to_val = np.where(lone_is_above_rep, lone_val_rep, rest_val_flat)
+
+    edge_pts = _interpolate_edge_batch(from_pt, from_val, to_pt, to_val, isovalue)
+    edge_pts = edge_pts.reshape(mc, 3, 3)
+    p0, p1, p2 = edge_pts[:, 0], edge_pts[:, 1], edge_pts[:, 2]
+    tri_c = _orient_triangle_batch(p0, p1, p2, reference_direction)
+    return tri_c.reshape(3 * mc, 3)
+
+
+def _march_quad_batch(
+    pts: np.ndarray, vals: np.ndarray, above: np.ndarray, reference_direction: np.ndarray, isovalue: float,
+) -> np.ndarray:
+    """Cas "quad" (n_above == 2, 2 triangles/tet, tri1 puis tri2 par tet). Retourne (6*Mq,3)."""
+    code = (above.astype(np.int64) * _QUAD_BIT_WEIGHTS).sum(axis=1)
+    ab = _QUAD_TABLE_A[code]  # (Mq,2) : a1,a2 croissant
+    bb = _QUAD_TABLE_B[code]  # (Mq,2) : b1,b2 croissant
+
+    mq = len(pts)
+    rows_q = np.arange(mq)
+    a1_pt, a2_pt = pts[rows_q, ab[:, 0]], pts[rows_q, ab[:, 1]]
+    b1_pt, b2_pt = pts[rows_q, bb[:, 0]], pts[rows_q, bb[:, 1]]
+    a1_val, a2_val = vals[rows_q, ab[:, 0]], vals[rows_q, ab[:, 1]]
+    b1_val, b2_val = vals[rows_q, bb[:, 0]], vals[rows_q, bb[:, 1]]
+
+    # 4 aretes par tet (chaque sommet "au-dessus" vers chaque sommet "en-dessous"), toujours interpolees
+    # from=below, to=above - meme convention que le scalaire.
+    from_pt_stack = np.stack([b1_pt, b2_pt, b1_pt, b2_pt], axis=1)
+    to_pt_stack = np.stack([a1_pt, a1_pt, a2_pt, a2_pt], axis=1)
+    from_val_stack = np.stack([b1_val, b2_val, b1_val, b2_val], axis=1)
+    to_val_stack = np.stack([a1_val, a1_val, a2_val, a2_val], axis=1)
+
+    edge_pts = _interpolate_edge_batch(
+        from_pt_stack.reshape(4 * mq, 3), from_val_stack.reshape(4 * mq),
+        to_pt_stack.reshape(4 * mq, 3), to_val_stack.reshape(4 * mq),
+        isovalue,
+    ).reshape(mq, 4, 3)
+
+    p_a1b1, p_a1b2, p_a2b1, p_a2b2 = (
+        edge_pts[:, 0], edge_pts[:, 1], edge_pts[:, 2], edge_pts[:, 3]
+    )
+    tri1 = _orient_triangle_batch(p_a1b1, p_a1b2, p_a2b2, reference_direction)
+    tri2 = _orient_triangle_batch(p_a1b1, p_a2b2, p_a2b1, reference_direction)
+    # tri1[i], tri2[i] consecutifs pour le meme tet - parite avec l'ordre d'ajout du scalaire.
+    both = np.stack([tri1, tri2], axis=1)  # (Mq,2,3,3)
+    return both.reshape(2 * mq * 3, 3)
+
+
 def _march_tetrahedra_batch(
     tet_points_batch: np.ndarray, tet_values_batch: np.ndarray, isovalue: float
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Equivalent vectorise d'appeler _march_tetrahedron une fois par ligne de
-    (tet_points_batch, tet_values_batch) - voir sa docstring pour la
+    (tet_points_batch (M,4,3), tet_values_batch (M,4)) - voir sa docstring pour la
     justification geometrique complete (champ P1, reference_direction
     garantie coherente avec le gradient reel), inchangee ici.
 
-    Args:
-        tet_points_batch: (M,4,3).
-        tet_values_batch: (M,4).
-        isovalue: valeur de champ de l'isosurface.
-
-    Returns:
-        (vertices, local_tet_idx) : vertices (3K,3), triplets consecutifs
-        de sommets de triangle (K = nb total de triangles extraits) ;
-        local_tet_idx (K,) indice de LIGNE dans le batch d'entree (PAS
-        l'indice tetraedre global - l'appelant doit le remapper via
-        candidates[local_tet_idx], voir _extract_isosurface_triangles).
-        Une ligne qui ne produit aucun triangle (n_above in (0,4), ou champ
-        constant degenere) ne contribue AUCUNE ligne en sortie - jamais un
-        placeholder/NaN.
+    Retourne (vertices, local_tet_idx) : vertices (3K,3), triplets consecutifs
+    de sommets de triangle ; local_tet_idx (K,) indice de LIGNE dans le batch
+    d'entree (PAS l'indice tetraedre global - l'appelant le remappe via
+    candidates[local_tet_idx], voir _extract_isosurface_triangles). Une ligne
+    sans triangle (n_above in (0,4), ou champ constant) ne contribue AUCUNE
+    ligne en sortie - jamais un placeholder/NaN.
     """
     m = tet_points_batch.shape[0]
     if m == 0:
@@ -341,105 +411,16 @@ def _march_tetrahedra_batch(
 
     vertices_parts: list[np.ndarray] = []
     tet_idx_parts: list[np.ndarray] = []
-
-    # ---------------- Cas "cap" : n_above in (1,3) -> 1 triangle/tet ------
     if np.any(cap_mask):
         idx = np.nonzero(cap_mask)[0]
-        above_c = above[idx]
-        n_above_c = n_above[idx]
-        lone_is_above = n_above_c == 1
-
-        match = above_c == lone_is_above[:, None]
-        lone_idx = np.argmax(match, axis=1)
-        rest_idx = _CAP_EXCLUDE_TABLE[lone_idx]  # (Mc,3)
-
-        pts_c = tet_points_batch[idx]
-        vals_c = tet_values_batch[idx]
-        mc = len(idx)
-        rows_c = np.arange(mc)
-
-        lone_pt = pts_c[rows_c, lone_idx]
-        lone_val = vals_c[rows_c, lone_idx]
-
-        rest_pt = np.take_along_axis(pts_c, rest_idx[:, :, None], axis=1)  # (Mc,3,3)
-        rest_val = np.take_along_axis(vals_c, rest_idx, axis=1)  # (Mc,3)
-
-        # Aplati la dimension "3 aretes par tet" dans la dimension batch
-        # pour un seul appel a _interpolate_edge_batch. Ordre C tet-majeur/
-        # arete-mineur : rest_pt.reshape(3*Mc,3) donne
-        # [tet0_e0,tet0_e1,tet0_e2, tet1_e0,...] et np.repeat(lone_pt,3,axis=0)
-        # donne [tet0,tet0,tet0, tet1,...] - meme ordre, alignement correct
-        # (verifie empiriquement pendant la conception, 7129 tetraedres
-        # synthetiques compares a l'oracle scalaire, 0 ecart).
-        rest_pt_flat = rest_pt.reshape(3 * mc, 3)
-        rest_val_flat = rest_val.reshape(3 * mc)
-        lone_pt_rep = np.repeat(lone_pt, 3, axis=0)
-        lone_val_rep = np.repeat(lone_val, 3)
-        lone_is_above_rep = np.repeat(lone_is_above, 3)
-
-        # Direction d'interpolation identique au scalaire :
-        #   lone_is_above=True  -> from=rest, to=lone
-        #   lone_is_above=False -> from=lone, to=rest
-        from_pt = np.where(lone_is_above_rep[:, None], rest_pt_flat, lone_pt_rep)
-        from_val = np.where(lone_is_above_rep, rest_val_flat, lone_val_rep)
-        to_pt = np.where(lone_is_above_rep[:, None], lone_pt_rep, rest_pt_flat)
-        to_val = np.where(lone_is_above_rep, lone_val_rep, rest_val_flat)
-
-        edge_pts = _interpolate_edge_batch(from_pt, from_val, to_pt, to_val, isovalue)
-        edge_pts = edge_pts.reshape(mc, 3, 3)
-
-        p0, p1, p2 = edge_pts[:, 0], edge_pts[:, 1], edge_pts[:, 2]
-        ref_c = reference_direction[idx]
-        tri_c = _orient_triangle_batch(p0, p1, p2, ref_c)
-
-        vertices_parts.append(tri_c.reshape(3 * mc, 3))
+        vertices_parts.append(_march_cap_batch(
+            tet_points_batch[idx], tet_values_batch[idx], above[idx], n_above[idx], reference_direction[idx],
+            isovalue))
         tet_idx_parts.append(idx)
-
-    # ---------------- Cas "quad" : n_above == 2 -> 2 triangles/tet --------
     if np.any(quad_mask):
         idx = np.nonzero(quad_mask)[0]
-        above_q = above[idx]
-        code = (above_q.astype(np.int64) * _QUAD_BIT_WEIGHTS).sum(axis=1)
-
-        ab = _QUAD_TABLE_A[code]  # (Mq,2) : a1,a2 croissant
-        bb = _QUAD_TABLE_B[code]  # (Mq,2) : b1,b2 croissant
-
-        pts_q = tet_points_batch[idx]
-        vals_q = tet_values_batch[idx]
-        mq = len(idx)
-        rows_q = np.arange(mq)
-
-        a1_pt, a2_pt = pts_q[rows_q, ab[:, 0]], pts_q[rows_q, ab[:, 1]]
-        b1_pt, b2_pt = pts_q[rows_q, bb[:, 0]], pts_q[rows_q, bb[:, 1]]
-        a1_val, a2_val = vals_q[rows_q, ab[:, 0]], vals_q[rows_q, ab[:, 1]]
-        b1_val, b2_val = vals_q[rows_q, bb[:, 0]], vals_q[rows_q, bb[:, 1]]
-
-        # 4 aretes par tet (chaque sommet "au-dessus" vers chaque sommet
-        # "en-dessous"), toujours interpolees from=below, to=above - meme
-        # convention que le scalaire.
-        from_pt_stack = np.stack([b1_pt, b2_pt, b1_pt, b2_pt], axis=1)
-        to_pt_stack = np.stack([a1_pt, a1_pt, a2_pt, a2_pt], axis=1)
-        from_val_stack = np.stack([b1_val, b2_val, b1_val, b2_val], axis=1)
-        to_val_stack = np.stack([a1_val, a1_val, a2_val, a2_val], axis=1)
-
-        edge_pts = _interpolate_edge_batch(
-            from_pt_stack.reshape(4 * mq, 3), from_val_stack.reshape(4 * mq),
-            to_pt_stack.reshape(4 * mq, 3), to_val_stack.reshape(4 * mq),
-            isovalue,
-        ).reshape(mq, 4, 3)
-
-        p_a1b1, p_a1b2, p_a2b1, p_a2b2 = (
-            edge_pts[:, 0], edge_pts[:, 1], edge_pts[:, 2], edge_pts[:, 3]
-        )
-        ref_q = reference_direction[idx]
-
-        tri1 = _orient_triangle_batch(p_a1b1, p_a1b2, p_a2b2, ref_q)
-        tri2 = _orient_triangle_batch(p_a1b1, p_a2b2, p_a2b1, ref_q)
-
-        # Interleave tri1[i], tri2[i] consecutifs pour le meme tet - parite
-        # avec l'ordre d'ajout du scalaire (tri1 avant tri2 par tet).
-        both = np.stack([tri1, tri2], axis=1)  # (Mq,2,3,3)
-        vertices_parts.append(both.reshape(2 * mq * 3, 3))
+        vertices_parts.append(_march_quad_batch(
+            tet_points_batch[idx], tet_values_batch[idx], above[idx], reference_direction[idx], isovalue))
         tet_idx_parts.append(np.repeat(idx, 2))
 
     if not vertices_parts:
@@ -1089,6 +1070,123 @@ def _spatial_dfs_order(
 # Point d'entree principal de l'etape
 # ---------------------------------------------------------------------------
 
+@dataclass
+class _ExtractContext:
+    """Donnees communes a l'extraction de toutes les couches d'un champ."""
+    tet_mesh: TetMesh
+    scalar_field: ScalarField
+    params: LayerParams
+    tet_regions: np.ndarray
+    volumes: np.ndarray
+    tet_min: np.ndarray
+    tet_max: np.ndarray
+    weld_tolerance: float
+    gap_threshold: float
+    cluster_tet_tolerance: float
+    native_extractor: object = None
+    gradient_c: object = None
+    volumes_c: object = None
+    tet_regions_c: object = None
+
+
+def _cluster_tet_tolerance(tet_mesh: TetMesh, params: LayerParams, scale: float) -> float:
+    """Taille caracteristique d'un tetraedre (mediane des longueurs d'arete x2), tolerance de proximite de
+    `_tets_for_cluster` (Decision 7). PAS une fraction de `scale` : mesure sur le modele tripode, elle tombait
+    sous la distance reelle centroide-tetraedre -> point de cluster le plus proche (0.328), filtrait TOUS les
+    tetraedres et forcait un repli sur unique_tets entier (region_ids identiques pour tous les clusters)."""
+    if params.split_disjoint_clusters is None:
+        return 0.0
+    tet_verts_per_tet = tet_mesh.tet_vertices[tet_mesh.tetrahedra]
+    edge_lengths = np.linalg.norm(
+        tet_verts_per_tet[:, 1:, :] - tet_verts_per_tet[:, 0:1, :], axis=-1
+    )
+    return float(np.median(edge_lengths)) * 2.0 if edge_lengths.size else scale
+
+
+def _split_layer_clusters(isovalue: float, contours: list, unique_tets: np.ndarray, ctx: _ExtractContext) -> list:
+    """Une couche scindee en clusters spatialement disjoints (`split_disjoint_clusters`)."""
+    tet_mesh, scalar_field = ctx.tet_mesh, ctx.scalar_field
+    provisional_frame = _compute_local_frame(
+        contours, scalar_field.gradient[unique_tets], ctx.volumes[unique_tets]
+    )
+    clusters = _cluster_contours(contours, provisional_frame, ctx.gap_threshold)
+    tet_centers = tet_mesh.tet_vertices[tet_mesh.tetrahedra[unique_tets]].mean(axis=1)
+    entries = []
+    for cluster_indices in clusters:
+        cluster_contours = [contours[i] for i in cluster_indices]
+        cluster_points = np.concatenate(cluster_contours, axis=0)
+        cluster_tets = _tets_for_cluster(
+            unique_tets, tet_centers, cluster_points, tolerance=ctx.cluster_tet_tolerance
+        )
+        if len(cluster_tets) == 0:
+            # aucun tetraedre proche (tolerance trop stricte sur un maillage tres grossier) : repli sur
+            # unique_tets entier plutot qu'un local_frame/region_ids vides.
+            cluster_tets = unique_tets
+        region_ids = sorted({int(r) for r in ctx.tet_regions[cluster_tets] if r >= 0})
+        local_frame = _compute_local_frame(
+            cluster_contours, scalar_field.gradient[cluster_tets], ctx.volumes[cluster_tets]
+        )
+        entries.append((float(isovalue), cluster_contours, region_ids, local_frame))
+    return entries
+
+
+def _extract_layer_entries(isovalue: float, ctx: _ExtractContext) -> list:
+    """Couche(s) brute(s) d'une isovaleur : liste de `(isovalue, contours, region_ids, local_frame)`."""
+    native_extractor, params = ctx.native_extractor, ctx.params
+    if (native_extractor is not None and (params.split_disjoint_clusters is None)
+            and hasattr(native_extractor, "extract_layer")):
+        # Chemin par defaut en un appel natif : isosurface, contours, regions et repere local.
+        # Statut 2 (bord non simple) : on retombe sur trimesh ci-dessous.
+        layer = native_extractor.extract_layer(float(isovalue), ctx.weld_tolerance, ctx.gradient_c,
+                                               ctx.volumes_c, ctx.tet_regions_c)
+        if isinstance(layer, tuple):
+            contours, region_ids, local_frame = layer
+            return [(float(isovalue), contours, list(region_ids), local_frame)]
+        if layer == 0:
+            return []
+    if native_extractor is not None:
+        welded_vertices, welded_faces, source_tets = native_extractor.extract(float(isovalue), ctx.weld_tolerance)
+        if len(welded_faces) == 0:
+            return []
+    else:
+        vertices, faces, source_tets = _extract_isosurface_triangles(
+            ctx.tet_mesh, ctx.scalar_field.values, float(isovalue), ctx.tet_min, ctx.tet_max
+        )
+        if len(faces) == 0:
+            return []
+        welded_vertices, welded_faces = _weld_vertices(vertices, faces, ctx.weld_tolerance)
+    contours = _extract_closed_contours(welded_vertices, welded_faces)
+    if not contours:
+        return []
+
+    unique_tets = np.unique(source_tets)
+    if params.split_disjoint_clusters is None or len(contours) < 2:
+        # chemin historique inchange (mot pour mot) - non-regression par construction.
+        region_ids = sorted({int(r) for r in ctx.tet_regions[unique_tets] if r >= 0})
+        local_frame = _compute_local_frame(
+            contours, ctx.scalar_field.gradient[unique_tets], ctx.volumes[unique_tets]
+        )
+        return [(float(isovalue), contours, region_ids, local_frame)]
+    return _split_layer_clusters(isovalue, contours, unique_tets, ctx)
+
+
+def _order_raw_layers(raw_layers: list, region_ranks: dict, gap_threshold: float, params: LayerParams) -> list:
+    if params.split_disjoint_clusters is not None:
+        # tri spatial DFS (Decision 8) : degenere exactement vers le tri historique (rank, isovalue) quand le
+        # clustering ne produit jamais plus d'un cluster par isovaleur - pas de parametre separe.
+        spatial_order = _spatial_dfs_order(raw_layers, region_ranks, gap_threshold)
+        return [raw_layers[i] for i in spatial_order]
+
+    def _sort_key(entry: tuple) -> tuple[int, float]:
+        isovalue, _contours, region_ids, _frame = entry
+        if params.isovalue_order:
+            return (0, isovalue)
+        rank = max((region_ranks.get(r, 0) for r in region_ids), default=0)
+        return (rank, isovalue)
+
+    return sorted(raw_layers, key=_sort_key)
+
+
 def run(
     tet_mesh: TetMesh,
     mesh_data: MeshData,
@@ -1119,143 +1217,36 @@ def run(
     isovalues = _generate_isovalues(scalar_field, tet_mesh, params)
 
     tet_values_per_tet = scalar_field.values[tet_mesh.tetrahedra]  # (T,4)
-    tet_min = tet_values_per_tet.min(axis=1)
-    tet_max = tet_values_per_tet.max(axis=1)
-
     tet_regions = _map_tets_to_regions(tet_mesh, mesh_data, region_dependency_graph)
     region_ranks = _compute_region_ranks(region_dependency_graph)
     volumes = _tet_volumes(tet_mesh)
-    tet_regions_c = np.ascontiguousarray(tet_regions, dtype=np.int64)
-    gradient_c = np.ascontiguousarray(scalar_field.gradient, dtype=float)
-    volumes_c = np.ascontiguousarray(volumes, dtype=float)
-
     scale = float(np.ptp(tet_mesh.tet_vertices, axis=0).max()) or 1.0
-    weld_tolerance = params.weld_tolerance_factor * scale
-
-    # Seuil de connexion spatiale entre boucles (clustering et tri par
-    # continuite) : quelques hauteurs de couche separent le prolongement direct
-    # d'un cluster de ce qui ne l'est pas. Valeur mesuree sur le modele en T.
+    # Seuil de connexion spatiale entre boucles (clustering et tri par continuite) : quelques hauteurs de
+    # couche separent le prolongement direct d'un cluster de ce qui ne l'est pas (mesure sur le modele en T).
     gap_threshold = (params.split_disjoint_clusters if params.split_disjoint_clusters is not None else 3.0) \
         * params.layer_height_base
-
-    # taille caracteristique d'un tetraedre (mediane des longueurs d'arete
-    # sur tout le TetMesh) - utilisee comme tolerance de proximite pour
-    # _tets_for_cluster (Decision 7). PAS une fraction de `scale` (l'etendue
-    # du modele entier) : mesure directement sur un cas reel (modele
-    # tripode, CLAUDE.md) qu'une fraction de `scale` (~0.32 sur ce modele)
-    # tombe EN DESSOUS de la distance reelle centroide-tetraedre -> point de
-    # cluster le plus proche (mesuree a 0.328 sur ce meme modele), filtrant
-    # ALORS TOUS les tetraedres et forcant un repli sur unique_tets entier
-    # (region_ids identiques pour tous les clusters, bug reel mesure avant
-    # ce fix). La taille de tetraedre typique (~2.6 unites sur ce modele)
-    # est la bonne echelle : un tetraedre contribuant a un triangle de bord
-    # d'un cluster a necessairement un centroide proche de ce cluster a
-    # l'echelle d'UN tetraedre, pas de l'echelle globale du modele.
-    if params.split_disjoint_clusters is not None:
-        tet_verts_per_tet = tet_mesh.tet_vertices[tet_mesh.tetrahedra]
-        edge_lengths = np.linalg.norm(
-            tet_verts_per_tet[:, 1:, :] - tet_verts_per_tet[:, 0:1, :], axis=-1
-        )
-        cluster_tet_tolerance = float(np.median(edge_lengths)) * 2.0 if edge_lengths.size else scale
-    else:
-        cluster_tet_tolerance = 0.0
-
-    raw_layers: list[tuple[float, list[np.ndarray], list[int], tuple[np.ndarray, np.ndarray, np.ndarray]]] = []
-
-    # Pas 13 du portage C++ (CLAUDE.md limite #56) : marching tetrahedra +
-    # soudure en natif, construit UNE fois par champ. Equivalence au bit
-    # (tests/test_cpp_equivalence.py) ; chemin Python inchange sinon.
-    native_extractor = None
+    ctx = _ExtractContext(
+        tet_mesh=tet_mesh, scalar_field=scalar_field, params=params, tet_regions=tet_regions, volumes=volumes,
+        tet_min=tet_values_per_tet.min(axis=1), tet_max=tet_values_per_tet.max(axis=1),
+        weld_tolerance=params.weld_tolerance_factor * scale, gap_threshold=gap_threshold,
+        cluster_tet_tolerance=_cluster_tet_tolerance(tet_mesh, params, scale),
+        gradient_c=np.ascontiguousarray(scalar_field.gradient, dtype=float),
+        volumes_c=np.ascontiguousarray(volumes, dtype=float),
+        tet_regions_c=np.ascontiguousarray(tet_regions, dtype=np.int64),
+    )
+    # Pas 13 du portage C++ (limite #56) : marching tetrahedra + soudure en natif, construit UNE fois par champ.
     if _cpp.enabled() and hasattr(_cpp.module(), "IsosurfaceExtractor"):
-        native_extractor = _cpp.module().IsosurfaceExtractor(
+        ctx.native_extractor = _cpp.module().IsosurfaceExtractor(
             np.ascontiguousarray(tet_mesh.tet_vertices, dtype=float),
             np.ascontiguousarray(tet_mesh.tetrahedra, dtype=np.int64),
             np.ascontiguousarray(scalar_field.values, dtype=float),
         )
 
+    raw_layers: list[tuple[float, list[np.ndarray], list[int], tuple[np.ndarray, np.ndarray, np.ndarray]]] = []
     for done, isovalue in enumerate(isovalues):
         _progress.report(done, len(isovalues))   # R-017 : couches deja extraites
-        if (native_extractor is not None and (params.split_disjoint_clusters is None)
-                and hasattr(native_extractor, "extract_layer")):
-            # Chemin par defaut en un appel natif : isosurface, contours, regions et
-            # repere local. Statut 2 (bord non simple) : on retombe sur trimesh ci-dessous.
-            layer = native_extractor.extract_layer(float(isovalue), weld_tolerance, gradient_c, volumes_c,
-                                                   tet_regions_c)
-            if isinstance(layer, tuple):
-                contours, region_ids, local_frame = layer
-                raw_layers.append((float(isovalue), contours, list(region_ids), local_frame))
-                continue
-            if layer == 0:
-                continue
-        if native_extractor is not None:
-            welded_vertices, welded_faces, source_tets = native_extractor.extract(float(isovalue), weld_tolerance)
-            if len(welded_faces) == 0:
-                continue
-        else:
-            vertices, faces, source_tets = _extract_isosurface_triangles(
-                tet_mesh, scalar_field.values, float(isovalue), tet_min, tet_max
-            )
-            if len(faces) == 0:
-                continue
-            welded_vertices, welded_faces = _weld_vertices(vertices, faces, weld_tolerance)
-        contours = _extract_closed_contours(welded_vertices, welded_faces)
-        if not contours:
-            continue
-
-        unique_tets = np.unique(source_tets)
-
-        if params.split_disjoint_clusters is None or len(contours) < 2:
-            # chemin historique inchange (mot pour mot) - garantit la
-            # non-regression par construction, pas par coincidence.
-            region_ids = sorted({int(r) for r in tet_regions[unique_tets] if r >= 0})
-            local_frame = _compute_local_frame(
-                contours, scalar_field.gradient[unique_tets], volumes[unique_tets]
-            )
-            raw_layers.append((float(isovalue), contours, region_ids, local_frame))
-            continue
-
-        provisional_frame = _compute_local_frame(
-            contours, scalar_field.gradient[unique_tets], volumes[unique_tets]
-        )
-        clusters = _cluster_contours(contours, provisional_frame, gap_threshold)
-
-        tet_centers = tet_mesh.tet_vertices[tet_mesh.tetrahedra[unique_tets]].mean(axis=1)
-
-        for cluster_indices in clusters:
-            cluster_contours = [contours[i] for i in cluster_indices]
-            cluster_points = np.concatenate(cluster_contours, axis=0)
-            cluster_tets = _tets_for_cluster(
-                unique_tets, tet_centers, cluster_points, tolerance=cluster_tet_tolerance
-            )
-            if len(cluster_tets) == 0:
-                # aucun tetraedre proche detecte (tolerance trop stricte sur
-                # un maillage tres grossier) : repli sur unique_tets entier
-                # plutot qu'un local_frame/region_ids vides.
-                cluster_tets = unique_tets
-
-            region_ids = sorted({int(r) for r in tet_regions[cluster_tets] if r >= 0})
-            local_frame = _compute_local_frame(
-                cluster_contours, scalar_field.gradient[cluster_tets], volumes[cluster_tets]
-            )
-            raw_layers.append((float(isovalue), cluster_contours, region_ids, local_frame))
-
-    if params.split_disjoint_clusters is not None:
-        # tri spatial DFS (Decision 8) : degenere exactement vers le tri
-        # historique (rank, isovalue) quand le clustering ne produit jamais
-        # plus d'un cluster par isovaleur (graphe = chaine simple sans
-        # branchement) - pas de parametre separe, voir docstring de
-        # split_disjoint_clusters.
-        spatial_order = _spatial_dfs_order(raw_layers, region_ranks, gap_threshold)
-        raw_layers = [raw_layers[i] for i in spatial_order]
-    else:
-        def _sort_key(entry: tuple) -> tuple[int, float]:
-            isovalue, _contours, region_ids, _frame = entry
-            if params.isovalue_order:
-                return (0, isovalue)
-            rank = max((region_ranks.get(r, 0) for r in region_ids), default=0)
-            return (rank, isovalue)
-
-        raw_layers.sort(key=_sort_key)
+        raw_layers.extend(_extract_layer_entries(float(isovalue), ctx))
+    raw_layers = _order_raw_layers(raw_layers, region_ranks, gap_threshold, params)
 
     return [
         Layer(

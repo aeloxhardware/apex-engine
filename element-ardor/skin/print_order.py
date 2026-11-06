@@ -37,6 +37,7 @@ Usage (venv d'Apex) :
       [--head-tolerance=45] [--sampling=0 (0 = tous les points)] [--margin=1.0] [--feed=25 (mm/s)]
 """
 import json
+from dataclasses import dataclass
 import os
 import pickle
 import sys
@@ -185,21 +186,30 @@ def _check_native(native_cls, sequence, body, paths, skin_angles, offset, head, 
     return tested
 
 
-def order_and_check(body, skin, paths, machine, sim, offset, tolerance=HEAD_TOLERANCE_DEG, plate_r=150.0,
-                    exclude=(), feed=25.0, log=False):
-    """P5 en memoire : insere chaque zone de lissage apres la derniere couche du
-    corps qui la porte, calcule les angles de tete, verifie les collisions avec
-    la VRAIE tete, retire les zones en contact. `body` : couches du corps
-    (deformed_slicing, toolpath_3d dans le repere de sortie, `offset` = repere
-    Bird -> sortie) ; `skin` : zones.compute ; `paths` : paths.trace.
-    Rend {passes, report, excluded, collision_points, monotone_ranks}."""
-    t_all = time.time()
+_DENSIFY = 0.25     # pas de densification de la matiere imprimee (erreur <= _DENSIFY / 2)
+_BLOCK = 256
+
+
+def _dense(polylines):
+    out = []
+    for p in polylines:
+        if len(p) < 2:
+            out.append(p)
+            continue
+        seg = np.linalg.norm(np.diff(p, axis=0), axis=1)
+        n = np.maximum(1, np.ceil(seg / _DENSIFY).astype(int))
+        t = np.concatenate([np.arange(m) / m for m in n])
+        i = np.repeat(np.arange(len(seg)), n)
+        out.append(np.vstack([p[i] + t[:, None] * (p[i + 1] - p[i]), p[-1:]]))
+    return out
+
+
+def _skin_sequence(body, skin, paths, exclude, log):
+    """1. ordre : chaque zone apres la derniere couche de rang <= moment. Retourne `(monotone, zones, sequence)`."""
     isovalues = skin["isovalues"]
     ranks = np.array([int(np.clip(np.searchsorted(isovalues, L["isovalue"] - 1e-9), 0, len(isovalues) - 1))
                       for L in body])
     monotone = bool(np.all(np.diff(ranks) >= 0))
-
-    # --- 1. ordre : chaque zone apres la derniere couche de rang <= moment ------
     skip = set(int(z) for z in (exclude or ()))     # zones deja retirees (creusement annule par P3)
     zones = sorted((z for z, e in paths.items() if e["paths"] and z not in skip), key=lambda z: paths[z]["moment"])
     after = {}
@@ -212,8 +222,11 @@ def order_and_check(body, skin, paths, machine, sim, offset, tolerance=HEAD_TOLE
         sequence.extend(("skin", z) for z in after.get(i, []))
     if log: print(f"P5 : {len(body)} couches de corps (rangs {'croissants' if monotone else 'NON monotones'}), "
           f"{len(zones)} zones de lissage inserees", flush=True)
+    return monotone, zones, sequence
 
-    # --- 2. angles de tete ------------------------------------------------------
+
+def _skin_head_angles(zones, paths, machine, tolerance, feed, log):
+    """2. angles de tete (cinematique reelle, axes coordonnes) et plan d'avance. Retourne `(skin_angles, over_tol)`."""
     step8 = Step8Params()
     t0 = time.time()
     skin_angles, over_tol = {}, {}
@@ -239,107 +252,109 @@ def order_and_check(body, skin, paths, machine, sim, offset, tolerance=HEAD_TOLE
     if log: print(f"angles de tete ({'C impose par la position' if machine.position_coupled_axes else 'C libre'}) : "
           f"{time.time() - t0:.1f} s ; zones avec des points au-dela de {tolerance:.0f} deg : "
           f"{sum(1 for v in over_tol.values() if v > 0)}", flush=True)
+    return skin_angles, over_tol
 
-    # --- 3. collisions avec la vraie tete -----------------------------------------
-    # Meme critere que l'etape 9 (point de tete a moins de marge + rayon de
-    # cordon d'une capsule imprimee), mais vectorise : la matiere imprimee est
-    # un nuage de points (trajectoires densifiees a DENSIFY mm, erreur <= DENSIFY/2)
-    # dans un arbre k-d. La boucle Python par capsule de l'etape 9 mettait plus
-    # de 10 min sur le Benchy (1,16 M de points de corps, tete de 77 mm).
+
+@dataclass
+class _CheckContext:
+    """Donnees communes du controle de collision de la partie 3 (chemin Python)."""
+    body: list
+    paths: dict
+    skin_angles: dict
+    offset: object
+    head: np.ndarray
+    machine: object
+    sim: object
+    plate_r: float
+    reach: float
+    tolerance: float
+    over_tol: dict
+    report: dict
+    collision_points: list
+
+
+def _check_line(p, a, ctx: _CheckContext, trees: tuple, hits: dict):
+    """Teste les points d'une ligne de lissage : la tete est aussi testee contre les lignes deja deposees de
+    la zone en cours et le debut de la ligne en cours (full_step89.py --fast). `trees` = (corps, lissage,
+    zone). Retourne `(points testes, distance minimale)`."""
     from scipy.spatial import cKDTree
-    DENSIFY = 0.25
-    BLOCK = 256
-    reach = sim.safety_margin + machine.nozzle_diameter / 2
+    machine, sim, reach = ctx.machine, ctx.sim, ctx.reach
+    body_tree, skin_tree, zone_tree = trees
+    idx = (np.arange(len(p)) if sim.path_sampling_step <= 0 else sample_indices(p, sim.path_sampling_step))
+    block_id, block_tree = -1, None
+    tested, closest = 0, np.inf
+    for i in idx:
+        tested += 1
+        verts = _positioned_toolhead_vertices(ctx.head, p[i], list(a[i]), machine.rotation_axes)
+        # debut de la ligne : arbre des blocs complets (reconstruit tous les _BLOCK points, sinon cout
+        # quadratique -- lignes de 20 000 points sur le dino) + petit arbre du bloc en cours
+        if i >= 1 and i // _BLOCK != block_id:
+            block_id = i // _BLOCK
+            start = block_id * _BLOCK
+            block_tree = cKDTree(_dense([p[:start + 1]])[0]) if start >= 1 else None
+        start = block_id * _BLOCK if i >= 1 else 0
+        partial_tree = cKDTree(_dense([p[start:i]])[0]) if i - start >= 1 else None
+        # plateau = disque z = 0 de rayon plate_r, meme marge
+        on_plate = ((verts[:, 2] < sim.safety_margin)
+                    & (np.linalg.norm(verts[:, :2], axis=1) < ctx.plate_r + sim.safety_margin)).any()
+        if on_plate:
+            hits["plateau"] += 1
+        d = np.inf
+        for tree in (body_tree, skin_tree, zone_tree, block_tree if i >= 1 else None, partial_tree):
+            if tree is not None:
+                d = min(d, float(tree.query(verts, distance_upper_bound=reach + 1.0)[0].min()))
+        closest = min(closest, d)
+        if d < reach:
+            hits["piece"] += 1
+        if d < reach or on_plate:
+            ctx.collision_points.append(p[i].tolist())
+    return tested, closest
 
-    def dense(polylines):
-        out = []
-        for p in polylines:
-            if len(p) < 2:
-                out.append(p)
-                continue
-            seg = np.linalg.norm(np.diff(p, axis=0), axis=1)
-            n = np.maximum(1, np.ceil(seg / DENSIFY).astype(int))
-            t = np.concatenate([np.arange(m) / m for m in n])
-            i = np.repeat(np.arange(len(seg)), n)
-            out.append(np.vstack([p[i] + t[:, None] * (p[i + 1] - p[i]), p[-1:]]))
-        return out
 
-    head = _surface_sample_points(machine.nozzle_model, sim.toolhead_sample_spacing)
-    head = _filter_nozzle_contact_zone(head, sim.nozzle_contact_clearance)
+def _check_python(sequence, ctx: _CheckContext) -> int:
+    """Partie 3 de order_and_check en Python : remplit `ctx.report` et `ctx.collision_points`, rend le nombre
+    de points testes. Meme critere que l'etape 9, vectorise : la matiere imprimee est un nuage de points
+    (trajectoires densifiees, erreur <= _DENSIFY/2) dans un arbre k-d (la boucle par capsule de l'etape 9
+    mettait plus de 10 min sur le Benchy)."""
+    from scipy.spatial import cKDTree
     body_pts, body_tree, body_upto = [], None, -1
     skin_pts = []
-    report, t0, tested = {}, time.time(), 0
-    collision_points = []
-    native = _skin_check_native()
-    if native is not None:
-        # Meme controle en C++ (apex/skin_check.hpp) : memes obstacles, meme distance
-        # bornee, meme densification ; la boucle ci-dessous n'est alors pas executee.
-        tested = _check_native(native, sequence, body, paths, skin_angles, offset, head, machine, sim, plate_r,
-                               reach, DENSIFY, tolerance, over_tol, report, collision_points)
-    for kind, ref in (sequence if native is None else ()):
+    tested = 0
+    for kind, ref in sequence:
         if kind == "body":
-            body_pts.extend(dense([t - offset for t in body[ref]["toolpath_3d"]]))
+            body_pts.extend(_dense([t - ctx.offset for t in ctx.body[ref]["toolpath_3d"]]))
             continue
         z = ref
-        e = paths[z]
+        e = ctx.paths[z]
         if body_upto != len(body_pts):                 # le corps a avance : arbre reconstruit
             body_tree = cKDTree(np.vstack(body_pts)) if body_pts else None
             body_upto = len(body_pts)
         skin_tree = cKDTree(np.vstack(skin_pts)) if skin_pts else None
-        angles_z, err_z = skin_angles[z]
+        angles_z, err_z = ctx.skin_angles[z]
         hits = {"plateau": 0, "piece": 0, "tolerance": 0}
         for p, err in zip(e["paths"], err_z):          # au-dela de la tolerance tete/normale : rogne aussi
-            far = np.flatnonzero(err > tolerance)
+            far = np.flatnonzero(err > ctx.tolerance)
             hits["tolerance"] += len(far)
-            collision_points.extend(p[far].tolist())
+            ctx.collision_points.extend(p[far].tolist())
         closest = np.inf
-        # Correctifs du 2026-09-30 (decision utilisateur) : TOUS les points sont
-        # testes (un contact de 0,02 mm tombait entre deux echantillons de 2 mm
-        # sur le dino), et la tete est aussi testee contre les lignes deja
-        # deposees de la zone en cours et le debut de la ligne en cours, comme
-        # full_step89.py --fast.
         zone_done = []
         for p, a in zip(e["paths"], angles_z):
             zone_tree = cKDTree(np.vstack(zone_done)) if zone_done else None
-            idx = (np.arange(len(p)) if sim.path_sampling_step <= 0
-                   else sample_indices(p, sim.path_sampling_step))
-            block_id, block_tree = -1, None
-            for i in idx:
-                tested += 1
-                verts = _positioned_toolhead_vertices(head, p[i], list(a[i]), machine.rotation_axes)
-                # debut de la ligne : arbre des blocs complets (reconstruit tous
-                # les BLOCK points, sinon cout quadratique -- lignes de 20 000
-                # points sur le dino) + petit arbre du bloc en cours
-                if i >= 1 and i // BLOCK != block_id:
-                    block_id = i // BLOCK
-                    start = block_id * BLOCK
-                    block_tree = cKDTree(dense([p[:start + 1]])[0]) if start >= 1 else None
-                start = block_id * BLOCK if i >= 1 else 0
-                partial_tree = cKDTree(dense([p[start:i]])[0]) if i - start >= 1 else None
-                # plateau = disque z = 0 de rayon plate_r, meme marge
-                on_plate = ((verts[:, 2] < sim.safety_margin)
-                            & (np.linalg.norm(verts[:, :2], axis=1) < plate_r + sim.safety_margin)).any()
-                if on_plate:
-                    hits["plateau"] += 1
-                d = np.inf
-                for tree in (body_tree, skin_tree, zone_tree, block_tree if i >= 1 else None, partial_tree):
-                    if tree is not None:
-                        d = min(d, float(tree.query(verts, distance_upper_bound=reach + 1.0)[0].min()))
-                closest = min(closest, d)
-                if d < reach:
-                    hits["piece"] += 1
-                if d < reach or on_plate:
-                    collision_points.append(p[i].tolist())
-            zone_done.extend(dense([p]))
-        report[z] = {"moment": e["moment"], "area": e["area"], "hits": hits,
-                     "worst_penetration": float(max(0.0, reach - closest)),
-                     "over_tolerance": over_tol[z],
-                     "max_head_deviation": float(max(x.max() for x in err_z)) if err_z else 0.0}
+            n_line, d_line = _check_line(p, a, ctx, (body_tree, skin_tree, zone_tree), hits)
+            tested += n_line
+            closest = min(closest, d_line)
+            zone_done.extend(_dense([p]))
+        ctx.report[z] = {"moment": e["moment"], "area": e["area"], "hits": hits,
+                         "worst_penetration": float(max(0.0, ctx.reach - closest)),
+                         "over_tolerance": ctx.over_tol[z],
+                         "max_head_deviation": float(max(x.max() for x in err_z)) if err_z else 0.0}
         if not any(hits.values()):
-            skin_pts.extend(dense(e["paths"]))         # zone deposee : obstacle pour la suite
+            skin_pts.extend(_dense(e["paths"]))         # zone deposee : obstacle pour la suite
         check_memory(f"zone {z}")
-    if log: print(f"collisions : {tested} points de lissage testes en {time.time() - t0:.1f} s", flush=True)
+    return tested
 
+
+def _log_exclusions(report, tolerance, log):
     excluded = sorted(z for z, r in report.items() if any(r["hits"].values()))
     area_all = sum(r["area"] for r in report.values())
     area_ex = sum(report[z]["area"] for z in excluded)
@@ -354,7 +369,39 @@ def order_and_check(body, skin, paths, machine, sim, offset, tolerance=HEAD_TOLE
     if dev:
         if log: print(f"zones gardees : {len(kept)}, ecart tete / normale max par zone : mediane {np.median(dev):.0f} deg, "
               f"max {max(dev):.0f} deg")
+    return excluded
 
+
+def order_and_check(body, skin, paths, machine, sim, offset, tolerance=HEAD_TOLERANCE_DEG, plate_r=150.0,
+                    exclude=(), feed=25.0, log=False):
+    """P5 en memoire : insere chaque zone de lissage apres la derniere couche du
+    corps qui la porte, calcule les angles de tete, verifie les collisions avec
+    la VRAIE tete, retire les zones en contact. `body` : couches du corps
+    (deformed_slicing, toolpath_3d dans le repere de sortie, `offset` = repere
+    Bird -> sortie) ; `skin` : zones.compute ; `paths` : paths.trace.
+    Rend {passes, report, excluded, collision_points, monotone_ranks}."""
+    t_all = time.time()
+    monotone, zones, sequence = _skin_sequence(body, skin, paths, exclude, log)
+    skin_angles, over_tol = _skin_head_angles(zones, paths, machine, tolerance, feed, log)
+
+    # --- 3. collisions avec la vraie tete -----------------------------------------
+    reach = sim.safety_margin + machine.nozzle_diameter / 2
+    head = _surface_sample_points(machine.nozzle_model, sim.toolhead_sample_spacing)
+    head = _filter_nozzle_contact_zone(head, sim.nozzle_contact_clearance)
+    report, t0 = {}, time.time()
+    collision_points = []
+    native = _skin_check_native()
+    if native is not None:
+        # Meme controle en C++ (apex/skin_check.hpp) : memes obstacles, meme distance bornee, meme densification.
+        tested = _check_native(native, sequence, body, paths, skin_angles, offset, head, machine, sim, plate_r,
+                               reach, _DENSIFY, tolerance, over_tol, report, collision_points)
+    else:
+        tested = _check_python(sequence, _CheckContext(body, paths, skin_angles, offset, head, machine, sim,
+                                                       plate_r, reach, tolerance, over_tol, report,
+                                                       collision_points))
+    if log: print(f"collisions : {tested} points de lissage testes en {time.time() - t0:.1f} s", flush=True)
+
+    excluded = _log_exclusions(report, tolerance, log)
     excluded_set = set(excluded)
     passes = []
     for kind, ref in sequence:
