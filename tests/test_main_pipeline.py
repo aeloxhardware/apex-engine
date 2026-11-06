@@ -361,7 +361,7 @@ def test_support_check_wired_in_both_orchestrators():
     import scripts.export_slicing_preview as preview_module
 
     main_source = inspect.getsource(main_module)  # module entier : run_pipeline delegue a des helpers
-    preview_source = inspect.getsource(preview_module.run_slicing_only)
+    preview_source = inspect.getsource(preview_module)  # module entier : run_slicing_only delegue a des helpers
 
     for name, source in (("run_pipeline", main_source), ("run_slicing_only", preview_source)):
         assert "support_check_run(" in source, (

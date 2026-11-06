@@ -369,6 +369,43 @@ def partition(z: SkinZones, edge_face_angle: float = EDGE_FACE_ANGLE_DEG, facet_
                            edge_face_angle, facet_smoothing, micro_inradius)
 
 
+def _assign_bands(piece2, band_moments: dict, moment2, last2, n_edge_pieces: int, n_faces: int):
+    """Bande de chaque face : plus petit moment choisi >= moment porteur ET <= dernier moment accessible."""
+    band = np.full(n_faces, -1)
+    for p in range(n_edge_pieces):
+        sel = np.flatnonzero(piece2 == p)
+        pts = band_moments[p]
+        j = np.searchsorted(pts, moment2[sel], side="left")
+        ok = j < len(pts)
+        ok[ok] = pts[j[ok]] <= last2[sel][ok]
+        # repli (rare) : premier moment choisi valide pour la face
+        for q in np.flatnonzero(~ok):
+            valid = np.flatnonzero((pts >= moment2[sel[q]]) & (pts <= last2[sel[q]]))
+            j[q] = valid[0] if len(valid) else -1
+        band[sel] = np.where(j >= 0, j, -1)
+    return band
+
+
+def _connected_zones(f, areas2, status2, piece2, band, moment2):
+    """Zones = composantes connexes de (morceau, bande) ; les zones sous MIN_ZONE_AREA passent au statut 5.
+    Retourne `(zone par face, zone_moment)`."""
+    zone = np.full(len(f), -1)
+    zone_moment = []
+    kept2 = np.flatnonzero((status2 == 0) & (band >= 0))
+    adj2 = face_adjacency(f[kept2]).tocoo()
+    same = (piece2[kept2][adj2.row] == piece2[kept2][adj2.col]) & (band[kept2][adj2.row] == band[kept2][adj2.col])
+    g2 = coo_matrix((np.ones(same.sum()), (adj2.row[same], adj2.col[same])), shape=(len(kept2),) * 2)
+    _n, comp = connected_components(g2, directed=False)
+    for c in range(comp.max() + 1 if len(kept2) else 0):
+        ids = kept2[comp == c]
+        if areas2[ids].sum() < MIN_ZONE_AREA:
+            status2[ids] = 5
+            continue
+        zone[ids] = len(zone_moment)
+        zone_moment.append(int(moment2[ids].max()))          # au plus tot
+    return zone, np.array(zone_moment, dtype=int)
+
+
 def _partition_core(surf_vertices, faces, surf_phi, normals, angles, status, moment, last, areas, isovalues,
                     edge_face_angle, facet_smoothing, micro_inradius) -> dict:
     n_faces = len(faces)
@@ -407,37 +444,8 @@ def _partition_core(surf_vertices, faces, surf_phi, normals, angles, status, mom
     # attributs herites de la face d'origine ; moment porteur recalcule
     status2, piece2, last2 = status[origin], piece[origin], last[origin]
     moment2 = layer_rank(phi[f].max(axis=1), isovalues)
-    band = np.full(len(f), -1)
-    for p in range(n_edge_pieces):
-        sel = np.flatnonzero(piece2 == p)
-        pts = band_moments[p]
-        # plus petit moment choisi >= moment porteur ET <= dernier moment accessible
-        j = np.searchsorted(pts, moment2[sel], side="left")
-        ok = j < len(pts)
-        ok[ok] = pts[j[ok]] <= last2[sel][ok]
-        # repli (rare) : premier moment choisi valide pour la face
-        for q in np.flatnonzero(~ok):
-            valid = np.flatnonzero((pts >= moment2[sel[q]]) & (pts <= last2[sel[q]]))
-            j[q] = valid[0] if len(valid) else -1
-        band[sel] = np.where(j >= 0, j, -1)
-    # zones = composantes connexes de (morceau, bande)
-    tri2 = v[f]
-    areas2 = 0.5 * np.linalg.norm(np.cross(tri2[:, 1] - tri2[:, 0], tri2[:, 2] - tri2[:, 0]), axis=1)
-    zone = np.full(len(f), -1)
-    zone_moment = []
-    kept2 = np.flatnonzero((status2 == 0) & (band >= 0))
-    adj2 = face_adjacency(f[kept2]).tocoo()
-    same = (piece2[kept2][adj2.row] == piece2[kept2][adj2.col]) & (band[kept2][adj2.row] == band[kept2][adj2.col])
-    g2 = coo_matrix((np.ones(same.sum()), (adj2.row[same], adj2.col[same])), shape=(len(kept2),) * 2)
-    _n, comp = connected_components(g2, directed=False)
-    for c in range(comp.max() + 1 if len(kept2) else 0):
-        ids = kept2[comp == c]
-        if areas2[ids].sum() < MIN_ZONE_AREA:
-            status2[ids] = 5
-            continue
-        zone[ids] = len(zone_moment)
-        zone_moment.append(int(moment2[ids].max()))          # au plus tot
-    zone_moment = np.array(zone_moment, dtype=int)
+    band = _assign_bands(piece2, band_moments, moment2, last2, n_edge_pieces, len(f))
+    zone, zone_moment = _connected_zones(f, areas2, status2, piece2, band, moment2)
     # micro-zones : rattachees a une voisine si la fusion reste accessible,
     # sinon NON lissees (decision utilisateur du 2026-09-28) -- statut 6, hors zone,
     # donc ni creusees par P3 ni tracees par P4

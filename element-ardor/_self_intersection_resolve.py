@@ -1,28 +1,14 @@
 """
-Resolution des auto-intersections d'une surface fermee (« outer hull »).
+Resolution des auto-intersections d'une surface fermee (« outer hull »). Contrairement a une EXCISION locale
+(`step1_ingest._repair_local_self_intersections`), qui ne peut pas traiter deux volumes qui s'INTERPENETRENT
+sans detacher un morceau, ce module resout le probleme a sa racine : 1. on decoupe chaque triangle le long de
+sa courbe d'intersection avec les autres (surface CONFORME) ; 2. on jette les morceaux strictement A
+L'INTERIEUR de la matiere, en ne gardant que l'enveloppe exterieure.
 
-Contrairement a une EXCISION locale (retirer les faces fautives puis
-reboucher le trou, cf. `step1_ingest._repair_local_self_intersections`),
-qui ne peut pas traiter deux volumes de matiere qui s'INTERPENETRENT
-reellement sans detacher un morceau, ce module resout le probleme a sa
-racine :
-
-  1. on decoupe chaque triangle le long de sa courbe d'intersection avec
-     les autres triangles (la surface devient CONFORME : plus aucun
-     interieur de triangle n'en traverse un autre) ;
-  2. on jette les morceaux qui se retrouvent strictement A L'INTERIEUR de
-     la matiere, en ne gardant que l'enveloppe exterieure.
-
-Le critere d'interiorite est le NOMBRE D'ENROULEMENT generalise (somme
-d'angles solides), et non un test de parite par lancer de rayon : sur une
-surface qui se recouvre elle-meme, la parite compte un point du
-recouvrement double comme EXTERIEUR (semantique XOR), alors que
-l'enroulement le compte correctement comme interieur (semantique UNION) -
-c'est exactement la configuration a traiter ici.
-
-Mesure ayant motive ce module (`res/test_models/turkish.stl`) : deux
-nervures issues d'un export booleen CSG se traversent, avec ~0.12 mm2 de
-recouvrement coplanaire reparti sur trois plans horizontaux.
+Critere d'interiorite : le NOMBRE D'ENROULEMENT generalise (somme d'angles solides), pas la parite d'un lancer
+de rayon (qui compte un recouvrement double comme EXTERIEUR, semantique XOR, alors que l'enroulement le compte
+comme interieur, semantique UNION). Mesure ayant motive ce module (`res/test_models/turkish.stl`) : deux
+nervures d'un export booleen CSG se traversent, ~0.12 mm2 de recouvrement coplanaire sur trois plans.
 """
 
 import numpy as np
@@ -32,12 +18,8 @@ import trimesh
 from core import _cpp
 
 _EPS = 1e-10
-# Tolerance d'equivalence pas 9 (triangle_triangle_segment) : le C++ resout
-# le meme systeme 3x3 par cofacteurs plutot que LAPACK (np.linalg.solve),
-# mesure a ~1e-14 relatif d'ecart - jamais le bit, voir
-# cpp/include/apex/mesh_intersect.hpp. Tolerance choisie tres au-dessus de
-# ce bruit et tres en dessous des tolerances propres du module (_EPS,
-# snap_tolerance >= 1e-9 * scale).
+# Tolerance d'equivalence pas 9 (triangle_triangle_segment) : le C++ resout le meme systeme 3x3 par cofacteurs
+# plutot que LAPACK, ~1e-14 relatif d'ecart (cpp/include/apex/mesh_intersect.hpp).
 _NATIVE_SEGMENT_TOLERANCE = 1e-9
 
 
@@ -476,39 +458,9 @@ def _split_keyhole_polygon(polygon, tolerance):
     return [simple]
 
 
-def _subdivide_face(triangle, segments, extra_edge_points, tolerance, node_points=None):
-    """
-    Decoupe un triangle par ses segments d'intersection, dans son propre
-    plan (donc sans aucune perte : le triangle est plan par construction,
-    tout point 2D se releve exactement en 3D).
-
-    Le BORD n'est PAS passe comme un anneau d'un seul tenant mais comme
-    trois aretes explicitement SUBDIVISEES aux points imposes
-    (`extra_edge_points`). C'est ce qui garantit la CONFORMITE entre deux
-    faces voisines : chacune doit porter exactement les memes sommets sur
-    l'arete qu'elles partagent, sinon la surface recollee presente une
-    fissure. Un mecanisme approximatif (materialiser le point par un
-    micro-segment) a ete essaye puis abandonne - mesure : maillage final
-    non etanche, euler=1 au lieu de 2.
-
-    Retourne la liste des sous-triangles en 3D, ou None si la decoupe echoue.
-    """
-    from shapely.geometry import LineString, Polygon
-    from shapely.ops import polygonize, unary_union
-    from trimesh.creation import triangulate_polygon
-
-    frame = _plane_frame(triangle)
-    if frame is None:
-        return None
-    corners_2d = _project(triangle, frame)
-    snap_tolerance = max(
-        tolerance, 1e-9 * float(np.max(np.abs(corners_2d)) + 1.0)
-    )
-
-    extras_2d = (
-        _project(np.asarray(extra_edge_points), frame)
-        if len(extra_edge_points) else np.zeros((0, 2))
-    )
+def _boundary_edge_lines(corners_2d, extras_2d, snap_tolerance: float, tolerance: float) -> list:
+    """Les trois aretes du triangle, explicitement SUBDIVISEES aux points imposes (`extras_2d`)."""
+    from shapely.geometry import LineString
 
     lines = []
     for index in range(3):
@@ -527,11 +479,9 @@ def _subdivide_face(triangle, segments, extra_edge_points, tolerance, node_point
             if float(np.linalg.norm(point - projected)) > snap_tolerance:
                 continue
             chain.append((ratio, projected))
-        # Deduplication des points de la chaine, JAMAIS un saut de
-        # sous-segment : sauter un sous-segment trop court TROUE l'anneau de
-        # bord, et `polygonize` ne peut alors plus refermer la grande region
-        # restante. Mesure du defaut : 4 faces sur 12 ne conservaient que 8 a
-        # 70 % de leur aire d'origine, d'ou une surface finale non etanche.
+        # Deduplication des points de la chaine, JAMAIS un saut de sous-segment : sauter un sous-segment trop
+        # court TROUE l'anneau de bord, et `polygonize` ne peut plus refermer la grande region restante
+        # (mesure : 4 faces sur 12 ne conservaient que 8 a 70 % de leur aire, surface finale non etanche).
         chain.sort(key=lambda item: item[0])
         deduplicated = [chain[0]]
         for item in chain[1:]:
@@ -545,14 +495,18 @@ def _subdivide_face(triangle, segments, extra_edge_points, tolerance, node_point
             lines.append(LineString([
                 deduplicated[position][1], deduplicated[position + 1][1]
             ]))
+    return lines
 
-    # Les courbes d'intersection doivent etre nodees GLOBALEMENT : un point
-    # ou la courbe traverse une arete du maillage scinde le segment dans une
-    # face mais pas forcement dans la face d'en face, ce qui cree une
-    # JONCTION EN T (mesure : une arete [0.1,-0.63,1]->[0.1,0.94,1] d'un
-    # cote, deux aretes coupees en [0.1,0.1,1] de l'autre). On reinjecte donc
-    # dans chaque segment tous les points-noeuds qui tombent dessus.
-    nodes_3d = node_points if node_points is not None else np.zeros((0, 3))
+
+def _intersection_segment_lines(segments, nodes_3d, frame, corners_2d, snap_tolerance: float,
+                                tolerance: float) -> list:
+    """Segments d'intersection nodes GLOBALEMENT : un point ou la courbe traverse une arete du maillage scinde
+    le segment dans une face mais pas forcement dans la face d'en face (JONCTION EN T, mesure : une arete
+    [0.1,-0.63,1]->[0.1,0.94,1] d'un cote, deux aretes coupees en [0.1,0.1,1] de l'autre). On reinjecte donc
+    dans chaque segment tous les points-noeuds qui tombent dessus."""
+    from shapely.geometry import LineString
+
+    lines = []
     for (start, end) in segments:
         direction = end - start
         length = float(np.linalg.norm(direction))
@@ -582,19 +536,13 @@ def _subdivide_face(triangle, segments, extra_edge_points, tolerance, node_point
             if float(np.linalg.norm(projected[position + 1] - projected[position])) < tolerance:
                 continue
             lines.append(LineString([projected[position], projected[position + 1]]))
+    return lines
 
-    if not lines:
-        return None
-    lines = _weld_line_endpoints(lines, snap_tolerance, tolerance)
-    if not lines:
-        return None
-    try:
-        arrangement = unary_union(lines)
-        polygons = [p for p in polygonize(arrangement) if p.area > tolerance ** 2]
-    except Exception:
-        return None
-    if not polygons:
-        return None
+
+def _triangulate_polygons(polygons, corners_2d, frame, snap_tolerance: float, tolerance: float):
+    """Triangule les polygones dont le point representatif est dans le triangle ; None si l'un echoue."""
+    from shapely.geometry import Polygon
+    from trimesh.creation import triangulate_polygon
 
     triangle_polygon = Polygon(corners_2d)
     output = []
@@ -614,6 +562,53 @@ def _subdivide_face(triangle, segments, extra_edge_points, tolerance, node_point
             vertices_3d = _unproject(vertices_2d, frame)
             for face in faces_2d:
                 output.append(vertices_3d[face])
+    return output
+
+
+def _subdivide_face(triangle, segments, extra_edge_points, tolerance, node_points=None):
+    """
+    Decoupe un triangle par ses segments d'intersection, dans son propre plan (donc sans aucune perte : le
+    triangle est plan par construction, tout point 2D se releve exactement en 3D).
+
+    Le BORD n'est PAS passe comme un anneau d'un seul tenant mais comme trois aretes explicitement SUBDIVISEES
+    aux points imposes (`extra_edge_points`) : c'est ce qui garantit la CONFORMITE entre deux faces voisines
+    (memes sommets sur l'arete partagee, sinon fissure). Un mecanisme approximatif (micro-segment) a ete
+    essaye puis abandonne - mesure : maillage final non etanche, euler=1 au lieu de 2.
+
+    Retourne la liste des sous-triangles en 3D, ou None si la decoupe echoue.
+    """
+    from shapely.ops import polygonize, unary_union
+
+    frame = _plane_frame(triangle)
+    if frame is None:
+        return None
+    corners_2d = _project(triangle, frame)
+    snap_tolerance = max(
+        tolerance, 1e-9 * float(np.max(np.abs(corners_2d)) + 1.0)
+    )
+    extras_2d = (
+        _project(np.asarray(extra_edge_points), frame)
+        if len(extra_edge_points) else np.zeros((0, 2))
+    )
+
+    lines = _boundary_edge_lines(corners_2d, extras_2d, snap_tolerance, tolerance)
+    nodes_3d = node_points if node_points is not None else np.zeros((0, 3))
+    lines.extend(_intersection_segment_lines(segments, nodes_3d, frame, corners_2d, snap_tolerance, tolerance))
+
+    if not lines:
+        return None
+    lines = _weld_line_endpoints(lines, snap_tolerance, tolerance)
+    if not lines:
+        return None
+    try:
+        arrangement = unary_union(lines)
+        polygons = [p for p in polygonize(arrangement) if p.area > tolerance ** 2]
+    except Exception:
+        return None
+    if not polygons:
+        return None
+
+    output = _triangulate_polygons(polygons, corners_2d, frame, snap_tolerance, tolerance)
     return output or None
 
 
