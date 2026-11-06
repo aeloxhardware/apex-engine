@@ -1,3 +1,4 @@
+#define _USE_MATH_DEFINES  // M_PI sous MSVC
 // TetraNet — prototype : réseau BCC, tri dedans/dehors, ramené à la peau (snap).
 #include "tetranet/tetranet.hpp"
 
