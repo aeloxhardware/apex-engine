@@ -117,7 +117,8 @@ def run(
     skin = traced = p5 = None
     for it in range(1, params.max_iter + 1):
         skin = timed("P2 partition", zones.partition, z, trim_points=trim, trim_radius=params.trim_radius)
-        traced = timed("P4 trajectoires", skin_paths.trace, skin, pattern=params.pattern, thickness=params.thickness,
+        traced = timed("P4 trajectoires", skin_paths.trace, skin,
+                       skin_paths.TraceOptions(pattern=params.pattern, thickness=params.thickness),
                        cache=trace_cache)
         p5 = timed("P5 controle (boucle)", print_order.order_and_check, body_uncarved, skin, traced, machine, loop_sim,
                    offset, tolerance=params.head_tolerance_deg, plate_r=plate_r)

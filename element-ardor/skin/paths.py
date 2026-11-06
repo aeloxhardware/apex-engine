@@ -29,6 +29,7 @@ import os
 import pickle
 import sys
 import time
+from dataclasses import dataclass
 
 import numpy as np
 import trimesh
@@ -80,13 +81,28 @@ def resample(path):
     return np.vstack(out)
 
 
-def zone_paths(zm, face_normals, pattern, angle, overlap, thickness, order, width, edge_rings=1,
-               edge_overlap=sp.EDGE_OVERLAP, remedy=None):
+@dataclass(frozen=True)
+class ZoneStyle:
+    """Reglages de trace d'une zone (entree de `zone_paths`)."""
+    pattern: str
+    angle: float
+    overlap: float
+    thickness: float
+    order: str
+    width: float
+    edge_rings: int = 1
+    edge_overlap: float = sp.EDGE_OVERLAP
+    remedy: str | None = None
+
+
+def zone_paths(zm, face_normals, style: ZoneStyle):
     """Trajectoires d'une zone. Pour Hilbert : part de surface etiree par le
     depliage ; au-dela de sp.HILBERT_WARN_FRACTION sans remede choisi, la zone
     est tracee telle quelle (A) et un AVERTISSEMENT structure est rendu (choix
     A / B / C expliques, pour l'interface) ; remede B = decoupe, C = grille
     resserree."""
+    pattern, angle, overlap, thickness, order = style.pattern, style.angle, style.overlap, style.thickness, style.order
+    width, edge_rings, edge_overlap, remedy = style.width, style.edge_rings, style.edge_overlap, style.remedy
     d_edge = zm.distance_to_boundary()
     warning, kw = None, {}
     fn = pattern
@@ -162,9 +178,25 @@ def dedupe_shared_passes(out, width, radius_factor=0.5, min_cos=0.9):
 
 
 
-def trace(skin, pattern="rectilinear", zone_pattern=None, line_angle=45.0, zone_angle=None, overlap=0.2,
-          thickness=0.2, order="outside_in", only=None, edge_rings=1, edge_overlap=sp.EDGE_OVERLAP,
-          remedy=None, zone_remedy=None, dedupe=True, log=False, cache=None):
+@dataclass(frozen=True)
+class TraceOptions:
+    """Reglages de `trace` (memes noms et defauts que les anciens parametres nommes)."""
+    pattern: str = "rectilinear"
+    zone_pattern: dict | None = None
+    line_angle: float = 45.0
+    zone_angle: dict | None = None
+    overlap: float = 0.2
+    thickness: float = 0.2
+    order: str = "outside_in"
+    only: object = None
+    edge_rings: int = 1
+    edge_overlap: float = sp.EDGE_OVERLAP
+    remedy: str | None = None
+    zone_remedy: dict | None = None
+    dedupe: bool = True
+
+
+def trace(skin, options: TraceOptions | None = None, log=False, cache=None):
     """Trajectoires de lissage de toutes les zones (P4), en memoire. `skin` :
     sortie de zones.compute. Rend {zone: entree} (ce que la recherche ecrivait
     dans _skin_paths_pass<k>.pkl, cle "zones").
@@ -174,10 +206,13 @@ def trace(skin, pattern="rectilinear", zone_pattern=None, line_angle=45.0, zone_
     normales, aires, parametres). La boucle de rognage retrace a chaque tour des
     zones inchangees : elles sont reprises du cache, resultat identique (copie
     profonde, `dedupe_shared_passes` modifiant les entrees ensuite)."""
+    o = options or TraceOptions()
+    pattern, line_angle, overlap, thickness, order = o.pattern, o.line_angle, o.overlap, o.thickness, o.order
+    only, edge_rings, edge_overlap, remedy, dedupe = o.only, o.edge_rings, o.edge_overlap, o.remedy, o.dedupe
     general = pattern
-    zone_pattern = zone_pattern or {}
-    zone_angle = zone_angle or {}
-    zone_remedy = zone_remedy or {}
+    zone_pattern = o.zone_pattern or {}
+    zone_angle = o.zone_angle or {}
+    zone_remedy = o.zone_remedy or {}
     for name in [general, *zone_pattern.values()]:
         if name not in sp.PATTERNS:
             raise ValueError(f"motif inconnu : {name} (disponibles : {', '.join(sp.PATTERNS)})")
@@ -217,9 +252,10 @@ def trace(skin, pattern="rectilinear", zone_pattern=None, line_angle=45.0, zone_
                 continue
         try:
             zm = sp.ZoneMesh(skin["vertices"], skin["faces"][faces])
-            paths, pnormals, _d, warning = zone_paths(zm, normals[faces], pattern, angle, overlap, thickness,
-                                                      order, width, edge_rings, edge_overlap,
-                                                      zone_remedy.get(z, remedy))
+            paths, pnormals, _d, warning = zone_paths(
+                zm, normals[faces],
+                ZoneStyle(pattern, angle, overlap, thickness, order, width, edge_rings, edge_overlap,
+                          zone_remedy.get(z, remedy)))
             if warning:
                 entry["warning"] = warning
             entry.update(paths=paths, normals=pnormals, extrusion=[1.0] * len(paths))
