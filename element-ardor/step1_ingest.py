@@ -448,40 +448,14 @@ def _build_half_edge_map(faces: np.ndarray):
     return half_edges
 
 
-def _boundary_loops_oriented(faces: np.ndarray):
-    """
-    Boucles de bord ORIENTEES d'un maillage triangulaire ouvert.
-
-    Chaque arete de bord appartient a exactement UNE face, dont le winding
-    lui donne une direction canonique. Le successeur de `(u, v)` s'obtient
-    en PIVOTANT autour de `v` a travers l'eventail de faces incidentes
-    jusqu'a la prochaine demi-arete sans face opposee. C'est ce pivot qui
-    leve l'ambiguite a un sommet de PINCEMENT (ou plusieurs eventails se
-    rejoignent) : il apparie les demi-aretes entrantes et sortantes PAR
-    EVENTAIL, information qu'un graphe non oriente a deja perdue.
-
-    `trimesh.outline()` ne convient PAS ici (verifie par lecture directe des
-    sources, pas suppose) : il passe par `edges_sorted` - le tri detruit la
-    direction portee par le winding - puis par un parcours en profondeur sur
-    graphe NON ORIENTE (`trimesh.graph.traversals`, `directed=False`), et
-    rend des polylignes qui ne sont meme pas garanties fermees.
-
-    Retourne une liste de boucles (listes d'indices de sommets, sans point
-    de fermeture duplique), ou None si le maillage est non-manifold ou si un
-    invariant de correction est viole.
-    """
-    half_edges = _build_half_edge_map(faces)
-    if half_edges is None:
-        return None
-
+def _boundary_successors(half_edges: dict, faces: np.ndarray, boundary: list):
+    """Successeur de chaque demi-arete de bord : on PIVOTE autour du sommet d'arrivee a travers l'eventail de
+    faces incidentes jusqu'a la prochaine demi-arete sans face opposee. Retourne None si un eventail n'est pas
+    ferme (geometrie incoherente)."""
     def next_in_face(half_edge):
         face_index, corner = half_edges[half_edge]
         triangle = faces[face_index]
         return (int(triangle[(corner + 1) % 3]), int(triangle[(corner + 2) % 3]))
-
-    boundary = [h for h in half_edges if (h[1], h[0]) not in half_edges]
-    if not boundary:
-        return []
 
     successor: dict = {}
     for start in boundary:
@@ -496,12 +470,10 @@ def _boundary_loops_oriented(faces: np.ndarray):
                 successor[start] = current
                 break
             current = (current[1], current[0])
+    return successor
 
-    # `successor` doit etre une BIJECTION sur les demi-aretes de bord :
-    # invariant de correction bon marche et tres discriminant.
-    if len(set(successor.values())) != len(boundary):
-        return None
 
+def _boundary_cycles(boundary: list, successor: dict):
     visited: set = set()
     cycles = []
     for start in sorted(boundary):
@@ -518,12 +490,13 @@ def _boundary_loops_oriented(faces: np.ndarray):
         cycles.append(cycle)
     if sum(len(c) for c in cycles) != len(boundary):
         return None
+    return cycles
 
-    # Un cycle peut visiter deux fois le meme sommet : c'est CORRECT (le bord
-    # se touche en un point) mais la triangulation le refuse. Scission en
-    # sous-boucles simples ; l'ordre du cycle encode deja l'appariement par
-    # eventail, donc cette scission est univoque - contrairement a celle d'un
-    # parcours non oriente, qui devine.
+
+def _split_cycles_into_simple_loops(cycles: list):
+    """Un cycle peut visiter deux fois le meme sommet : c'est CORRECT (le bord se touche en un point) mais la
+    triangulation le refuse. Scission en sous-boucles simples ; l'ordre du cycle encode deja l'appariement par
+    eventail, donc la scission est univoque - contrairement a celle d'un parcours non oriente, qui devine."""
     loops = []
     for cycle in cycles:
         sequence = [h[0] for h in cycle]
@@ -549,6 +522,93 @@ def _boundary_loops_oriented(faces: np.ndarray):
     return loops
 
 
+def _boundary_loops_oriented(faces: np.ndarray):
+    """
+    Boucles de bord ORIENTEES d'un maillage triangulaire ouvert.
+
+    Chaque arete de bord appartient a exactement UNE face, dont le winding lui donne une direction canonique ;
+    le successeur de `(u, v)` s'obtient en PIVOTANT autour de `v` (`_boundary_successors`), ce qui leve
+    l'ambiguite a un sommet de PINCEMENT. `trimesh.outline()` ne convient PAS (verifie dans les sources) : le
+    tri des aretes detruit la direction du winding et le parcours est non oriente, sans garantie de fermeture.
+
+    Retourne une liste de boucles (listes d'indices de sommets, sans point de fermeture duplique), ou None si
+    le maillage est non-manifold ou si un invariant de correction est viole.
+    """
+    half_edges = _build_half_edge_map(faces)
+    if half_edges is None:
+        return None
+    boundary = [h for h in half_edges if (h[1], h[0]) not in half_edges]
+    if not boundary:
+        return []
+    successor = _boundary_successors(half_edges, faces, boundary)
+    if successor is None:
+        return None
+    # `successor` doit etre une BIJECTION sur les demi-aretes de bord : invariant bon marche et discriminant.
+    if len(set(successor.values())) != len(boundary):
+        return None
+    cycles = _boundary_cycles(boundary, successor)
+    if cycles is None:
+        return None
+    return _split_cycles_into_simple_loops(cycles)
+
+
+class _LoopTriangleWeights:
+    """Poids (aire, ou infini si interdit) des triangles candidats `(i, k, j)` du bouchage d'une boucle, avec
+    cache. Deux contraintes DANS le DP, sous forme de poids infini : 1. UNICITE D'ARETE (une corde ne duplique
+    pas une arete deja presente ; sinon des aretes portees par 4 faces) ; 2. NON-INTERSECTION avec la surface
+    conservee et les patchs acceptes (SAT, `_triangles_cross`) - verification qui manquait au repli en eventail."""
+
+    def __init__(self, loop, vertices, blocked_edges, obstacle_faces, obstacle_triangles, obstacle_tree,
+                 accepted_triangles):
+        self.loop, self.vertices, self.blocked_edges = loop, vertices, blocked_edges
+        self.obstacle_faces, self.obstacle_triangles = obstacle_faces, obstacle_triangles
+        self.obstacle_tree, self.accepted_triangles = obstacle_tree, accepted_triangles
+        self.n = len(loop)
+        self.cache: dict = {}
+
+    def _chord_blocked(self, i: int, k: int, j: int) -> bool:
+        loop, n = self.loop, self.n
+        for (x, y) in ((i, k), (k, j), (i, j)):
+            separation = abs(x - y)
+            if separation == 1 or separation == n - 1:
+                continue  # arete de bord de la boucle, pas une corde
+            if tuple(sorted((loop[x], loop[y]))) in self.blocked_edges:
+                return True
+        return False
+
+    def _crosses_anything(self, a: int, b: int, c: int, candidate: np.ndarray) -> bool:
+        own = {a, b, c}
+        query = np.concatenate([candidate.min(axis=0), candidate.max(axis=0)])
+        for other in self.obstacle_tree.intersection(query):
+            other = int(other)
+            if own & {int(v) for v in self.obstacle_faces[other]}:
+                continue  # sommet partage : contact par construction
+            if _triangles_cross(candidate, self.obstacle_triangles[other]):
+                return True
+        for (oa, ob, oc) in self.accepted_triangles:
+            if own & {oa, ob, oc}:
+                continue
+            if _triangles_cross(candidate, self.vertices[[oa, ob, oc]]):
+                return True
+        return False
+
+    def weight(self, i: int, k: int, j: int) -> float:
+        key = (i, k, j)
+        cached = self.cache.get(key)
+        if cached is not None:
+            return cached
+        a, b, c = self.loop[i], self.loop[k], self.loop[j]
+        pa, pb, pc = self.vertices[a], self.vertices[b], self.vertices[c]
+        area = 0.5 * float(np.linalg.norm(np.cross(pb - pa, pc - pa)))
+        result = area
+        if area < _LOCAL_REPAIR_MIN_TRIANGLE_AREA or self._chord_blocked(i, k, j):
+            result = math.inf
+        elif self._crosses_anything(a, b, c, np.array([pa, pb, pc])):
+            result = math.inf
+        self.cache[key] = result
+        return result
+
+
 def _fill_loop_min_weight(
     loop,
     vertices: np.ndarray,
@@ -559,74 +619,17 @@ def _fill_loop_min_weight(
     accepted_triangles: list,
 ):
     """
-    Triangulation a POIDS MINIMAL de la boucle `loop` (Klincsek, O(n^3)).
-
-    `best_cost[i][j]` = cout minimal de trianguler le sous-contour `i..j`,
-    cout d'un triangle = son aire. C'est l'algorithme classique de bouchage
-    de trou (Barequet-Sharir) : il choisit une triangulation respectant la
-    forme 3D reelle de la boucle, au lieu de l'aplatir sur un plan moyen.
-
-    Deux contraintes sont integrees DANS le DP sous forme de poids infini,
-    et non verifiees apres coup - un patch invalide rend donc la
-    triangulation infaisable au lieu d'etre accepte puis regrette :
-      1. UNICITE D'ARETE : une corde ne doit pas dupliquer une arete deja
-         presente. Sans elle, mesure directe : des aretes se retrouvaient
-         portees par 4 faces et le maillage n'etait pas etanche.
-      2. NON-INTERSECTION : le triangle candidat ne doit croiser ni la
-         surface conservee ni un patch deja accepte (SAT, `_triangles_cross`).
-         C'est exactement la verification qui manquait au repli en eventail,
-         lequel creait de NOUVELLES auto-intersections (mesure : TetGen
-         nommait les sommets d'eventail synthetiques comme fautifs).
-
-    Retourne la liste des triangles `(a, b, c)`, ou None si aucune
-    triangulation valide n'existe.
+    Triangulation a POIDS MINIMAL de la boucle `loop` (Klincsek, O(n^3)) : `best_cost[i][j]` = cout minimal du
+    sous-contour `i..j`, cout d'un triangle = son aire (algorithme classique de bouchage de trou, Barequet-
+    Sharir : respecte la forme 3D de la boucle au lieu de l'aplatir). Contraintes dans le DP : voir
+    `_LoopTriangleWeights`. Retourne la liste des triangles `(a, b, c)`, ou None si aucune triangulation
+    valide n'existe.
     """
     n = len(loop)
     if n < 3:
         return None
-
-    weight_cache: dict = {}
-
-    def triangle_weight(i: int, k: int, j: int) -> float:
-        key = (i, k, j)
-        cached = weight_cache.get(key)
-        if cached is not None:
-            return cached
-        a, b, c = loop[i], loop[k], loop[j]
-        pa, pb, pc = vertices[a], vertices[b], vertices[c]
-        area = 0.5 * float(np.linalg.norm(np.cross(pb - pa, pc - pa)))
-        result = area
-        if area < _LOCAL_REPAIR_MIN_TRIANGLE_AREA:
-            result = math.inf
-        else:
-            for (x, y) in ((i, k), (k, j), (i, j)):
-                separation = abs(x - y)
-                if separation == 1 or separation == n - 1:
-                    continue  # arete de bord de la boucle, pas une corde
-                if tuple(sorted((loop[x], loop[y]))) in blocked_edges:
-                    result = math.inf
-                    break
-        if result != math.inf:
-            candidate = np.array([pa, pb, pc])
-            own = {a, b, c}
-            query = np.concatenate([candidate.min(axis=0), candidate.max(axis=0)])
-            for other in obstacle_tree.intersection(query):
-                other = int(other)
-                if own & {int(v) for v in obstacle_faces[other]}:
-                    continue  # sommet partage : contact par construction
-                if _triangles_cross(candidate, obstacle_triangles[other]):
-                    result = math.inf
-                    break
-            if result != math.inf:
-                for (oa, ob, oc) in accepted_triangles:
-                    if own & {oa, ob, oc}:
-                        continue
-                    if _triangles_cross(candidate, vertices[[oa, ob, oc]]):
-                        result = math.inf
-                        break
-        weight_cache[key] = result
-        return result
-
+    weights = _LoopTriangleWeights(loop, vertices, blocked_edges, obstacle_faces, obstacle_triangles,
+                                   obstacle_tree, accepted_triangles)
     best_cost = [[math.inf] * n for _ in range(n)]
     split_at = [[-1] * n for _ in range(n)]
     for i in range(n - 1):
@@ -641,7 +644,7 @@ def _fill_loop_min_weight(
                 right = best_cost[k][j]
                 if left == math.inf or right == math.inf:
                     continue
-                own_cost = triangle_weight(i, k, j)
+                own_cost = weights.weight(i, k, j)
                 if own_cost == math.inf:
                     continue
                 total = left + right + own_cost
@@ -662,15 +665,13 @@ def _fill_loop_min_weight(
         k = split_at[i][j]
         if k < 0:
             return None
-        # Winding INVERSE par rapport au sens de parcours du bord : c'est ce
-        # qui rend le maillage recolle coherent (mesure directe - emettre
-        # dans le sens de la boucle donne is_winding_consistent=False).
+        # Winding INVERSE par rapport au sens de parcours du bord : maillage recolle coherent (mesure directe).
         triangles.append((loop[j], loop[k], loop[i]))
         stack.append((i, k))
         stack.append((k, j))
 
-    # Filet de securite : deux triangles du MEME patch ne doivent pas se
-    # croiser non plus (le DP les evalue isolement, jamais deux a deux).
+    # Filet de securite : deux triangles du MEME patch ne doivent pas se croiser non plus (le DP les evalue
+    # isolement, jamais deux a deux).
     for x in range(len(triangles)):
         for y in range(x + 1, len(triangles)):
             if set(triangles[x]) & set(triangles[y]):
@@ -680,44 +681,76 @@ def _fill_loop_min_weight(
     return triangles
 
 
+def _fill_all_loops(loops: list, vertices, blocked_edges: set, kept_faces, kept_triangles, obstacle_tree):
+    """Rebouche chaque boucle ; retourne `(triangles acceptes, boucles en echec)`."""
+    accepted: list = []
+    failed = []
+    for loop in loops:
+        patch = _fill_loop_min_weight(
+            loop, vertices, blocked_edges, kept_faces, kept_triangles, obstacle_tree, accepted,
+        )
+        if patch is None:
+            failed.append(loop)
+            continue
+        accepted.extend(patch)
+        for (a, b, c) in patch:
+            for (x, y) in ((a, b), (b, c), (c, a)):
+                blocked_edges.add(tuple(sorted((int(x), int(y)))))
+    return accepted, failed
+
+
+def _validated_repair(mesh, vertices, kept_faces, accepted, initial_bad_count, body_count_before,
+                      require_euler_preserved: bool):
+    """Assemble le maillage repare et verifie ses post-conditions ; None si l'une est violee. La TOPOLOGIE doit
+    etre preservee : sur turkish.stl un retrait finissait par DETACHER un morceau (euler -14 -> -13, 1 corps ->
+    2) et TetGen echouait sur `recoversubfaces` sans plus signaler d'auto-intersection. Une reparation qui
+    change le nombre de corps ou la caracteristique d'Euler ne repare plus : elle mutile."""
+    all_faces = np.vstack([kept_faces, np.array(accepted, dtype=np.int64)]) if accepted else kept_faces
+    repaired = trimesh.Trimesh(vertices=vertices.copy(), faces=all_faces, process=False)
+    repaired.remove_unreferenced_vertices()
+    if not repaired.is_watertight or not repaired.is_winding_consistent:
+        return None
+    if require_euler_preserved and repaired.euler_number != mesh.euler_number:
+        return None
+    if len(repaired.split(only_watertight=False)) != body_count_before:
+        return None
+    if _count_self_intersecting_faces(repaired) >= initial_bad_count:
+        return None
+    return repaired
+
+
+def _grow_removed_around(failed: list, edge_to_faces: dict, removed: set) -> bool:
+    """Croissance CIBLEE : uniquement les faces bordant les boucles en echec (un trou a 3 sommets n'a qu'un
+    patch possible - la face retiree - donc son bord DOIT s'eloigner du croisement)."""
+    grew = False
+    for loop in failed:
+        size = len(loop)
+        for index in range(size):
+            key = tuple(sorted((loop[index], loop[(index + 1) % size])))
+            for face_index in edge_to_faces.get(key, ()):
+                if face_index not in removed:
+                    removed.add(face_index)
+                    grew = True
+    return grew
+
+
 def _repair_local_self_intersections(
     mesh: trimesh.Trimesh, extra_seed_faces=None, require_euler_preserved: bool = True,
 ):
     """
-    Retire les faces auto-intersectantes et rebouche les trous par
-    triangulation 3D a poids minimal, en laissant TOUT le reste du maillage
-    strictement intact.
+    Retire les faces auto-intersectantes et rebouche les trous par triangulation 3D a poids minimal, en
+    laissant TOUT le reste du maillage strictement intact (reparation CHIRURGICALE, contrairement a
+    `_repair_with_pymeshfix` qui reecrit tout et amputait turkish.stl de 10104 a 1488 faces).
 
-    `require_euler_preserved=False` desactive UNIQUEMENT le garde-fou de
-    caracteristique d'Euler ci-dessous (le garde de CONNEXITE - nombre de
-    corps preserve - reste actif dans tous les cas). Necessaire pour un
-    appelant dont le mesh d'entree a DEJA subi un changement topologique
-    legitime avant cet appel (ex : `resolve_self_intersections` +
-    `_close_small_boundary_loops`, qui ferme des trous residuels par
-    soudage de sommets - une operation qui change l'euler par construction,
-    pas une mutilation). Mesure sur turkish.stl : reparation de 8 faces
-    auto-intersectantes en 1 iteration, corps unique preserve, watertight,
-    winding coherent, 0 auto-intersection residuelle, ecart de volume
-    2.9e-6% - un resultat de tres haute fidelite que la garde stricte
-    rejetait a tort (euler -37 au lieu de -36, un decalage de 1 exactement
-    attendu pour la fermeture de boucles de tailles differentes de celles
-    retirees).
+    `require_euler_preserved=False` desactive UNIQUEMENT la garde de caracteristique d'Euler (la garde de
+    CONNEXITE reste active) : necessaire quand le mesh d'entree a DEJA subi un changement topologique
+    legitime (`resolve_self_intersections` + `_close_small_boundary_loops`). Mesure sur turkish.stl : 8 faces
+    reparees en 1 iteration, corps unique, watertight, ecart de volume 2.9e-6% (la garde stricte rejetait a
+    tort : euler -37 au lieu de -36). Reference : 50 faces auto-intersectantes, 99 retirees (0.98%) et 93
+    ajoutees en 4 iterations, etendue Z et euler preserves, ecart de volume 3.6e-4 %, 50 -> 0.
 
-    Contrairement a `_repair_with_pymeshfix` (qui reecrit le maillage entier
-    et peut en amputer une grande part - mesure sur turkish.stl : 10104 ->
-    1488 faces, hauteur tronquee de 90.78 a 63.26mm), cette reparation est
-    CHIRURGICALE : seules les faces effectivement fautives sont retirees, et
-    la zone n'est elargie que la ou le rebouchage echoue, trou par trou.
-
-    Mesure de reference sur `res/test_models/turkish.stl` : 50 faces
-    auto-intersectantes detectees, 99 faces retirees (0.98% du maillage) et
-    93 ajoutees apres convergence en 4 iterations ; etendue Z et
-    `euler_number` preserves a l'identique, ecart de volume 3.6e-4 %,
-    50 -> 0 auto-intersections.
-
-    Best-effort : retourne None (jamais une exception) si le defaut n'est
-    pas de cette nature - maillage non-manifold, boucle non rebouchable,
-    budget de retrait depasse, ou post-condition violee.
+    Best-effort : retourne None (jamais une exception) si le defaut n'est pas de cette nature - maillage
+    non-manifold, boucle non rebouchable, budget de retrait depasse, ou post-condition violee.
     """
     faces = np.asarray(mesh.faces, dtype=np.int64)
     vertices = np.asarray(mesh.vertices, dtype=np.float64)
@@ -726,12 +759,8 @@ def _repair_local_self_intersections(
 
     initial_bad = set(_find_self_intersecting_faces(mesh))
     if extra_seed_faces:
-        # Le test SAT ignore volontairement les paires partageant un sommet
-        # et ne voit pas les CONTACTS EXACTS (triangles coplanaires
-        # superposes, sommet pose sur une facette) - or c'est precisement ce
-        # que TetGen refuse. Mesure directe sur turkish.stl : apres avoir
-        # repare les 50 faces SAT, TetGen en signalait encore 40. Les faces
-        # qu'il nomme lui-meme sont donc indispensables a la graine.
+        # Le test SAT ignore les paires partageant un sommet et les CONTACTS EXACTS (coplanaires superposes,
+        # sommet pose sur une facette) que TetGen refuse (turkish.stl : 40 encore signalees apres les 50 SAT).
         initial_bad |= {int(i) for i in extra_seed_faces if 0 <= int(i) < len(faces)}
     if not initial_bad:
         return None  # rien a reparer : le maillage n'est jamais modifie
@@ -750,14 +779,10 @@ def _repair_local_self_intersections(
     for _iteration in range(_LOCAL_REPAIR_MAX_GROWTH_ITERATIONS):
         if len(removed) > max_removed:
             return None
-
-        kept_index = np.array(
-            [i for i in range(len(faces)) if i not in removed], dtype=np.int64
-        )
+        kept_index = np.array([i for i in range(len(faces)) if i not in removed], dtype=np.int64)
         if len(kept_index) == 0:
             return None
         kept_faces = faces[kept_index]
-
         loops = _boundary_loops_oriented(kept_faces)
         if loops is None:
             return None
@@ -770,62 +795,12 @@ def _repair_local_self_intersections(
                 blocked_edges.add(tuple(sorted(
                     (int(triangle[corner]), int(triangle[(corner + 1) % 3]))
                 )))
-
-        accepted: list = []
-        failed = []
-        for loop in loops:
-            patch = _fill_loop_min_weight(
-                loop, vertices, blocked_edges, kept_faces, kept_triangles,
-                obstacle_tree, accepted,
-            )
-            if patch is None:
-                failed.append(loop)
-                continue
-            accepted.extend(patch)
-            for (a, b, c) in patch:
-                for (x, y) in ((a, b), (b, c), (c, a)):
-                    blocked_edges.add(tuple(sorted((int(x), int(y)))))
-
+        accepted, failed = _fill_all_loops(loops, vertices, blocked_edges, kept_faces, kept_triangles,
+                                           obstacle_tree)
         if not failed:
-            if accepted:
-                all_faces = np.vstack([kept_faces, np.array(accepted, dtype=np.int64)])
-            else:
-                all_faces = kept_faces
-            repaired = trimesh.Trimesh(
-                vertices=vertices.copy(), faces=all_faces, process=False
-            )
-            repaired.remove_unreferenced_vertices()
-            if not repaired.is_watertight or not repaired.is_winding_consistent:
-                return None
-            # La TOPOLOGIE doit etre preservee a l'identique. Sans ce
-            # garde-fou, mesure directe sur turkish.stl : le retrait finit
-            # par DETACHER un morceau (euler -14 -> -13, 1 corps -> 2), et
-            # TetGen echoue alors sur `recoversubfaces` SANS plus signaler
-            # la moindre auto-intersection - un echec devenu indechiffrable.
-            # Une reparation qui change le nombre de corps ou la
-            # caracteristique d'Euler ne repare plus : elle mutile.
-            if require_euler_preserved and repaired.euler_number != mesh.euler_number:
-                return None
-            if len(repaired.split(only_watertight=False)) != _body_count_before:
-                return None
-            if _count_self_intersecting_faces(repaired) >= len(initial_bad):
-                return None
-            return repaired
-
-        # Croissance CIBLEE : uniquement les faces bordant les boucles en
-        # echec. Un trou a 3 sommets n'a qu'un seul patch possible - la face
-        # qu'on vient justement de retirer - donc son bord DOIT s'eloigner
-        # du croisement pour devenir rebouchable.
-        grew = False
-        for loop in failed:
-            size = len(loop)
-            for index in range(size):
-                key = tuple(sorted((loop[index], loop[(index + 1) % size])))
-                for face_index in edge_to_faces.get(key, ()):
-                    if face_index not in removed:
-                        removed.add(face_index)
-                        grew = True
-        if not grew:
+            return _validated_repair(mesh, vertices, kept_faces, accepted, len(initial_bad),
+                                     _body_count_before, require_euler_preserved)
+        if not _grow_removed_around(failed, edge_to_faces, removed):
             return None
     return None
 
@@ -1207,53 +1182,22 @@ def _split_for_platform_refinement(
     platform_z: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Decoupe `mesh` en un PLC (piecewise linear complex) combine, deux
-    regions de part et d'autre de `z = platform_z + near_platform_margin`
-    ("slab" pres du plateau, "rest" au-dela), pour alimenter
-    `TetGen.add_region` avec un point-seed par region - mecanisme retenu
-    pour le raffinement local (voir CLAUDE.md pour le mecanisme bgmesh/metric
-    ecarte : silencieusement ignore par le binding tetgen installe des qu'un
-    `switches=` non vide est passe, et provoque un segfault natif
-    reproductible si on force `-m` malgre tout).
+    Decoupe `mesh` en un PLC combine, deux regions de part et d'autre de `z = platform_z +
+    near_platform_margin` ("slab" pres du plateau, "rest" au-dela), pour alimenter `TetGen.add_region` avec un
+    seed par region (le mecanisme bgmesh/metric est ecarte, voir limite #35).
 
-    Le contour de coupe est triangule UNE SEULE FOIS (`_shared_cut_cap`) et
-    n'apparait qu'UNE SEULE fois dans le PLC combine, comme facette INTERNE
-    partagee entre les deux regions - PAS deux fois via deux appels
-    independants a `slice_plane(cap=True)`. Correction d'un bug reel mesure
-    sur `res/test_models/death.stl` (benchy avec disque de support rond) :
-    deux appels independants a `slice_plane(cap=True)` (un pour "slab", un
-    pour "rest") trianguleraient le MEME contour (memes sommets XY, ecart
-    mesure = 0.0) mais de facon INDEPENDANTE - `triangulate_polygon` choisit
-    ses diagonales differemment a chaque appel des que le contour est non
-    convexe. Mesure directe : `l_shape_overhang.stl` (8 sommets au contour)
-    n'a que 2 triangles divergents sur 6, sous le seuil de tolerance de
-    TetGen ; `death.stl` (47 sommets, disque de support + jambes du benchy)
-    en a 12 sur 47, ce que TetGen refuse net ("The input surface mesh
-    contain self-intersections"). Le repli en cascade de `_tetrahedralize`
-    (limite #43) masquait l'echec en desactivant purement et simplement le
-    raffinement plateau - reintroduisant l'erreur de discretisation FEM de
-    la limite #34 exactement dans la zone qui devrait rester plate (le
-    disque de support), d'ou les couches fragmentees en « escalier »
-    observees visuellement. Corrige : triangulation unique + une seule copie
-    dans le PLC final, verifie sans aucun warning TetGen sur les deux
-    modeles (`death.stl` : 112698 tetraedres avec raffinement plateau reel,
-    contre 107037 en mode degrade avant ce fix ; `l_shape_overhang.stl` :
-    1677 tetraedres, identique a la mesure deja documentee - non-regression
-    confirmee).
+    Le contour de coupe est triangule UNE SEULE FOIS (`_shared_cut_cap`) et n'apparait qu'UNE fois dans le PLC,
+    comme facette INTERNE partagee. Bug mesure sur death.stl : deux `slice_plane(cap=True)` independants
+    triangulent le meme contour non convexe de facon differente (12 triangles divergents sur 47), ce que TetGen
+    refuse ("self-intersections") ; le repli de `_tetrahedralize` (limite #43) masquait l'echec en desactivant
+    le raffinement plateau (couches en « escalier »). Apres correction : death.stl 112698 tetraedres avec
+    raffinement reel (107037 en mode degrade), l_shape_overhang.stl 1677 (inchange).
 
-    Retourne (combined_vertices (N,3), combined_faces (M,3), slab_seed (3,),
-    rest_seed (3,)). Le seed de chaque region part du centroide de sa coque
-    ouverte (coordonnee z explicitement repoussee vers l'interieur de sa
-    region pour ne jamais tomber exactement sur la frontiere de coupe),
-    VERIFIE via `shell.contains()` (`_find_guaranteed_interior_point`) sur
-    une coque watertight temporaire (coque ouverte + cap oriente vers
-    l'interieur) construite UNIQUEMENT pour ce test d'inclusion - jamais
-    pour le PLC final, qui lui ne contient qu'une seule copie du cap. Le
-    test d'inclusion echoue et retombe sur un tirage par rejet (deterministe)
-    sur forme non convexe (CLAUDE.md limite #42 : le centroide de la coque
-    "rest" tombe hors du solide sur le modele en T reel,
-    `l-triple-axis-overhanged-shape.stl`, et un seed hors-coque casse
-    silencieusement `TetGen.add_region`).
+    Retourne (combined_vertices (N,3), combined_faces (M,3), slab_seed (3,), rest_seed (3,)). Chaque seed part
+    du centroide de sa coque ouverte, repousse vers l'interieur de sa region, VERIFIE via `shell.contains()`
+    (`_find_guaranteed_interior_point`) sur une coque watertight temporaire (jamais le PLC final) ; tirage par
+    rejet deterministe sur forme non convexe (limite #42 : un seed hors-coque casse silencieusement
+    `TetGen.add_region`).
     """
     cut_z = platform_z + near_platform_margin
     plane_origin = np.array([0.0, 0.0, cut_z])
@@ -1274,19 +1218,14 @@ def _split_for_platform_refinement(
         cap_faces + n_slab + n_rest,  # une seule copie - facette interne partagee
     ])
 
-    # slab_open/rest_open portent chacun leur PROPRE copie numerique des
-    # sommets du contour de coupe (memes coordonnees que cap_vertices,
-    # indices differents) - sans cette fusion globale, le cap resterait
-    # topologiquement deconnecte des bords ouverts malgre des coordonnees
-    # identiques.
+    # slab_open/rest_open portent chacun leur copie des sommets du contour de coupe : sans cette fusion
+    # globale, le cap resterait deconnecte des bords ouverts malgre des coordonnees identiques.
     unique, inverse = trimesh_grouping.unique_rows(combined_vertices_dup)
     combined_vertices = combined_vertices_dup[unique]
     combined_faces = inverse[combined_faces_dup]
     combined_faces = combined_faces[(combined_faces[:, :1] != combined_faces[:, 1:]).all(axis=1)]
 
-    # Coques watertight temporaires (coque ouverte + cap oriente vers
-    # l'interieur de CETTE coque), uniquement pour le test d'inclusion des
-    # seeds - jamais utilisees pour le PLC final envoye a tetgen.
+    # Coques watertight temporaires (coque ouverte + cap), uniquement pour le test d'inclusion des seeds.
     slab_for_seed = trimesh.Trimesh(
         vertices=np.vstack([slab_open.vertices, cap_vertices]),
         faces=np.vstack([slab_open.faces, cap_faces[:, ::-1] + n_slab]),
@@ -1552,50 +1491,21 @@ def _finish_geometric_resolution(
     resolution: float,
 ) -> trimesh.Trimesh:
     """
-    Affine iterativement le resultat de `resolve_self_intersections` en
-    utilisant TetGen LUI-MEME comme oracle (principe deja acte, limite
-    #43 : "TetGen est le seul juge fiable de ce qui le bloque").
+    Affine iterativement le resultat de `resolve_self_intersections` avec TetGen LUI-MEME comme oracle
+    (limite #43). A chaque iteration : vraie tetraedrisation (`_tetrahedralize_once_isolated`) ; si TetGen la
+    refuse pour une raison RECUPERABLE et nomme des sommets en conflit (`_probe_tetgen_conflicts`), cible une
+    reparation locale (`_repair_local_self_intersections`, `extra_seed_faces`) sur EXACTEMENT ce qu'il refuse.
+    Mesure sur turkish.stl : 8 auto-intersections locales invisibles au test SAT global ; apres reparation
+    ciblee, TetGen aboutit sur la geometrie COMPLETE (330306 tetraedres, z=[30.26,90.78]).
 
-    A chaque iteration : tente une VRAIE tetraedrisation (subprocess isole,
-    `_tetrahedralize_once_isolated`) ; si TetGen la refuse pour une raison
-    RECUPERABLE et nomme des sommets en conflit dans sa sortie textuelle
-    (via `_probe_tetgen_conflicts`), cible une reparation locale
-    (`_repair_local_self_intersections`, `extra_seed_faces` = les faces
-    portant ces sommets) sur EXACTEMENT ce que TetGen vient de refuser, au
-    lieu d'un repli generique. Mesure sur turkish.stl : 8 auto-
-    intersections locales (issues du soudage de trous residuels de
-    `resolve_self_intersections`) rendaient TetGen incapable d'aboutir
-    malgre un SAT=0 global (contact EXACT entre deux segments de faces
-    partageant un sommet, donc invisible au test SAT qui exclut ces
-    paires) ; ce mecanisme reduit le residu jusqu'a un dernier segment
-    nomme, cible et repare en 1 iteration supplementaire - TetGen aboutit
-    alors sur la geometrie COMPLETE (330306 tetraedres, z=[30.26,90.78],
-    contre l'echec total precedent), pour un ecart de volume negligeable.
+    Deliberement SANS raffinement plateau/jonction : le PLC combine renumerote les sommets
+    (`_split_for_platform_refinement`), un conflit nomme ne se traduirait donc pas en `extra_seed_faces` sur le
+    mesh de surface repare ici (bug mesure : aucun sommet exploitable). La question est « ce mesh de SURFACE
+    est-il tetraedrisable EN SOI » ; la compatibilite avec le raffinement plateau reste a la cascade de
+    `_tetrahedralize` (repli « sans raffinement plateau », limite #44).
 
-    Deliberement SANS raffinement plateau/jonction ici (jamais
-    `near_platform_resolution`/`junction_refinement_resolution`), meme si
-    l'appelant final en utilise un : ce raffinement construit un PLC
-    COMBINE avec de nouveaux sommets injectes au plan de coupe
-    (`_split_for_platform_refinement`), dont la numerotation ne correspond
-    PAS a celle de `current` - un conflit nomme par TetGen sur CE PLC
-    combine ne peut donc pas etre traduit fidelement en `extra_seed_faces`
-    sur le mesh de surface qu'on repare ici. Bug mesure en integrant ce
-    mecanisme : avec raffinement plateau actif, le sondage ne trouvait
-    jamais aucun sommet exploitable (mauvais referentiel), la fonction
-    rendait la main sans le moindre progres, et la tentative reelle de
-    l'appelant (elle, avec raffinement) echouait alors identiquement a
-    chaque fois. La question posee ici est volontairement plus etroite :
-    « ce mesh de SURFACE est-il tetraedrisable EN SOI » - la compatibilite
-    avec le raffinement plateau reste de la responsabilite de la cascade
-    normale de `_tetrahedralize`, qui sait deja s'en degrader proprement
-    (repli "sans raffinement plateau", limite #44).
-
-    Best-effort, ne leve jamais : rend le meilleur mesh obtenu (le dernier
-    `resolved` valide) des qu'un probe reussit, qu'une reparation echoue,
-    qu'aucun sommet n'est nommable, ou que le budget d'iterations est
-    epuise - l'appelant (`_tetrahedralize`) refera de toute facon une VRAIE
-    tentative sur ce resultat dans sa cascade normale, avec son cortege
-    habituel de replis (pymeshfix, sans raffinement plateau).
+    Best-effort, ne leve jamais : rend `(mesh, TetMesh de la sonde ou None)` ; le meilleur mesh obtenu des
+    qu'un probe reussit, qu'une reparation echoue, qu'aucun sommet n'est nommable ou que le budget est epuise.
     """
     current = resolved
     for _probe in range(_GEOMETRIC_RESOLUTION_MAX_TETGEN_PROBES):
@@ -1940,6 +1850,54 @@ class _NativeTetgen:
                 self.elem = np.fromfile(f, dtype=np.int32, count=nt * 4).reshape(nt, 4)
 
 
+def _run_worker_process(mesh: trimesh.Trimesh, payload: dict, tmp_dir: str) -> dict:
+    """Lance `pipeline._tetrahedralize_worker` et retourne son resultat deserialise.
+
+    Les avertissements nommes de TetGen ("Two segments exactly intersect [869,836]...") sortent par les
+    descripteurs OS bruts de l'extension C : une redirection Python ne les voit pas, et un PIPE ne suffit pas
+    (mesure sur turkish.stl : texte tronque, tampon de la libc jamais vide avant la fin du sous-processus).
+    Rediriger vers de VRAIS FICHIERS resout le probleme."""
+    input_path = os.path.join(tmp_dir, "input.pkl")
+    output_path = os.path.join(tmp_dir, "output.pkl")
+    stdout_path = os.path.join(tmp_dir, "stdout.txt")
+    stderr_path = os.path.join(tmp_dir, "stderr.txt")
+
+    with open(input_path, "wb") as f:
+        pickle.dump(
+            dict(payload, vertices=np.asarray(mesh.vertices, dtype=np.float64),
+                 faces=np.asarray(mesh.faces, dtype=np.int64)),
+            f,
+        )
+    with open(stdout_path, "wb") as stdout_file, open(stderr_path, "wb") as stderr_file:
+        completed = subprocess.run(
+            [sys.executable, "-m", "pipeline._tetrahedralize_worker", input_path, output_path],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            stdout=stdout_file,
+            stderr=stderr_file,
+        )
+    if completed.returncode != 0 or not os.path.isfile(output_path):
+        with open(stderr_path, "rb") as f:
+            stderr_tail = f.read().decode("utf-8", errors="replace")[-500:]
+        raise _TetgenCrashError(
+            f"Le sous-processus TetGen s'est termine anormalement "
+            f"(code de sortie {completed.returncode}, probablement un "
+            f"crash natif) - stderr : {stderr_tail}"
+        )
+    with open(output_path, "rb") as f:
+        result = pickle.load(f)
+    if not result["ok"]:
+        error_type = result.get("error_type", "RuntimeError")
+        message = result["error"]
+        if error_type == "MeshIngestError":
+            raise MeshIngestError(message)
+        with open(stdout_path, "rb") as f:
+            tetgen_output = f.read().decode("utf-8", errors="replace")
+        with open(stderr_path, "rb") as f:
+            tetgen_output += f.read().decode("utf-8", errors="replace")
+        raise _TetgenNamedConflictError(message, tetgen_output)
+    return result
+
+
 def _tetrahedralize_once_isolated(
     mesh: trimesh.Trimesh,
     resolution: float,
@@ -1950,46 +1908,18 @@ def _tetrahedralize_once_isolated(
     junction_refinement_resolution: Optional[float],
 ) -> TetMesh:
     """
-    Fait tourner UNE tentative de `_tetrahedralize_once` dans un
-    sous-processus isole (`pipeline/_tetrahedralize_worker.py`), pour
-    survivre a un crash NATIF de TetGen (segfault) que ni `except
-    RuntimeError` ni aucun autre mecanisme Python ne peut intercepter
-    in-process - un tel crash tue tout le process qui l'a appele.
-
-    Mesure concretement sur une version modifiee de `res/test_models/death.stl`
-    (2340 triangles) : le process se terminait avec le code de sortie 139
-    (SIGSEGV) des la 1ere tentative de la cascade de reparation existante,
-    juste apres les memes avertissements TetGen deja documentes a la limite
-    #43 ("Two segments exactly intersect" etc.) - AVANT que la reparation
-    pymeshfix n'ait la moindre chance de s'executer, puisque le process qui
-    aurait du l'appeler etait deja mort. L'isolation par sous-processus
-    s'applique donc a CHAQUE tentative de la cascade (y compris la 1ere,
-    "tel quel"), jamais seulement en dernier recours - c'est la seule facon
-    de garantir qu'un crash sur le mesh original n'empeche pas d'essayer la
-    reparation ensuite.
-
-    Cout accepte : overhead de lancement d'un sous-processus Python par
-    tentative (import de tetgen/scipy/trimesh a chaque fois) - largement
-    inferieur au temps de la tetraedrisation elle-meme sur tout modele non
-    trivial, et strictement necessaire pour la garantie de robustesse
-    demandee (voir CLAUDE.md limite #46/#49, section "point ouvert
-    death.stl").
-
-    Serialisation deliberement minimale (vertices/faces bruts, pas un objet
-    Trimesh complet) : plus robuste au pickling inter-version que de
-    transporter des objets trimesh a travers la frontiere de process.
+    Fait tourner UNE tentative de `_tetrahedralize_once` dans un sous-processus isole
+    (`pipeline/_tetrahedralize_worker.py`), pour survivre a un crash NATIF de TetGen (segfault) qu'aucun
+    `except RuntimeError` ne peut intercepter in-process (mesure sur une version modifiee de death.stl : code
+    139 des la 1ere tentative, avant que la reparation pymeshfix puisse s'executer). L'isolation s'applique a
+    CHAQUE tentative de la cascade, y compris la 1ere. Cout accepte : lancement d'un sous-processus Python par
+    tentative. Serialisation minimale (vertices/faces bruts, pas d'objet Trimesh).
 
     Raises:
-        RuntimeError: relayee telle quelle si le worker a lui-meme leve une
-            RuntimeError Python normale (ex: message "self-intersection" de
-            TetGen) - meme comportement qu'un appel in-process, la cascade
-            de `_tetrahedralize` la traite exactement comme avant.
-        _TetgenCrashError: si le sous-processus s'est termine par un crash
-            natif (code de sortie non nul, ou fichier de sortie absent/
-            illisible) plutot qu'une exception Python.
-        MeshIngestError: relayee telle quelle si le worker a leve cette
-            exception (entree structurellement invalide, pas un defaut de
-            maillage a reparer).
+        RuntimeError: relayee telle quelle si le worker a leve une RuntimeError Python normale (ex: message
+            "self-intersection" de TetGen) - meme comportement qu'un appel in-process.
+        _TetgenCrashError: crash natif du sous-processus (code de sortie non nul ou sortie absente/illisible).
+        MeshIngestError: relayee telle quelle (entree structurellement invalide).
     """
     if _native_tetgen_worker_path() is not None:
         return _tetrahedralize_once(
@@ -2003,71 +1933,16 @@ def _tetrahedralize_once_isolated(
             _tetgen_factory=_NativeTetgen,
         )
 
+    payload = {
+        "resolution": resolution,
+        "near_platform_resolution": near_platform_resolution,
+        "near_platform_margin": near_platform_margin,
+        "platform_z": platform_z,
+        "junction_zones": junction_zones,
+        "junction_refinement_resolution": junction_refinement_resolution,
+    }
     with tempfile.TemporaryDirectory(prefix="apex_tetgen_") as tmp_dir:
-        input_path = os.path.join(tmp_dir, "input.pkl")
-        output_path = os.path.join(tmp_dir, "output.pkl")
-        stdout_path = os.path.join(tmp_dir, "stdout.txt")
-        stderr_path = os.path.join(tmp_dir, "stderr.txt")
-
-        with open(input_path, "wb") as f:
-            pickle.dump(
-                {
-                    "vertices": np.asarray(mesh.vertices, dtype=np.float64),
-                    "faces": np.asarray(mesh.faces, dtype=np.int64),
-                    "resolution": resolution,
-                    "near_platform_resolution": near_platform_resolution,
-                    "near_platform_margin": near_platform_margin,
-                    "platform_z": platform_z,
-                    "junction_zones": junction_zones,
-                    "junction_refinement_resolution": junction_refinement_resolution,
-                },
-                f,
-            )
-
-        # Les avertissements nommes de TetGen ("Two segments exactly
-        # intersect [869,836]...") sortent de l'extension C du binding par
-        # ses descripteurs OS bruts, en contournant l'objet Python
-        # `sys.stdout` - une redirection Python (`contextlib.redirect_*`,
-        # essayee et rejetee) ne les voit jamais. `subprocess.run(...,
-        # capture_output=True)` (PIPE) ne suffit PAS non plus : mesure
-        # directe sur turkish.stl, le texte s'arretait net juste apres
-        # "Recovering boundaries..." (avant les avertissements eux-memes),
-        # signature d'un tampon de la libc du binding jamais vide vers un
-        # PIPE avant la fin du sous-processus. Rediriger vers de VRAIS
-        # FICHIERS resout le probleme (verifie : texte complet recupere,
-        # y compris les indices de sommets) - la nature du descripteur
-        # (fichier vs pipe) change le comportement de bufferisation cote
-        # OS, meme si Python ne voit aucune difference de son point de vue.
-        with open(stdout_path, "wb") as stdout_file, open(stderr_path, "wb") as stderr_file:
-            completed = subprocess.run(
-                [sys.executable, "-m", "pipeline._tetrahedralize_worker", input_path, output_path],
-                cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                stdout=stdout_file,
-                stderr=stderr_file,
-            )
-
-        if completed.returncode != 0 or not os.path.isfile(output_path):
-            with open(stderr_path, "rb") as f:
-                stderr_tail = f.read().decode("utf-8", errors="replace")[-500:]
-            raise _TetgenCrashError(
-                f"Le sous-processus TetGen s'est termine anormalement "
-                f"(code de sortie {completed.returncode}, probablement un "
-                f"crash natif) - stderr : {stderr_tail}"
-            )
-
-        with open(output_path, "rb") as f:
-            result = pickle.load(f)
-
-        if not result["ok"]:
-            error_type = result.get("error_type", "RuntimeError")
-            message = result["error"]
-            if error_type == "MeshIngestError":
-                raise MeshIngestError(message)
-            with open(stdout_path, "rb") as f:
-                tetgen_output = f.read().decode("utf-8", errors="replace")
-            with open(stderr_path, "rb") as f:
-                tetgen_output += f.read().decode("utf-8", errors="replace")
-            raise _TetgenNamedConflictError(message, tetgen_output)
+        result = _run_worker_process(mesh, payload, tmp_dir)
 
     tet_vertices = result["tet_vertices"]
     tetrahedra = result["tetrahedra"]
@@ -2077,6 +1952,71 @@ def _tetrahedralize_once_isolated(
         tetrahedra=np.asarray(tetrahedra, dtype=np.int64),
         tet_adjacency=tet_adjacency,
     )
+
+
+def _check_seeds_outside_junctions(slab_seed, rest_seed, junction_zones) -> None:
+    """Garde-fou EXPLICITE : si slab_seed ou rest_seed tombent dans le rayon d'une zone de jonction, TetGen
+    appliquerait le volume FIN de la jonction a toute la region plateau/rest. Non re-derive automatiquement
+    (deplacer les seeds casserait la garantie de `_split_for_platform_refinement`) : signale."""
+    for seed_name, seed in [("slab_seed", slab_seed), ("rest_seed", rest_seed)]:
+        for zone in junction_zones:
+            if np.linalg.norm(seed - zone.centroid) <= zone.radius:
+                raise MeshIngestError(
+                    f"{seed_name} ({seed}) tombe a l'interieur d'une zone de "
+                    f"jonction (centre={zone.centroid}, rayon={zone.radius}) - "
+                    "raffinement plateau et raffinement jonction se chevauchent "
+                    "sur ce modele, non supporte (near_platform_margin ou les "
+                    "zones detectees devraient etre ajustes)."
+                )
+
+
+def _tetgen_with_platform_refinement(
+    factory, mesh: trimesh.Trimesh, hole_points: list, merged_junction_seed, opts: _TetOptions,
+    near_platform_resolution: float,
+):
+    """Tetraedrise avec une region "slab" (pres du plateau) et une region "rest", plus "junction" si active."""
+    max_tet_volume = opts.resolution ** 3
+    combined_vertices, combined_faces, slab_seed, rest_seed = _split_for_platform_refinement(
+        mesh, opts.near_platform_margin, opts.platform_z
+    )
+    if merged_junction_seed is not None:
+        _check_seeds_outside_junctions(slab_seed, rest_seed, opts.junction_zones)
+    tet = factory(combined_vertices, combined_faces)
+    for hole_point in hole_points:
+        tet.add_hole(hole_point)
+    if merged_junction_seed is not None:
+        # ORDRE CRITIQUE avec 3 regions (scripts/measure_add_region_*.py, limite #48) : la region la plus
+        # GROSSIERE ("rest") doit etre add_region(1, ...), sinon la densite explose sur TOUT le maillage
+        # (tripode : far<3mm de 34 a 1150 tetraedres). Le meme defaut existe avec 2 regions (slab=1,rest=2 :
+        # far<3mm 847 vs 29) mais n'est PAS corrige pour le cas SANS jonction : l_shape_overhang.stl donne
+        # exactement 1677 tetraedres avec l'ordre actuel (limite #36), aucune regression mesuree.
+        tet.add_region(1, rest_seed, max_tet_volume)
+        tet.add_region(2, slab_seed, near_platform_resolution ** 3)
+        tet.add_region(3, merged_junction_seed, opts.junction_refinement_resolution ** 3)
+    else:
+        tet.add_region(1, slab_seed, near_platform_resolution ** 3)
+        tet.add_region(2, rest_seed, max_tet_volume)
+    # -A active les regions (chaque region utilise SON PROPRE max_vol) ; -a sans valeur ne fixe PAS de plafond.
+    tet.tetrahedralize(switches="pq1.2Aa")
+    return tet
+
+
+def _tetgen_with_junction_refinement(
+    factory, mesh: trimesh.Trimesh, hole_points: list, merged_junction_seed, opts: _TetOptions,
+):
+    """Sans raffinement plateau : 2 regions ("rest" + "junction") sur le mesh brut. Seed "rest" garanti HORS
+    de toute zone de jonction (voir `_find_rest_seed_outside_junction_zones`)."""
+    rest_seed = _find_rest_seed_outside_junction_zones(mesh, opts.junction_zones)
+    tet = factory(mesh.vertices, mesh.faces)
+    for hole_point in hole_points:
+        tet.add_hole(hole_point)
+    # ORDRE CRITIQUE (mesure) : "rest" (grossier) region 1, "junction" (fin) region 2 ; l'inverse fait exploser
+    # la densite (3080 tetraedres contre 46000+, memes seeds et volumes). Comportement TetGen non documente,
+    # reproductible sur ce binding (0.8.4).
+    tet.add_region(1, rest_seed, opts.resolution ** 3)
+    tet.add_region(2, merged_junction_seed, opts.junction_refinement_resolution ** 3)
+    tet.tetrahedralize(switches="pq1.2Aa")
+    return tet
 
 
 def _tetrahedralize_once(
@@ -2098,17 +2038,15 @@ def _tetrahedralize_once(
     Jusqu'a 3 regions TetGen actives simultanement : "slab" (pres du
     plateau), "junction" (jonctions multi-region fusionnees en UN seul
     seed, cf. `_merged_junction_seed`), "rest" (le reste, a `resolution`).
-    Contrairement au plateau, une jonction n'a pas de plan de coupe : le
-    PLC combine (`combined_vertices`/`combined_faces`) reste celui du
-    plateau seul (ou le mesh brut si le plateau n'est pas actif) - le seed
-    de jonction est juste un point interne supplementaire, jamais une
-    decoupe de surface.
+    Une jonction n'a pas de plan de coupe : le PLC combine reste celui du
+    plateau seul (ou le mesh brut) ; le seed de jonction est un point interne.
     """
     if _tetgen_factory is None:
         import tetgen
 
         _tetgen_factory = tetgen.TetGen
 
+    opts = _TetOptions(resolution, near_platform_margin, platform_z, junction_zones, junction_refinement_resolution)
     max_tet_volume = resolution ** 3
     hole_points = _find_internal_cavities(mesh)
 
@@ -2117,83 +2055,10 @@ def _tetrahedralize_once(
         merged_junction_seed = _merged_junction_seed(mesh, junction_zones)
 
     if near_platform_resolution is not None:
-        combined_vertices, combined_faces, slab_seed, rest_seed = _split_for_platform_refinement(
-            mesh, near_platform_margin, platform_z
-        )
-        if merged_junction_seed is not None:
-            # Garde-fou EXPLICITE (pas un silence) : si slab_seed ou
-            # rest_seed tombent a l'interieur du rayon d'une zone de
-            # jonction, TetGen appliquerait le volume FIN de la jonction a
-            # toute la region plateau/rest - meme bug mesure et corrige
-            # pour le cas jonction seule (_find_rest_seed_outside_junction_zones).
-            # Non re-derive automatiquement ici (deplacer slab_seed/rest_seed
-            # casserait la garantie deja etablie par _split_for_platform_refinement
-            # d'etre chacun a l'interieur de SA PROPRE coque) - signale plutot
-            # qu'un resultat silencieusement corrompu.
-            for seed_name, seed in [("slab_seed", slab_seed), ("rest_seed", rest_seed)]:
-                for zone in junction_zones:
-                    if np.linalg.norm(seed - zone.centroid) <= zone.radius:
-                        raise MeshIngestError(
-                            f"{seed_name} ({seed}) tombe a l'interieur d'une zone de "
-                            f"jonction (centre={zone.centroid}, rayon={zone.radius}) - "
-                            "raffinement plateau et raffinement jonction se chevauchent "
-                            "sur ce modele, non supporte (near_platform_margin ou les "
-                            "zones detectees devraient etre ajustes)."
-                        )
-        tet = _tetgen_factory(combined_vertices, combined_faces)
-        for hole_point in hole_points:
-            tet.add_hole(hole_point)
-        if merged_junction_seed is not None:
-            # ORDRE CRITIQUE quand une 3e region (jonction) est active,
-            # mesure pas suppose (scripts/measure_add_region_*.py, session
-            # limite #48) : la region la plus GROSSIERE ("rest") doit etre
-            # add_region(1, ...), sinon la densite explose sur TOUT le
-            # maillage (mesure sur le tripode synthetique : far<3mm passe de
-            # 34 a 1150 tetraedres selon l'ordre, memes seeds/volumes). Ce
-            # meme defaut existe deja avec seulement 2 regions
-            # (slab=1,rest=2 vs rest=1,slab=2 : far<3mm 847 vs 29 sur un
-            # modele synthetique) mais N'EST PAS corrige ici pour le cas
-            # SANS jonction (slab_seed/rest_seed) : `l_shape_overhang.stl`
-            # (modele de reference du projet, deja valide) produit
-            # exactement 1677 tetraedres avec l'ordre actuel slab=1/rest=2 -
-            # identique au chiffre deja documente CLAUDE.md limite #36,
-            # aucune regression mesuree sur ce cas. Inverser l'ordre pour
-            # TOUS les appels aurait ete un changement de comportement non
-            # mesure sur le cas deja valide - reserve au nouveau cas (3
-            # regions) ou le defaut est confirme.
-            tet.add_region(1, rest_seed, max_tet_volume)
-            tet.add_region(2, slab_seed, near_platform_resolution ** 3)
-            tet.add_region(3, merged_junction_seed, junction_refinement_resolution ** 3)
-        else:
-            tet.add_region(1, slab_seed, near_platform_resolution ** 3)
-            tet.add_region(2, rest_seed, max_tet_volume)
-        # -A active les regions (chaque region utilise SON PROPRE max_vol
-        # declare via add_region) ; -a sans valeur numerique explicite ne
-        # fixe PAS de plafond global unique - verifie fonctionnel, aucun
-        # crash, resultat mesure (CLAUDE.md).
-        tet.tetrahedralize(switches="pq1.2Aa")
+        tet = _tetgen_with_platform_refinement(
+            _tetgen_factory, mesh, hole_points, merged_junction_seed, opts, near_platform_resolution)
     elif merged_junction_seed is not None:
-        # Pas de raffinement plateau actif : 2 regions seulement ("junction"
-        # + "rest"), sur le mesh brut (pas de PLC combine necessaire, aucune
-        # decoupe de surface pour une jonction - voir _merged_junction_seed).
-        # Seed "rest" garanti HORS de toute zone de jonction (pas seulement
-        # a l'interieur du mesh) - voir docstring de
-        # _find_rest_seed_outside_junction_zones pour le bug mesure sinon.
-        rest_seed = _find_rest_seed_outside_junction_zones(mesh, junction_zones)
-        tet = _tetgen_factory(mesh.vertices, mesh.faces)
-        for hole_point in hole_points:
-            tet.add_hole(hole_point)
-        # ORDRE CRITIQUE, mesure pas suppose (scripts/measure_add_region_*.py) :
-        # "rest" (grossier) DOIT etre la region 1, "junction" (fin) la region 2
-        # - inverser l'ordre (junction=1, rest=2) fait EXPLOSER la densite sur
-        # tout le maillage (mesure : 3080 tetraedres corrects avec rest=1, vs
-        # 46000+ avec junction=1, memes seeds, meme mesh, meme volumes cibles).
-        # Comportement TetGen non documente, mais reproductible a l'identique
-        # sur ce binding (0.8.4) - meme discipline que la limite #42 (TetGen
-        # est le seul juge fiable de son propre comportement d'add_region).
-        tet.add_region(1, rest_seed, max_tet_volume)
-        tet.add_region(2, merged_junction_seed, junction_refinement_resolution ** 3)
-        tet.tetrahedralize(switches="pq1.2Aa")
+        tet = _tetgen_with_junction_refinement(_tetgen_factory, mesh, hole_points, merged_junction_seed, opts)
     else:
         tet = _tetgen_factory(mesh.vertices, mesh.faces)
         for hole_point in hole_points:
@@ -2436,127 +2301,33 @@ def _ingest_with_tetranet(
     return mesh_data, tet_mesh, report
 
 
-def run(
-    mesh_path: str,
-    resolution: float,
-    allow_multi_mesh: bool = False,
-    near_platform_resolution: Optional[float] = None,
-    near_platform_margin: float = 5.0,
-    platform_z: Optional[float] = None,
-    junction_zones: Optional[list[JunctionZone]] = None,
-    junction_refinement_resolution: Optional[float] = None,
-    check_surface_coverage: bool = False,
-    place_on_platform: bool = False,
-    mesher: str = "tetgen",
-    tetranet_refuse_ratio: float = 0.05,
-) -> tuple[MeshData, TetMesh, IngestReport]:
-    """
-    Charge, nettoie et prepare le mesh source pour le reste du pipeline.
+def _surface_coverage_into_report(report: IngestReport, mesh: trimesh.Trimesh, tet_mesh: TetMesh) -> None:
+    from core.tet_coverage import surface_outside_volume
 
-    Args:
-        mesh_path: chemin vers le fichier STL/3MF source.
-        resolution: taille cible de tetraedre (FieldSolverParams.resolution),
-            utilisee pour controler la densite de la tetraedrisation.
-        allow_multi_mesh: si True, fusionne les geometries multiples d'une
-            Scene plutot que de lever une erreur.
-        near_platform_resolution: taille de tetraedre cible pres du plateau,
-            plus fine que `resolution` (opt-in, None = desactive par defaut,
-            comportement historique de resolution globale unique inchange).
-            Corrige une erreur de discretisation FEM mesuree pres du plateau
-            (CLAUDE.md) sans payer le cout d'un maillage fin partout.
-        near_platform_margin: hauteur (mm) au-dessus de `platform_z` sur
-            laquelle le raffinement s'applique, avec une transition lisse
-            vers `resolution` au-dela. Ignore si `near_platform_resolution`
-            est None.
-        platform_z: niveau du plateau. `None` (defaut) = DETECTION
-            AUTOMATIQUE depuis le mesh nettoye (`min(z)` des sommets) -
-            meme discipline de derivation geometrique que
-            `_find_guaranteed_interior_point`/`_find_internal_cavities`
-            plutot que d'exiger un parametre externe suppose correct. Une
-            valeur explicite reste un override total. La valeur REELLEMENT
-            utilisee (fournie ou deduite) est toujours remontee via
-            `IngestReport.platform_z_used` - jamais un silence sur une
-            valeur derivee, meme discipline que
-            `self_intersecting_faces_before`. Corrige un bug reel mesure
-            sur `res/test_models/death.stl` (min(z)=1.245, pas 0.0) : avec
-            l'ancien defaut `platform_z=0.0` fige, `_compute_platform_contact`
-            (step3) ne detectait AUCUNE face de contact plateau sur ce
-            modele, cassant en cascade l'ancrage plateau du solveur FEM
-            (step4) - voir CLAUDE.md.
-        junction_zones: zones de jonction multi-region a raffiner localement
-            (opt-in, None = desactive par defaut), typiquement produites par
-            `pipeline.step1b_junction_detection.detect_junction_zones` sur
-            une premiere passe legere (mesh + step2 + step3) orchestree par
-            `main.run_pipeline` - `step1_ingest.run()` lui-meme ne les
-            calcule jamais, il les recoit deja prealablement calculees.
-            Corrige la non-monotonie du champ scalaire aux jonctions
-            (CLAUDE.md limite #47/#48), portee laissee explicitement ouverte
-            par le mecanisme `near_platform_resolution` ci-dessus (limite
-            #36 : "traiter le cas jonction... non fait").
-        junction_refinement_resolution: taille de tetraedre cible aux zones
-            de jonction, plus fine que `resolution` (opt-in, None =
-            desactive par defaut). Ignore si `junction_zones` est vide ou
-            None.
-        check_surface_coverage: mesure la part de la surface hors du volume
-            tetraedrise et la remonte dans l'`IngestReport` (opt-in, defaut
-            False : calcul supplementaire, aucun effet sur le maillage).
-        place_on_platform: pose le modele sur le plateau par une translation
-            en z SEULE (min(z) -> `platform_z`, ou 0.0 si `platform_z` est
-            None) : la machine place son plateau a z = 0 et l'export refuse
-            une pointe sous 0, or un STL peut avoir son minimum ailleurs
-            (death.stl : +1.245 mm, real_overhang.stl : -15 mm). Opt-in
-            (defaut False : coordonnees du fichier inchangees). Le decalage
-            applique est remonte via `IngestReport.placement_offset_z`.
+    coverage = surface_outside_volume(mesh.vertices, mesh.faces, tet_mesh.tet_vertices, tet_mesh.tetrahedra)
+    report.surface_outside_volume_fraction = coverage.far_fraction
+    report.surface_outside_volume_area = coverage.far_area
+    report.surface_max_distance_to_tets = coverage.max_distance
+    report.tet_volume_ratio = coverage.volume_ratio
+    report.surface_outside_volume_clusters = [(c.area, c.center) for c in coverage.clusters[:10]]
 
-    Returns:
-        Tuple (MeshData, TetMesh, IngestReport).
 
-    Raises:
-        MeshIngestError: si le fichier est illisible, vide, ou ne peut pas
-            etre reduit a un volume tetraedrisable meme apres reparation.
-    """
-    raw_mesh = _load_raw_mesh(mesh_path, allow_multi_mesh)
-    _progress.milestone(0.5)                 # R-017 : fichier lu (etape « import »)
-    if mesher == "tetranet":
-        if junction_zones:
-            print("[step1] TetraNet : zones de jonction non prises en charge, retour a TetGen")
-        elif not tetranet_available():
-            print("[step1] TetraNet : noyau natif absent, retour a TetGen")
-        else:
-            if near_platform_resolution is not None:
-                print("[step1] TetraNet : raffinement pres du plateau pas encore porte, ignore")
-            _progress.milestone(0.9)
-            _progress.switch_stage("tetrahedralization")   # TetraNet nettoie et maille en un appel (R-022)
-            return _ingest_with_tetranet(raw_mesh, resolution, platform_z, place_on_platform,
-                                         check_surface_coverage, tetranet_refuse_ratio)
-    cleaned_mesh, report = _clean_and_repair(raw_mesh)
-    _progress.milestone(0.9)                 # surface nettoyee et reparee : fin de l'« import » (R-022)
-    _progress.switch_stage("tetrahedralization")   # reste le maillage volumique (TetGen, indivisible)
-
-    if place_on_platform and len(cleaned_mesh.vertices):
-        target_z = 0.0 if platform_z is None else float(platform_z)
-        offset_z = target_z - float(cleaned_mesh.vertices[:, 2].min())
-        if offset_z != 0.0:
-            cleaned_mesh.apply_translation([0.0, 0.0, offset_z])
-        report.placement_offset_z = offset_z
-
-    resolved_platform_z = (
-        float(cleaned_mesh.vertices[:, 2].min()) if platform_z is None else platform_z
-    )
-    report.platform_z_used = resolved_platform_z
-
-    # Autodocteur : la surface est TOUJOURS analysee AVANT TetGen. Reparation immediate quand
-    # des coques se traversent, que la surface n'est pas etanche ou que son orientation est
-    # incoherente (TetGen peut alors ACCEPTER la surface et produire des tetraedres
-    # degeneres : Fighter jet F18) ; reparation aussi apres un refus de TetGen ou un maillage
-    # inexploitable. Une surface saine n'est jamais modifiee. Une auto-intersection dans UNE
-    # coque garde la cascade historique de `_tetrahedralize` (TetGen pour juge, limite #43).
+def _tetrahedralize_with_autodoctor(
+    cleaned_mesh: trimesh.Trimesh, report: IngestReport, resolution: float,
+    near_platform_resolution: Optional[float], near_platform_margin: float, resolved_platform_z: float,
+    junction_zones: Optional[list[JunctionZone]], junction_refinement_resolution: Optional[float],
+):
+    """Autodocteur : la surface est TOUJOURS analysee AVANT TetGen. Reparation immediate quand des coques se
+    traversent, que la surface n'est pas etanche ou que son orientation est incoherente (TetGen peut alors
+    ACCEPTER la surface et produire des tetraedres degeneres : Fighter jet F18) ; reparation aussi apres un
+    refus de TetGen ou un maillage inexploitable. Une surface saine n'est jamais modifiee. Une
+    auto-intersection dans UNE coque garde la cascade historique de `_tetrahedralize` (limite #43).
+    Retourne `(cleaned_mesh, tet_mesh)` (le maillage de surface peut avoir ete repare)."""
     from pipeline.mesh_doctor import diagnose_surface
 
     diagnosis = diagnose_surface(cleaned_mesh)
     report.surface_problems = list(diagnosis.problems)
     pre_repair = (diagnosis.shells > 1 and diagnosis.self_intersecting_faces > 0) or not diagnosis.watertight
-    final_mesh = cleaned_mesh
     tet_mesh = None
     first_error: Optional[Exception] = None
     if pre_repair:
@@ -2584,21 +2355,82 @@ def run(
         report.is_watertight_after_repair = bool(final_mesh.is_watertight)
         print(f"[step1] surface reparee : {label} ({tet_mesh.tet_count} tetraedres)")
         cleaned_mesh = final_mesh
+    return cleaned_mesh, tet_mesh
+
+
+def _place_mesh_on_platform(mesh: trimesh.Trimesh, report: IngestReport, platform_z: Optional[float]) -> None:
+    """Translation en z SEULE : min(z) -> `platform_z` (0.0 si None)."""
+    target_z = 0.0 if platform_z is None else float(platform_z)
+    offset_z = target_z - float(mesh.vertices[:, 2].min())
+    if offset_z != 0.0:
+        mesh.apply_translation([0.0, 0.0, offset_z])
+    report.placement_offset_z = offset_z
+
+
+def run(
+    mesh_path: str,
+    resolution: float,
+    allow_multi_mesh: bool = False,
+    near_platform_resolution: Optional[float] = None,
+    near_platform_margin: float = 5.0,
+    platform_z: Optional[float] = None,
+    junction_zones: Optional[list[JunctionZone]] = None,
+    junction_refinement_resolution: Optional[float] = None,
+    check_surface_coverage: bool = False,
+    place_on_platform: bool = False,
+    mesher: str = "tetgen",
+    tetranet_refuse_ratio: float = 0.05,
+) -> tuple[MeshData, TetMesh, IngestReport]:
+    """
+    Charge, nettoie et prepare le mesh source pour le reste du pipeline.
+
+    `resolution` : taille cible de tetraedre. `allow_multi_mesh` : fusionne les geometries d'une Scene au lieu
+    de lever une erreur. `near_platform_resolution`/`near_platform_margin` (opt-in) : raffinement pres du
+    plateau. `platform_z` : `None` = detection automatique (`min(z)` du mesh nettoye), sinon override total ;
+    la valeur utilisee est remontee dans `IngestReport.platform_z_used` (death.stl, min(z)=1.245 : l'ancien
+    defaut 0.0 faisait manquer toute face de contact plateau a step3). `junction_zones` /
+    `junction_refinement_resolution` (opt-in) : zones de jonction a raffiner, produites par
+    `step1b_junction_detection` sur une passe legere orchestree par `main.run_pipeline` (limite #47/#48).
+    `check_surface_coverage` (opt-in) : mesure la part de la surface hors du volume tetraedrise.
+    `place_on_platform` (opt-in) : translation en z SEULE (min(z) -> `platform_z`, 0.0 si None), l'export
+    refusant une pointe sous 0 ; decalage remonte via `IngestReport.placement_offset_z`.
+
+    Returns: (MeshData, TetMesh, IngestReport).
+    Raises: MeshIngestError si le fichier est illisible, vide, ou non tetraedrisable meme apres reparation.
+    """
+    raw_mesh = _load_raw_mesh(mesh_path, allow_multi_mesh)
+    _progress.milestone(0.5)                 # R-017 : fichier lu (etape « import »)
+    if mesher == "tetranet":
+        if junction_zones:
+            print("[step1] TetraNet : zones de jonction non prises en charge, retour a TetGen")
+        elif not tetranet_available():
+            print("[step1] TetraNet : noyau natif absent, retour a TetGen")
+        else:
+            if near_platform_resolution is not None:
+                print("[step1] TetraNet : raffinement pres du plateau pas encore porte, ignore")
+            _progress.milestone(0.9)
+            _progress.switch_stage("tetrahedralization")   # TetraNet nettoie et maille en un appel (R-022)
+            return _ingest_with_tetranet(raw_mesh, resolution, platform_z, place_on_platform,
+                                         check_surface_coverage, tetranet_refuse_ratio)
+    cleaned_mesh, report = _clean_and_repair(raw_mesh)
+    _progress.milestone(0.9)                 # surface nettoyee et reparee : fin de l'« import » (R-022)
+    _progress.switch_stage("tetrahedralization")   # reste le maillage volumique (TetGen, indivisible)
+
+    if place_on_platform and len(cleaned_mesh.vertices):
+        _place_mesh_on_platform(cleaned_mesh, report, platform_z)
+
+    resolved_platform_z = (
+        float(cleaned_mesh.vertices[:, 2].min()) if platform_z is None else platform_z
+    )
+    report.platform_z_used = resolved_platform_z
+    cleaned_mesh, tet_mesh = _tetrahedralize_with_autodoctor(
+        cleaned_mesh, report, resolution, near_platform_resolution, near_platform_margin, resolved_platform_z,
+        junction_zones, junction_refinement_resolution,
+    )
     _progress.milestone(0.9)                 # volume tetraedrise
     mesh_data = _build_mesh_data(cleaned_mesh)
 
     report.tetrahedra_generated = tet_mesh.tet_count
-
     if check_surface_coverage:
-        from core.tet_coverage import surface_outside_volume
-
-        coverage = surface_outside_volume(
-            cleaned_mesh.vertices, cleaned_mesh.faces, tet_mesh.tet_vertices, tet_mesh.tetrahedra
-        )
-        report.surface_outside_volume_fraction = coverage.far_fraction
-        report.surface_outside_volume_area = coverage.far_area
-        report.surface_max_distance_to_tets = coverage.max_distance
-        report.tet_volume_ratio = coverage.volume_ratio
-        report.surface_outside_volume_clusters = [(c.area, c.center) for c in coverage.clusters[:10]]
-
+        _surface_coverage_into_report(report, cleaned_mesh, tet_mesh)
     return mesh_data, tet_mesh, report
