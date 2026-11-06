@@ -121,7 +121,8 @@ def run(
                        skin_paths.TraceOptions(pattern=params.pattern, thickness=params.thickness),
                        cache=trace_cache)
         p5 = timed("P5 controle (boucle)", print_order.order_and_check, body_uncarved, skin, traced, machine, loop_sim,
-                   offset, tolerance=params.head_tolerance_deg, plate_r=plate_r)
+                   offset,
+                   print_order.CheckOptions(tolerance=params.head_tolerance_deg, plate_r=plate_r))
         new = p5["collision_points"]
         say(f"tour {it} : {len(new)} point(s) de collision, {len(p5['excluded'])} zone(s) en contact")
         if not new:
@@ -144,7 +145,8 @@ def run(
     if clean:
         body_layers, body = carved_body()
         p5 = timed("P5 controle (exhaustif)", print_order.order_and_check, body, skin, traced, machine, full_sim,
-                   offset, tolerance=params.head_tolerance_deg, plate_r=plate_r)
+                   offset,
+                   print_order.CheckOptions(tolerance=params.head_tolerance_deg, plate_r=plate_r))
         if not p5["collision_points"]:
             say(f"zero collision (verifie sur le corps creuse) en {time.time() - t0:.0f} s")
             return SkinResult(body_layers, body, skin, traced, p5, it, True, [], messages, timings)
@@ -156,7 +158,9 @@ def run(
     for r in range(1, params.exclusion_rounds + 1):
         body_layers, body = carved_body(sorted(excluded))
         p5 = timed("P5 controle (exhaustif)", print_order.order_and_check, body, skin, traced, machine, full_sim,
-                   offset, tolerance=params.head_tolerance_deg, plate_r=plate_r, exclude=sorted(excluded))
+                   offset,
+                   print_order.CheckOptions(tolerance=params.head_tolerance_deg, plate_r=plate_r,
+                                            exclude=tuple(sorted(excluded))))
         say(f"exclusion {r} : zones retirees {sorted(excluded)}, points restants {len(p5['collision_points'])}")
         if not p5["collision_points"]:
             break

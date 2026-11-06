@@ -41,6 +41,7 @@ import os
 import pickle
 import sys
 import time
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -135,10 +136,29 @@ def _lines(polylines):
     return np.ascontiguousarray(pts), starts
 
 
-def _check_native(native_cls, sequence, body, paths, skin_angles, offset, head, machine, sim, plate_r, reach,
-                  densify, tolerance, over_tol, report, collision_points):
+@dataclass(frozen=True)
+class _NativeCheckContext:
+    """Entrees de `_check_native` (tout sauf les deux sorties `report` et `collision_points`)."""
+    body: list
+    paths: dict
+    skin_angles: dict
+    offset: np.ndarray
+    head: np.ndarray
+    machine: object
+    sim: object
+    plate_r: float
+    reach: float
+    densify: float
+    tolerance: float
+    over_tol: dict
+
+
+def _check_native(native_cls, sequence, ctx: _NativeCheckContext, report, collision_points):
     """Partie 3 de order_and_check en C++ : remplit `report` et `collision_points`
     exactement comme la boucle Python, rend le nombre de points testes."""
+    body, paths, skin_angles, offset, head = ctx.body, ctx.paths, ctx.skin_angles, ctx.offset, ctx.head
+    machine, sim, plate_r, reach = ctx.machine, ctx.sim, ctx.plate_r, ctx.reach
+    densify, tolerance, over_tol = ctx.densify, ctx.tolerance, ctx.over_tol
     index = native_cls(reach + 1.0)
     axes = np.array([np.asarray(spec.axis, dtype=float) / np.linalg.norm(np.asarray(spec.axis, dtype=float))
                      for spec in machine.rotation_axes]).reshape(-1, 3)
@@ -185,14 +205,25 @@ def _check_native(native_cls, sequence, body, paths, skin_angles, offset, head, 
     return tested
 
 
-def order_and_check(body, skin, paths, machine, sim, offset, tolerance=HEAD_TOLERANCE_DEG, plate_r=150.0,
-                    exclude=(), feed=25.0, log=False):
+@dataclass(frozen=True)
+class CheckOptions:
+    """Reglages de `order_and_check` (memes noms et defauts que les anciens parametres nommes)."""
+    tolerance: float = HEAD_TOLERANCE_DEG
+    plate_r: float = 150.0
+    exclude: tuple = ()
+    feed: float = 25.0
+    log: bool = False
+
+
+def order_and_check(body, skin, paths, machine, sim, offset, options: CheckOptions | None = None):
     """P5 en memoire : insere chaque zone de lissage apres la derniere couche du
     corps qui la porte, calcule les angles de tete, verifie les collisions avec
     la VRAIE tete, retire les zones en contact. `body` : couches du corps
     (deformed_slicing, toolpath_3d dans le repere de sortie, `offset` = repere
     Bird -> sortie) ; `skin` : zones.compute ; `paths` : paths.trace.
     Rend {passes, report, excluded, collision_points, monotone_ranks}."""
+    o = options or CheckOptions()
+    tolerance, plate_r, exclude, feed, log = o.tolerance, o.plate_r, o.exclude, o.feed, o.log
     t_all = time.time()
     isovalues = skin["isovalues"]
     ranks = np.array([int(np.clip(np.searchsorted(isovalues, L["isovalue"] - 1e-9), 0, len(isovalues) - 1))
@@ -274,8 +305,11 @@ def order_and_check(body, skin, paths, machine, sim, offset, tolerance=HEAD_TOLE
     if native is not None:
         # Meme controle en C++ (apex/skin_check.hpp) : memes obstacles, meme distance
         # bornee, meme densification ; la boucle ci-dessous n'est alors pas executee.
-        tested = _check_native(native, sequence, body, paths, skin_angles, offset, head, machine, sim, plate_r,
-                               reach, DENSIFY, tolerance, over_tol, report, collision_points)
+        tested = _check_native(
+            native, sequence,
+            _NativeCheckContext(body, paths, skin_angles, offset, head, machine, sim, plate_r, reach, DENSIFY,
+                                tolerance, over_tol),
+            report, collision_points)
     for kind, ref in (sequence if native is None else ()):
         if kind == "body":
             body_pts.extend(dense([t - offset for t in body[ref]["toolpath_3d"]]))
