@@ -75,6 +75,41 @@ class SkinInputs:
     toolpath2d_params: s6.Step6Params
 
 
+class _SkinRun:
+    """Contexte d'une execution de `run` : entrees, journal et chronometrage."""
+
+    def __init__(self, tet_mesh, scalar_field, layers, mesh_data, overhang_map, toolpath2d_params,
+                 params, log: bool):
+        self.tet_mesh, self.scalar_field, self.layers = tet_mesh, scalar_field, layers
+        self.mesh_data, self.overhang_map, self.toolpath2d_params = mesh_data, overhang_map, toolpath2d_params
+        self.params, self.log = params, log
+        self.messages: list[str] = []
+        self.timings: dict = {}
+
+    def timed(self, name, fn, *args, **kwargs):
+        t = time.time()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            self.timings[name] = self.timings.get(name, 0.0) + time.time() - t
+
+    def say(self, msg):
+        self.messages.append(msg)
+        if self.log:
+            print(f"[skin] {msg}", flush=True)
+
+    def carved_body(self, skin, excluded=()):
+        params = self.params
+        cp = carve.CarveParams(thickness=params.thickness)
+        keep = (skin["zone"] >= 0) & ~np.isin(skin["zone"], list(excluded))
+        zone_faces = skin["faces"][keep]
+        carved, _rep = self.timed("P3 creusement", carve.carve_layers, self.layers, self.tet_mesh, self.scalar_field,
+                                  carve.ZoneDistance(skin["vertices"], zone_faces, cp), cp)
+        filled_c = self.timed("remplissage du corps creuse (etape 6)", s6.run, carved, self.mesh_data,
+                              self.overhang_map, self.toolpath2d_params)
+        return filled_c, body_from_layers(filled_c)
+
+
 def run(
     inputs: SkinInputs,
     machine: MachineProfile,
@@ -82,23 +117,11 @@ def run(
     params: SkinParams = SkinParams(),
     log: bool = False,
 ) -> SkinResult:
+    ctx = _SkinRun(inputs.tet_mesh, inputs.scalar_field, inputs.layers, inputs.mesh_data, inputs.overhang_map,
+                   inputs.toolpath2d_params, params, log)
+    timed, say = ctx.timed, ctx.say
     tet_mesh, scalar_field, layers = inputs.tet_mesh, inputs.scalar_field, inputs.layers
     mesh_data, overhang_map, toolpath2d_params = inputs.mesh_data, inputs.overhang_map, inputs.toolpath2d_params
-    messages: list[str] = []
-    timings: dict = {}
-
-    def timed(name, fn, *args, **kwargs):
-        t = time.time()
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            timings[name] = timings.get(name, 0.0) + time.time() - t
-
-    def say(msg):
-        messages.append(msg)
-        if log:
-            print(f"[skin] {msg}", flush=True)
-
     plate_r = params.plate_radius or getattr(machine, "platform_radius", None) or 150.0
     offset = np.zeros(3)
     t0 = time.time()
@@ -131,33 +154,22 @@ def run(
             break
         trim.extend(new)
 
-    cp = carve.CarveParams(thickness=params.thickness)
-
-    def carved_body(excluded=()):
-        keep = (skin["zone"] >= 0) & ~np.isin(skin["zone"], list(excluded))
-        zone_faces = skin["faces"][keep]
-        carved, _rep = timed("P3 creusement", carve.carve_layers, layers, tet_mesh, scalar_field,
-                             carve.ZoneDistance(skin["vertices"], zone_faces, cp), cp)
-        filled_c = timed("remplissage du corps creuse (etape 6)", s6.run, carved, mesh_data, overhang_map,
-                         toolpath2d_params)
-        return filled_c, body_from_layers(filled_c)
-
     excluded: set[int] = set()
     if clean:
-        body_layers, body = carved_body()
+        body_layers, body = ctx.carved_body(skin)
         p5 = timed("P5 controle (exhaustif)", print_order.order_and_check, body, skin, traced, machine, full_sim,
                    offset,
                    print_order.CheckOptions(tolerance=params.head_tolerance_deg, plate_r=plate_r))
         if not p5["collision_points"]:
             say(f"zero collision (verifie sur le corps creuse) en {time.time() - t0:.0f} s")
-            return SkinResult(body_layers, body, skin, traced, p5, it, True, [], messages, timings)
+            return SkinResult(body_layers, body, skin, traced, p5, it, True, [], ctx.messages, ctx.timings)
         say(f"verification sur le corps creuse : {len(p5['collision_points'])} point(s) -> zones retirees")
     else:
         say(f"{params.max_iter} tours sans zero collision : zones restantes retirees")
     excluded |= set(int(zz) for zz in p5["excluded"])
     body_layers, body = None, None
     for r in range(1, params.exclusion_rounds + 1):
-        body_layers, body = carved_body(sorted(excluded))
+        body_layers, body = ctx.carved_body(skin, sorted(excluded))
         p5 = timed("P5 controle (exhaustif)", print_order.order_and_check, body, skin, traced, machine, full_sim,
                    offset,
                    print_order.CheckOptions(tolerance=params.head_tolerance_deg, plate_r=plate_r,
@@ -166,4 +178,4 @@ def run(
         if not p5["collision_points"]:
             break
         excluded |= set(int(zz) for zz in p5["excluded"])
-    return SkinResult(body_layers, body, skin, traced, p5, it, clean, sorted(excluded), messages, timings)
+    return SkinResult(body_layers, body, skin, traced, p5, it, clean, sorted(excluded), ctx.messages, ctx.timings)

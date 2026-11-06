@@ -605,21 +605,83 @@ def _iter_schedule_points_native(schedule, layers_by_id, params):
     )
 
 
+def _schedule_segment_polyline(
+    layers_by_id: dict[int, Layer], layer_id: int, segment_index: int
+) -> tuple[Layer, np.ndarray]:
+    layer = layers_by_id.get(layer_id)
+    if layer is None:
+        raise ToolpathResolutionError(
+            f"PrintSchedule reference la couche {layer_id}, absente de `layers`."
+        )
+    toolpath = layer.toolpath_2d
+    if toolpath is None:
+        raise ToolpathResolutionError(
+            f"La couche {layer_id} n'a pas de toolpath_2d - "
+            f"pipeline/step7_scheduling.py doit etre execute avant l'etape 8."
+        )
+    if segment_index >= len(toolpath):
+        raise ToolpathResolutionError(
+            f"PrintSchedule reference le segment {segment_index} de la couche "
+            f"{layer_id}, hors limites ({len(toolpath)} segments disponibles)."
+        )
+    return layer, toolpath[segment_index]
+
+
+class _RawBlocks:
+    """Blocs de points bruts (un par polyligne ou point de trajet a vide), assembles en `_RawPoints`."""
+
+    def __init__(self):
+        self.positions: list[np.ndarray] = []
+        self.direction: list[np.ndarray] = []
+        self.count: list[int] = []
+        self.layer: list[int] = []
+        self.segment: list[int] = []
+        self.color: list[Optional[int]] = []
+        self.travel: list[bool] = []
+
+    def add(self, points, direction, layer_id: int, segment_index: int, color, travel: bool) -> None:
+        self.positions.append(points)
+        self.direction.append(direction)
+        self.count.append(len(points))
+        self.layer.append(layer_id)
+        self.segment.append(segment_index)
+        self.color.append(color)
+        self.travel.append(travel)
+
+    def to_raw_points(self, params: Step8Params) -> _RawPoints:
+        travel_feedrate = params.travel_feedrate if params.travel_feedrate > 0 else params.default_feedrate
+        if not self.positions:
+            empty3 = np.zeros((0, 3))
+            return _RawPoints(empty3, empty3.copy(), np.zeros(0, np.int64), np.zeros(0, np.int64), [],
+                              np.zeros(0), np.zeros(0), np.zeros(0, bool))
+        counts = np.asarray(self.count, dtype=np.int64)
+        travel = np.repeat(np.asarray(self.travel, dtype=bool), counts)
+        color_ids: list[Optional[int]] = []
+        for color, count in zip(self.color, self.count):
+            color_ids.extend([color] * count)
+        return _RawPoints(
+            position=np.concatenate(self.positions, axis=0).astype(float, copy=False),
+            desired_direction=np.repeat(np.asarray(self.direction, dtype=float), counts, axis=0),
+            layer_id=np.repeat(np.asarray(self.layer, dtype=np.int64), counts),
+            segment_index=np.repeat(np.asarray(self.segment, dtype=np.int64), counts),
+            color_id=color_ids,
+            feedrate=np.where(travel, float(travel_feedrate), float(params.default_feedrate)),
+            extrusion=np.where(travel, 0.0, 1.0),
+            is_travel=travel,
+        )
+
+
 def _iter_schedule_points(
     schedule: PrintSchedule, layers_by_id: dict[int, Layer], params: Step8Params
 ) -> _RawPoints:
     """
-    Parcourt `schedule.passes` DANS L'ORDRE (jamais re-derive : c'est
-    l'ordre d'execution gele par step7), releve chaque segment 2D vers le
-    3D, et insere un point de trajet a vide (`extrusion=0.0`) a chaque
-    frontiere de polyligne - y compris entre deux passes non contigues
-    (changement de couleur ou saut de couche). Une frontiere est detectee
-    des que la cle (layer_id, index) du segment courant differe de celle du
-    segment precedent, quelle que soit son origine (meme couche, couche
-    differente, passe differente).
+    Parcourt `schedule.passes` DANS L'ORDRE (jamais re-derive : c'est l'ordre d'execution gele par step7),
+    releve chaque segment 2D vers le 3D, et insere un point de trajet a vide (`extrusion=0.0`) a chaque
+    frontiere de polyligne - y compris entre deux passes non contigues. Une frontiere est detectee des que la
+    cle (layer_id, index) du segment courant differe de celle du segment precedent.
 
-    Rend des TABLEAUX (`_RawPoints`), assembles par blocs (un par
-    polyligne) : memes valeurs que la liste d'objets d'origine (2026-10-01).
+    Rend des TABLEAUX (`_RawPoints`), assembles par blocs (un par polyligne) : memes valeurs que la liste
+    d'objets d'origine (2026-10-01).
     """
     native_result = _iter_schedule_points_native(schedule, layers_by_id, params)
     if native_result is not None:
@@ -627,98 +689,32 @@ def _iter_schedule_points(
 
     previous_key: Optional[tuple[int, int]] = None
     normal_cache: dict[int, np.ndarray] = {}
-    travel_feedrate = params.travel_feedrate if params.travel_feedrate > 0 else params.default_feedrate
-
-    position_blocks: list[np.ndarray] = []
-    block_direction: list[np.ndarray] = []
-    block_count: list[int] = []
-    block_layer: list[int] = []
-    block_segment: list[int] = []
-    block_color: list[Optional[int]] = []
-    block_travel: list[bool] = []
-
-    def _segment_polyline(layer_id: int, segment_index: int) -> tuple[Layer, np.ndarray]:
-        layer = layers_by_id.get(layer_id)
-        if layer is None:
-            raise ToolpathResolutionError(
-                f"PrintSchedule reference la couche {layer_id}, absente de `layers`."
-            )
-        toolpath = layer.toolpath_2d
-        if toolpath is None:
-            raise ToolpathResolutionError(
-                f"La couche {layer_id} n'a pas de toolpath_2d - "
-                f"pipeline/step7_scheduling.py doit etre execute avant l'etape 8."
-            )
-        if segment_index >= len(toolpath):
-            raise ToolpathResolutionError(
-                f"PrintSchedule reference le segment {segment_index} de la couche "
-                f"{layer_id}, hors limites ({len(toolpath)} segments disponibles)."
-            )
-        return layer, toolpath[segment_index]
-
+    blocks = _RawBlocks()
     for pass_ in schedule.passes:
         for layer_id, segment_index in pass_.segments:
-            layer, polyline_2d = _segment_polyline(layer_id, segment_index)
+            layer, polyline_2d = _schedule_segment_polyline(layers_by_id, layer_id, segment_index)
             if len(polyline_2d) == 0:
                 continue
 
             points_3d = _lift_to_3d(polyline_2d, layer.local_frame)
-            # une normale PAR COUCHE, pas par polyligne : 29 691 np.cross sur
-            # death @ 0,8 (0,84 s) pour 257 valeurs distinctes
+            # une normale PAR COUCHE, pas par polyligne : 29 691 np.cross sur death @ 0,8 (0,84 s) pour 257
+            # valeurs distinctes
             desired_direction = normal_cache.get(layer_id)
             if desired_direction is None:
                 desired_direction = _layer_normal(layer.local_frame)
                 normal_cache[layer_id] = desired_direction
-            # Le sens de depot est donne par l'ORDRE de parcours des
-            # isosurfaces, pas par le signe de grad(phi). Une couche atteinte
-            # en DESCENDANT le champ (voir Layer.deposition_reversed) se
-            # depose sous la matiere existante : la tete doit pointer a
-            # l'oppose de la normale. Tant que l'ordre etait "phi croissant",
-            # ce cas n'existait pas et la supposition +grad(phi) restait vraie
-            # par construction.
+            # Le sens de depot est donne par l'ORDRE de parcours des isosurfaces, pas par le signe de
+            # grad(phi) : une couche atteinte en DESCENDANT le champ (Layer.deposition_reversed) se depose
+            # sous la matiere existante, la tete pointe a l'oppose de la normale.
             if getattr(layer, "deposition_reversed", False):
                 desired_direction = -desired_direction
             key = (layer_id, segment_index)
 
             if previous_key is not None and key != previous_key:
-                position_blocks.append(points_3d[:1])
-                block_direction.append(desired_direction)
-                block_count.append(1)
-                block_layer.append(layer_id)
-                block_segment.append(segment_index)
-                block_color.append(pass_.color_id)
-                block_travel.append(True)
-
-            position_blocks.append(points_3d)
-            block_direction.append(desired_direction)
-            block_count.append(len(points_3d))
-            block_layer.append(layer_id)
-            block_segment.append(segment_index)
-            block_color.append(pass_.color_id)
-            block_travel.append(False)
-
+                blocks.add(points_3d[:1], desired_direction, layer_id, segment_index, pass_.color_id, True)
+            blocks.add(points_3d, desired_direction, layer_id, segment_index, pass_.color_id, False)
             previous_key = key
-
-    if not position_blocks:
-        empty3 = np.zeros((0, 3))
-        return _RawPoints(empty3, empty3.copy(), np.zeros(0, np.int64), np.zeros(0, np.int64), [],
-                          np.zeros(0), np.zeros(0), np.zeros(0, bool))
-    counts = np.asarray(block_count, dtype=np.int64)
-    travel = np.repeat(np.asarray(block_travel, dtype=bool), counts)
-    color_ids: list[Optional[int]] = []
-    for color, count in zip(block_color, block_count):
-        color_ids.extend([color] * count)
-    return _RawPoints(
-        position=np.concatenate(position_blocks, axis=0).astype(float, copy=False),
-        desired_direction=np.repeat(np.asarray(block_direction, dtype=float), counts, axis=0),
-        layer_id=np.repeat(np.asarray(block_layer, dtype=np.int64), counts),
-        segment_index=np.repeat(np.asarray(block_segment, dtype=np.int64), counts),
-        color_id=color_ids,
-        feedrate=np.where(travel, float(travel_feedrate), float(params.default_feedrate)),
-        extrusion=np.where(travel, 0.0, 1.0),
-        is_travel=travel,
-    )
-
+    return blocks.to_raw_points(params)
 
 
 def gradient_direction_field(tet_mesh, scalar_field, nodal: bool = False):
@@ -883,17 +879,9 @@ def resolve_raw_points(
     ses points sans couches ni planning passe par exactement la meme resolution.
     """
     axes = machine_profile.rotation_axes or []
-    # Direction a angles nuls = SENS D'IMPRESSION de la tete au repos : tete
-    # vers le bas, donc impression vers +Z (axe du corps de la tete, +Z du
-    # modele de tete, cf. CLAUDE.md). Meme convention que step3/step7
-    # (composed_rotation_directions(..., reference_direction=up)), puisque la
-    # cible passee a l'IK est la normale de couche, c'est-a-dire le sens
-    # d'impression.
-    # Correction (2026-09-27) : la reference valait -Z, si bien qu'une couche
-    # plate (cible +Z) donnait B = 179,9 deg -- tete retournee, corps SOUS la
-    # buse -- et toute orientation etait inversee (couche inclinee de 11,5 deg
-    # -> B = 168,5 deg). Aucun G-code n'etant encore produit, seule l'etape 9
-    # en voyait les effets.
+    # Direction a angles nuls = SENS D'IMPRESSION de la tete au repos (tete vers le bas, impression vers +Z) :
+    # meme convention que step3/step7. Correction 2026-09-27 : la reference valait -Z (couche plate => B =
+    # 179,9 deg, tete retournee, corps SOUS la buse).
     reference_direction = np.array([0.0, 0.0, 1.0])
     platform_origin = machine_profile.platform_origin
 
@@ -921,9 +909,14 @@ def resolve_raw_points(
         # Listes neuves, propres a cet appel : aucune recopie necessaire.
         smoothed_angles = resolved_angles
 
-    points: list[ToolpathPoint] = []
-    diagnostics: list[Step8Diagnostic] = []
+    return _assemble_machine_toolpath(raw_points, smoothed_angles, residual_errors, params)
 
+
+def _assemble_machine_toolpath(
+    raw_points: "_RawPoints", smoothed_angles, residual_errors, params: Step8Params
+) -> tuple[ToolpathMachine, list[Step8Diagnostic]]:
+    """ToolpathPoint + diagnostics d'orientation inatteignable a partir des angles resolus."""
+    diagnostics: list[Step8Diagnostic] = []
     positions = raw_points.position
     extrusion = raw_points.extrusion.tolist()
     feedrate = raw_points.feedrate.tolist()
@@ -938,8 +931,7 @@ def resolve_raw_points(
         )
         for i in range(len(raw_points))
     ]
-    # conversion en degres VECTORISEE (meme operation element par element que
-    # np.degrees scalaire) : 364 192 appels numpy evites sur death @ 0,8
+    # conversion en degres VECTORISEE : 364 192 appels numpy evites sur death @ 0,8
     residual_deg = np.degrees(np.asarray(residual_errors, dtype=float))
     for i in np.nonzero(residual_deg > params.max_unreachable_angular_error_deg)[0]:
         diagnostics.append(
@@ -1143,36 +1135,9 @@ def _resolve_all_axis_angles_coupled(
 
 
 
-def _resolve_all_axis_angles_coupled_native(
-    raw_points: list["_RawPoint"],
-    axes: list[RotationAxisSpec],
-    outer_axis: np.ndarray,
-    reference_direction: np.ndarray,
-    machine_profile: MachineProfile,
-    params: Step8Params,
-) -> tuple[list[list[float]], list[float]]:
-    """
-    Pas 17 du portage C++ (CLAUDE.md limite #56) : meme calcul que la boucle
-    Python de `_resolve_all_axis_angles_coupled`, reorganise en trois temps.
-
-    1. Angle couple C de TOUS les points d'un coup (vectorise). Sa seule
-       dependance sequentielle est l'heritage sur l'axe (singularite) : un
-       remplissage vers l'avant, 0 au debut.
-    2. Cibles ramenees dans le repere de C (Rodrigues par lots).
-    3. Axes internes resolus par l'IK NATIVE du pas 2, SANS detection de
-       singularite (la boucle Python n'en fait pas non plus pour les axes
-       internes), avec la meme reprise au point fautif : la grille Python ne
-       traite que ce point.
-
-    Equivalence : TOLERANCE declaree, comme au pas 2 (angles a ~1e-9 deg).
-    Les produits scalaires vectorises peuvent differer d'un ULP des produits
-    scalaires point par point de la boucle Python.
-    """
-    global _LAST_NATIVE_FALLBACK_COUNT
-    native = _cpp.module()
-    positions, targets = _point_arrays(raw_points)
-    targets = targets / np.maximum(np.linalg.norm(targets, axis=1), 1e-12)[:, None]
-
+def _coupled_axis_angles(positions, outer_axis, machine_profile: MachineProfile, params: Step8Params):
+    """Angle couple C de TOUS les points d'un coup. Sa seule dependance sequentielle est l'heritage sur l'axe
+    (singularite) : un remplissage vers l'avant, 0 au debut."""
     rel = positions - np.asarray(machine_profile.platform_origin, dtype=float)
     rel = rel - np.outer(rel @ outer_axis, outer_axis)
     on_axis = np.linalg.norm(rel, axis=1) < params.singularity_radius_epsilon
@@ -1188,13 +1153,39 @@ def _resolve_all_axis_angles_coupled_native(
             if on_axis[i]:
                 c[i] = last
             last = c[i]
+    return c
+
+
+def _resolve_all_axis_angles_coupled_native(
+    raw_points: list["_RawPoint"],
+    axes: list[RotationAxisSpec],
+    outer_axis: np.ndarray,
+    reference_direction: np.ndarray,
+    machine_profile: MachineProfile,
+    params: Step8Params,
+) -> tuple[list[list[float]], list[float]]:
+    """
+    Pas 17 du portage C++ (limite #56) : meme calcul que la boucle Python de
+    `_resolve_all_axis_angles_coupled`, reorganise en trois temps : 1. angle couple C de tous les points
+    (`_coupled_axis_angles`) ; 2. cibles ramenees dans le repere de C (Rodrigues par lots) ; 3. axes internes
+    resolus par l'IK NATIVE du pas 2, SANS detection de singularite (la boucle Python n'en fait pas non plus
+    pour les axes internes), avec la meme reprise au point fautif : la grille Python ne traite que ce point.
+
+    Equivalence : TOLERANCE declaree, comme au pas 2 (angles a ~1e-9 deg) ; les produits scalaires vectorises
+    peuvent differer d'un ULP de ceux de la boucle Python.
+    """
+    global _LAST_NATIVE_FALLBACK_COUNT
+    native = _cpp.module()
+    positions, targets = _point_arrays(raw_points)
+    targets = targets / np.maximum(np.linalg.norm(targets, axis=1), 1e-12)[:, None]
+    c = _coupled_axis_angles(positions, outer_axis, machine_profile, params)
 
     local_targets = _rodrigues_rotate(targets, outer_axis, np.radians(-c))
     inner_axes = axes[1:]
     inner_spec = [(np.asarray(spec.axis, dtype=float), *spec.angle_range_deg) for spec in inner_axes]
 
-    # blocs de lignes (natif) et lignes isolees (repli), concatenes une fois :
-    # aucune conversion ligne par ligne (0,26 s sur death @ 0,8)
+    # blocs de lignes (natif) et lignes isolees (repli), concatenes une fois : aucune conversion ligne par
+    # ligne (0,26 s sur death @ 0,8)
     inner_blocks: list[np.ndarray] = []
     previous: Optional[list[float]] = None
     cursor = 0
@@ -1233,6 +1224,7 @@ def _resolve_all_axis_angles_coupled_native(
         achieved = _rodrigues_rotate(achieved, ax / np.linalg.norm(ax), np.radians(angles[:, k]))
     residuals = np.arccos(np.clip(np.einsum("ij,ij->i", achieved, targets), -1.0, 1.0))
     return angles.tolist(), residuals.tolist()
+
 
 def _resolve_all_axis_angles(
     raw_points: list["_RawPoint"],

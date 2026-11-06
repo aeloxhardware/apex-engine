@@ -243,41 +243,7 @@ def _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, re
     return EXIT_OK
 
 
-def slice_main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="main.py slice", description="Tranche un modele selon une requete JSON.")
-    parser.add_argument("--request", required=True, help="Fichier requete.json.")
-    args = parser.parse_args(argv)
-    real_stdout, log = sys.stdout, sys.stderr
-
-    def refuse(status: str, code: int, message: str, **extra) -> int:
-        _emit(log, {"type": "log", "level": "error", "code": status, "message": message})
-        print(_dumps(_clean(_result(status, message=message, **extra))), file=real_stdout, flush=True)
-        return code
-
-    try:
-        with open(args.request, encoding="utf-8") as handle:
-            request = parse_request(handle.read())
-    except OSError as exc:
-        return refuse("invalid_request", EXIT_INVALID, f"requete illisible : {exc}")
-    except InvalidRequest as exc:
-        return refuse("invalid_request", EXIT_INVALID, str(exc))
-    if not os.path.isfile(request["mesh"]):
-        return refuse("invalid_request", EXIT_INVALID, f"maillage introuvable : {request['mesh']}")
-
-    os.makedirs(request["output_dir"], exist_ok=True)
-    name = request["output_name"] or os.path.splitext(os.path.basename(request["mesh"]))[0] + ".gcode"
-    final_path = os.path.join(request["output_dir"], name)
-    temp_path = final_path + ".part"
-    for stale in (temp_path,):
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(stale)
-
-    def progress(slug: str, fraction: float) -> None:
-        _emit(log, {"type": "step", "slug": slug, "fraction": float(fraction)})
-
-    if request["algorithm"] == "element-aeolis":
-        return _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, refuse)
-
+def _slice_ardor(request: dict, final_path: str, temp_path: str, progress, log, real_stdout, refuse) -> int:
     from main import export_gcode_checked, run_pipeline
     from pipeline.step1_ingest import MeshIngestError, SurfaceInconsistentError
 
@@ -324,3 +290,40 @@ def slice_main(argv: list[str]) -> int:
         platform_z=getattr(ingest, "platform_z_used", None),
         warnings=warnings, **_counts(result)))), file=real_stdout, flush=True)
     return EXIT_OK
+
+
+def slice_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="main.py slice", description="Tranche un modele selon une requete JSON.")
+    parser.add_argument("--request", required=True, help="Fichier requete.json.")
+    args = parser.parse_args(argv)
+    real_stdout, log = sys.stdout, sys.stderr
+
+    def refuse(status: str, code: int, message: str, **extra) -> int:
+        _emit(log, {"type": "log", "level": "error", "code": status, "message": message})
+        print(_dumps(_clean(_result(status, message=message, **extra))), file=real_stdout, flush=True)
+        return code
+
+    try:
+        with open(args.request, encoding="utf-8") as handle:
+            request = parse_request(handle.read())
+    except OSError as exc:
+        return refuse("invalid_request", EXIT_INVALID, f"requete illisible : {exc}")
+    except InvalidRequest as exc:
+        return refuse("invalid_request", EXIT_INVALID, str(exc))
+    if not os.path.isfile(request["mesh"]):
+        return refuse("invalid_request", EXIT_INVALID, f"maillage introuvable : {request['mesh']}")
+
+    os.makedirs(request["output_dir"], exist_ok=True)
+    name = request["output_name"] or os.path.splitext(os.path.basename(request["mesh"]))[0] + ".gcode"
+    final_path = os.path.join(request["output_dir"], name)
+    temp_path = final_path + ".part"
+    for stale in (temp_path,):
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(stale)
+
+    def progress(slug: str, fraction: float) -> None:
+        _emit(log, {"type": "step", "slug": slug, "fraction": float(fraction)})
+
+    if request["algorithm"] == "element-aeolis":
+        return _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, refuse)
+    return _slice_ardor(request, final_path, temp_path, progress, log, real_stdout, refuse)

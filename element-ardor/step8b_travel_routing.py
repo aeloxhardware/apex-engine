@@ -220,6 +220,49 @@ def _path_collides(
     return False
 
 
+@dataclass
+class _RoutingContext:
+    toolhead_base_samples: Optional[np.ndarray]
+    printed_index: Optional[_PrintedGeometryIndex]
+    has_toolhead: bool
+    machine_profile: MachineProfile
+    sim_params: CollisionSimParams
+    params: TravelRoutingParams
+
+
+def _route_one_travel(ctx: _RoutingContext, index: int, point: ToolpathPoint, start, end, travel_length: float):
+    """Lift standard, double successivement jusqu'a `lift_height * max_lift_multiplier`. Retourne
+    `(chemin, diagnostic ou None)`. Si aucune hauteur n'evite la collision (ou pas de modele de tete pour
+    valider), on route quand meme via le DERNIER candidat essaye (strictement mieux qu'une ligne droite) mais
+    on le signale si un modele de tete confirme la collision residuelle."""
+    params = ctx.params
+    candidate_lift = params.lift_height
+    max_lift = params.lift_height * max(params.max_lift_multiplier, 1.0)
+    last_tested_lift = candidate_lift
+    while True:
+        path = _lifted_path_points(start, end, candidate_lift, params.traverse_samples)
+        last_tested_lift = candidate_lift
+        if not _path_collides(
+            path, ctx.toolhead_base_samples, ctx.machine_profile.rotation_axes,
+            point.axis_angles, ctx.printed_index, ctx.sim_params.safety_margin,
+        ):
+            return path, None
+        if candidate_lift >= max_lift or not ctx.has_toolhead:
+            break
+        candidate_lift = min(candidate_lift * 2.0, max_lift)
+
+    chosen_path = _lifted_path_points(start, end, last_tested_lift, params.traverse_samples)
+    diagnostic = None
+    if ctx.has_toolhead:
+        diagnostic = TravelRoutingDiagnostic(
+            point_index=index,
+            travel_length=travel_length,
+            max_lift_tested=last_tested_lift,
+            still_colliding=True,
+        )
+    return chosen_path, diagnostic
+
+
 def route_long_travels(
     toolpath: ToolpathMachine,
     machine_profile: MachineProfile,
@@ -227,38 +270,28 @@ def route_long_travels(
     params: TravelRoutingParams,
 ) -> tuple[ToolpathMachine, list[TravelRoutingDiagnostic]]:
     """
-    Remplace chaque trajet a vide de longueur > `params.length_threshold`
-    par un chemin lift-and-traverse valide par detection de collision
-    contre la matiere deja imprimee (index incrementalement grossi, meme
+    Remplace chaque trajet a vide de longueur > `params.length_threshold` par un chemin lift-and-traverse
+    valide par detection de collision contre la matiere deja imprimee (index incrementalement grossi, meme
     invariant "jamais en avance sur le point teste" que step9/step10).
 
-    Ne mute jamais `toolpath` - retourne une copie. Les points en extrusion
-    (`extrusion > 0`) sont copies tels quels et strictement dans le meme
-    ordre : seuls les points de trajet a vide (`extrusion <= 0`) peuvent
-    voir leur position dediee remplacee par une sequence de plusieurs
-    points.
+    Ne mute jamais `toolpath` - retourne une copie. Les points en extrusion sont copies tels quels et dans le
+    meme ordre : seuls les points de trajet a vide peuvent voir leur position remplacee par plusieurs points.
 
-    Sans modele de tete charge (`machine_profile.nozzle_model` absent),
-    aucune validation de collision n'est possible : le lift standard
-    (`params.lift_height`) est applique sans essai d'augmentation ni
-    diagnostic - un lift non valide reste strictement meilleur qu'une ligne
-    droite non validee (memes soulevements deja utilises par les slicers
-    3-axes classiques comme palliatif), mais n'est jamais presente comme
-    "verifie sans collision" (aucun TravelRoutingDiagnostic n'est
-    d'ailleurs emis dans ce cas, faute de pouvoir juger).
+    Sans modele de tete charge, aucune validation de collision n'est possible : le lift standard
+    (`params.lift_height`) est applique sans essai d'augmentation ni diagnostic (un lift non valide reste
+    meilleur qu'une ligne droite non validee, mais n'est jamais presente comme "verifie sans collision").
     """
     nozzle_model = machine_profile.nozzle_model
     has_toolhead = isinstance(nozzle_model, trimesh.Trimesh) and len(nozzle_model.vertices) > 0
 
     toolhead_base_samples = None
-    if has_toolhead:
-        toolhead_base_samples = _surface_sample_points(nozzle_model, params.routing_toolhead_sample_spacing)
-
     printed_index: Optional[_PrintedGeometryIndex] = None
     if has_toolhead:
+        toolhead_base_samples = _surface_sample_points(nozzle_model, params.routing_toolhead_sample_spacing)
         printed_index = _PrintedGeometryIndex(
             machine_profile.nozzle_diameter, params.routing_grid_cell_size_multiplier
         )
+    ctx = _RoutingContext(toolhead_base_samples, printed_index, has_toolhead, machine_profile, sim_params, params)
 
     points = list(toolpath.points)
     boundary_indices = set(_travel_boundaries(points))
@@ -278,47 +311,13 @@ def route_long_travels(
         start = points[i - 1].position
         end = point.position
         travel_length = float(np.linalg.norm(end - start))
-
         if travel_length <= params.length_threshold:
             routed_points.append(point)
             continue
 
-        candidate_lift = params.lift_height
-        max_lift = params.lift_height * max(params.max_lift_multiplier, 1.0)
-        chosen_path: Optional[list[np.ndarray]] = None
-        last_tested_lift = candidate_lift
-
-        while True:
-            path = _lifted_path_points(start, end, candidate_lift, params.traverse_samples)
-            last_tested_lift = candidate_lift
-            if not _path_collides(
-                path, toolhead_base_samples, machine_profile.rotation_axes,
-                point.axis_angles, printed_index, sim_params.safety_margin,
-            ):
-                chosen_path = path
-                break
-            if candidate_lift >= max_lift or not has_toolhead:
-                break
-            candidate_lift = min(candidate_lift * 2.0, max_lift)
-
-        if chosen_path is None:
-            # Aucune hauteur testee n'a evite la collision (ou pas de
-            # modele de tete pour valider) : on route quand meme via le
-            # DERNIER candidat essaye plutot que retomber sur la ligne
-            # droite (strictement pire, jamais un progres) - mais on le
-            # signale explicitement si un modele de tete etait disponible
-            # et confirme la collision residuelle.
-            chosen_path = _lifted_path_points(start, end, last_tested_lift, params.traverse_samples)
-            if has_toolhead:
-                diagnostics.append(
-                    TravelRoutingDiagnostic(
-                        point_index=i,
-                        travel_length=travel_length,
-                        max_lift_tested=last_tested_lift,
-                        still_colliding=True,
-                    )
-                )
-
+        chosen_path, diagnostic = _route_one_travel(ctx, i, point, start, end, travel_length)
+        if diagnostic is not None:
+            diagnostics.append(diagnostic)
         travel_feedrate = points[i - 1].feedrate
         for intermediate_position in chosen_path[:-1]:
             routed_points.append(_make_intermediate_point(intermediate_position, point, travel_feedrate))

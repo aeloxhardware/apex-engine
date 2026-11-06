@@ -431,34 +431,11 @@ def head_zlow_from_table(grid: np.ndarray, values: np.ndarray) -> Callable[[floa
     return head_zlow
 
 
-def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[str] = None,
-                 head_zlow: Optional[Callable[[float], float]] = None,
-                 travel_check: Optional[Callable[[int, np.ndarray, float], bool]] = None):
-    """Ecrit le G-code (si `path`) et rend (lignes, GcodeReport).
-
-    `head_zlow(B)` : hauteur du point le plus bas de la vraie tete sous la
-    pointe pour cet angle (negative), pour refuser un degagement vers le
-    plateau. `travel_check(i, point, B) -> bool` : controle de collision d'un
-    point de degagement (vrai = contact), compte dans le rapport."""
-    pos = np.asarray(toolpath["position"], dtype=float)
-    ang = np.asarray(toolpath["axis_angles"], dtype=float)
-    ext = np.asarray(toolpath["extrusion"], dtype=float)
-    skin = np.asarray(toolpath.get("is_skin", np.zeros(len(pos), bool)), dtype=bool)
-    n = len(pos)
-    if params.tip_at_bead_top and n:
-        half = np.where(skin, params.skin_thickness, params.layer_height) * 0.5
-        pos = pos + head_axis_vectors(pos, ang[:, 1]) * half[:, None]
-    rep = GcodeReport()
-    fil_area = np.pi * (params.filament_diameter / 2) ** 2
-    L, dec = params.pivot_to_tip, params.decimals
-    coupled = list(getattr(machine, "position_coupled_axes", None) or [])
-    vmax = float(np.degrees(getattr(machine, "max_angular_velocity", 0.0) or 0.0))
-    amax = float(np.degrees(getattr(machine, "max_angular_acceleration", 0.0) or 0.0))
-    _, _, slow = feed_plan(pos, ang, vmax, amax, coupled, params.print_speed) if n > 1 else (0, 0, np.ones(0))
-
-    # En-tete natif (pas 24, suite) quand le format de repr(float) est le meme ;
-    # sinon (valeur hors [1e-4, 1e16)) le texte Python.
+def _header_lines(params: GcodeParams, machine, pivot_to_tip: float) -> list:
+    """En-tete du fichier. Natif (pas 24, suite) quand le format de repr(float) est le meme ; sinon (valeur
+    hors [1e-4, 1e16)) le texte Python."""
     from core import _cpp
+    L = pivot_to_tip
     native_header = None
     if _cpp.enabled() and hasattr(_cpp.module(), "gcode_header"):
         native_header = _cpp.module().gcode_header(
@@ -479,110 +456,126 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
     out.insert(0, SIGNATURE)                      # ligne fixe, en clair : l'interface reconnait Apex (R-025)
     out.append(kinematics_header_line(params))   # R-007 : la cinematique d'ecriture voyage avec le fichier
     out += _encrypted_header(params, machine)              # R-010 : meme information dans le bloc chiffre (sans le paquet : rien)
-    state = {"fw": None, "e": 0.0, "retracted": False}
-    guard = {"x": [], "y": [], "z": []}
+    return out
 
-    def fmt(v):
-        s = f"{v:.{dec}f}".rstrip("0").rstrip(".")
+
+def _native_body_options(params: GcodeParams, fil_area: float) -> dict:
+    return {"layer_height": params.layer_height, "skin_thickness": params.skin_thickness,
+            "line_width": params.line_width, "flow": params.flow, "print_speed": params.print_speed,
+            "travel_speed": params.travel_speed, "rotation_feed": params.rotation_feed,
+            "max_feed": params.max_feed, "retract_length": params.retract_length,
+            "retract_speed": params.retract_speed, "retract_min_travel": params.retract_min_travel,
+            "travel_clearance": params.travel_clearance, "pivot_to_tip": params.pivot_to_tip,
+            "platform_margin": params.platform_margin, "singularity_radius": params.singularity_radius,
+            "tilt_sign": params.tilt_sign, "b_sign": params.b_sign, "z_reference": params.z_reference,
+            "decimals": params.decimals,
+            "fil_area": fil_area, "max_tip_deviation": params.max_tip_deviation}
+
+
+class _GcodeWriter:
+    """Etat et mouvements de l'ecriture du G-code (chemin Python et recueil des resultats natifs)."""
+
+    def __init__(self, params: GcodeParams, machine, head_zlow, rep: GcodeReport, out: list):
+        self.params, self.machine, self.head_zlow, self.rep, self.out = params, machine, head_zlow, rep, out
+        self.L = params.pivot_to_tip
+        self.state = {"fw": None, "e": 0.0, "retracted": False}
+        self.guard = {"x": [], "y": [], "z": []}
+
+    def fmt(self, v):
+        s = f"{v:.{self.params.decimals}f}".rstrip("0").rstrip(".")
         return "0" if s in ("-0", "") else s
 
-    # Pas 24 du portage C++ : corps du fichier en natif, texte identique ligne
-    # a ligne (tests/test_cpp_equivalence.py), decoupage `max_tip_deviation`
-    # compris depuis le 2026-10-07, controle des degagements depuis le 2026-10-13
-    # (`material_travel_check`, porte en donnees). Hors de portee du natif : un
-    # `travel_check` quelconque (rappel Python sans `.native`) ou un `head_zlow` sans table.
-    table = getattr(head_zlow, "table", None) if head_zlow is not None else (np.zeros(0), np.zeros(0))
-    travel_native = getattr(travel_check, "native", None) if travel_check is not None else None
-    if (_cpp.enabled() and hasattr(_cpp.module(), "export_gcode_body")
-            and (travel_check is None
-                 or (travel_native is not None and getattr(_cpp.module(), "EXPORT_TRAVEL_CHECK", False)))
-            and table is not None and n):
+    def native_body(self, arrays: tuple, travel_check, fil_area: float) -> int:
+        """Pas 24 du portage C++ : corps du fichier en natif, texte identique ligne a ligne
+        (tests/test_cpp_equivalence.py), decoupage `max_tip_deviation` compris, controle des degagements
+        depuis le 2026-10-13 (`material_travel_check`, porte en donnees). Hors de portee du natif : un
+        `travel_check` quelconque (rappel Python sans `.native`) ou un `head_zlow` sans table.
+        Retourne le nombre de points restant a ecrire par le chemin Python (`n` ou 0)."""
+        from core import _cpp
+        pos, ang, ext, skin, slow = arrays
+        n, params, rep = len(pos), self.params, self.rep
+        head_zlow = self.head_zlow
+        table = getattr(head_zlow, "table", None) if head_zlow is not None else (np.zeros(0), np.zeros(0))
+        travel_native = getattr(travel_check, "native", None) if travel_check is not None else None
+        if not (_cpp.enabled() and hasattr(_cpp.module(), "export_gcode_body")
+                and (travel_check is None
+                     or (travel_native is not None and getattr(_cpp.module(), "EXPORT_TRAVEL_CHECK", False)))
+                and table is not None and n):
+            return n
         body, st = _cpp.module().export_gcode_body(
             np.ascontiguousarray(pos), np.ascontiguousarray(ang[:, :2]), np.ascontiguousarray(ext),
             np.ascontiguousarray(skin, dtype=np.uint8), np.ascontiguousarray(slow, dtype=float),
             np.ascontiguousarray(table[0], dtype=float), np.ascontiguousarray(table[1], dtype=float),
-            {"layer_height": params.layer_height, "skin_thickness": params.skin_thickness,
-             "line_width": params.line_width, "flow": params.flow, "print_speed": params.print_speed,
-             "travel_speed": params.travel_speed, "rotation_feed": params.rotation_feed,
-             "max_feed": params.max_feed, "retract_length": params.retract_length,
-             "retract_speed": params.retract_speed, "retract_min_travel": params.retract_min_travel,
-             "travel_clearance": params.travel_clearance, "pivot_to_tip": L,
-             "platform_margin": params.platform_margin, "singularity_radius": params.singularity_radius,
-             "tilt_sign": params.tilt_sign, "b_sign": params.b_sign, "z_reference": params.z_reference,
-             "decimals": dec,
-             "fil_area": fil_area, "max_tip_deviation": params.max_tip_deviation},
+            _native_body_options(params, fil_area),
             *(() if travel_native is None else (travel_native,)))
         _z_offset(1.0, params.z_reference)   # meme erreur que le chemin Python si z_reference est inconnu
         if "subdivided_moves" not in st:
-            # Module natif PERIME (anterieur au decoupage `max_tip_deviation`, pas 24 etendu) : il
-            # ecrirait des mouvements non decoupes, donc une pointe qui quitte sa trajectoire. Son
-            # resultat est ecarte et le chemin Python, identique, le remplace (jamais un fichier faux).
-            n_loop = n
-        else:
-            rep.travel_collisions = int(st.get("travel_collisions", 0))
-            out += body.split(chr(10))
-            rep.moves, rep.travels, rep.retractions = st["moves"], st["travels"], st["retractions"]
-            rep.subdivided_moves = st["subdivided_moves"]
-            rep.max_tip_deviation_before = st["max_tip_deviation_before"]
-            rep.clearance_axes = {"Z": st["clearance_Z"], "R": st["clearance_R"], "none": st["clearance_none"]}
-            rep.filament_mm, rep.c_mismatch_deg = st["filament_mm"], st["c_mismatch_deg"]
-            rep.tip_z_min, rep.head_z_min = st["tip_z_min"], st["head_z_min"]
-            rep.tip_below_plate, rep.head_below_margin = st["tip_below_plate"], st["head_below_margin"]
-            if st["any"]:
-                guard["x"], guard["y"], guard["z"] = list(st["x"]), list(st["y"]), list(st["z"])
-            n_loop = 0
-    else:
-        n_loop = n
+            # Module natif PERIME (anterieur au decoupage `max_tip_deviation`) : son resultat est ecarte et
+            # le chemin Python, identique, le remplace (jamais un fichier faux).
+            return n
+        rep.travel_collisions = int(st.get("travel_collisions", 0))
+        self.out += body.split(chr(10))
+        rep.moves, rep.travels, rep.retractions = st["moves"], st["travels"], st["retractions"]
+        rep.subdivided_moves = st["subdivided_moves"]
+        rep.max_tip_deviation_before = st["max_tip_deviation_before"]
+        rep.clearance_axes = {"Z": st["clearance_Z"], "R": st["clearance_R"], "none": st["clearance_none"]}
+        rep.filament_mm, rep.c_mismatch_deg = st["filament_mm"], st["c_mismatch_deg"]
+        rep.tip_z_min, rep.head_z_min = st["tip_z_min"], st["head_z_min"]
+        rep.tip_below_plate, rep.head_below_margin = st["tip_below_plate"], st["head_below_margin"]
+        if st["any"]:
+            self.guard["x"], self.guard["y"], self.guard["z"] = list(st["x"]), list(st["y"]), list(st["z"])
+        return 0
 
-    def move(point, b, tip_speed, e_add=0.0, comment=""):
+    def _deviation(self, p0, b0, fw0, p1, b1):
+        params = self.params
+        fw1 = machine_to_firmware(p1, b1, self.L, fw0[1], params.singularity_radius,
+                                  params.tilt_sign, params.z_reference, params.b_sign)
+        mid_fw = [(u + v) / 2.0 for u, v in zip(fw0, fw1)]
+        mid_tip = firmware_to_machine(*mid_fw, self.L, params.tilt_sign, params.z_reference, params.b_sign)
+        return float(np.linalg.norm(mid_tip - (np.asarray(p0) + np.asarray(p1)) / 2.0)), fw1
+
+    def _split(self, p0, b0, fw0, p1, b1, depth, pieces):
+        dev, fw1 = self._deviation(p0, b0, fw0, p1, b1)
+        if depth == 0:
+            self.rep.max_tip_deviation_before = max(self.rep.max_tip_deviation_before, dev)
+        if dev <= self.params.max_tip_deviation or depth >= 10:
+            pieces.append((np.asarray(p1, dtype=float), b1))
+            return fw1
+        pm = (np.asarray(p0, dtype=float) + np.asarray(p1, dtype=float)) / 2.0
+        bm = (b0 + b1) / 2.0
+        fwm = self._split(p0, b0, fw0, pm, bm, depth + 1, pieces)
+        return self._split(pm, bm, fwm, p1, b1, depth + 1, pieces)
+
+    def move(self, point, b, tip_speed, e_add=0.0, comment=""):
         """Mouvement vers (point, b), DECOUPE si besoin pour que la pointe suive
         la droite visee a `max_tip_deviation` pres (voir GcodeParams)."""
-        tol = params.max_tip_deviation
+        state = self.state
         prev = state["fw"]
-        if tol is None or prev is None:
-            emit(point, b, tip_speed, e_add, comment)
+        if self.params.max_tip_deviation is None or prev is None:
+            self.emit(point, b, tip_speed, e_add, comment)
             return
-        a_tip, a_b = state["tip"], float(prev[3]) * params.b_sign
+        a_tip, a_b = state["tip"], float(prev[3]) * self.params.b_sign
         pieces = []
-
-        def deviation(p0, b0, fw0, p1, b1):
-            fw1 = machine_to_firmware(p1, b1, L, fw0[1], params.singularity_radius,
-                                      params.tilt_sign, params.z_reference, params.b_sign)
-            mid_fw = [(u + v) / 2.0 for u, v in zip(fw0, fw1)]
-            mid_tip = firmware_to_machine(*mid_fw, L, params.tilt_sign, params.z_reference, params.b_sign)
-            return float(np.linalg.norm(mid_tip - (np.asarray(p0) + np.asarray(p1)) / 2.0)), fw1
-
-        def split(p0, b0, fw0, p1, b1, depth):
-            dev, fw1 = deviation(p0, b0, fw0, p1, b1)
-            if depth == 0:
-                rep.max_tip_deviation_before = max(rep.max_tip_deviation_before, dev)
-            if dev <= tol or depth >= 10:
-                pieces.append((np.asarray(p1, dtype=float), b1))
-                return fw1
-            pm = (np.asarray(p0, dtype=float) + np.asarray(p1, dtype=float)) / 2.0
-            bm = (b0 + b1) / 2.0
-            fwm = split(p0, b0, fw0, pm, bm, depth + 1)
-            return split(pm, bm, fwm, p1, b1, depth + 1)
-
-        split(a_tip, a_b, prev, np.asarray(point, dtype=float), float(b), 0)
+        self._split(a_tip, a_b, prev, np.asarray(point, dtype=float), float(b), 0, pieces)
         if len(pieces) > 1:
-            rep.subdivided_moves += 1
+            self.rep.subdivided_moves += 1
         total = float(np.linalg.norm(np.asarray(point, dtype=float) - a_tip))
         start = a_tip
         for k, (p, bb) in enumerate(pieces):
             share = float(np.linalg.norm(p - start)) / total if total > 1e-12 else 1.0 / len(pieces)
-            emit(p, bb, tip_speed, e_add * share, comment if k == len(pieces) - 1 else "")
+            self.emit(p, bb, tip_speed, e_add * share, comment if k == len(pieces) - 1 else "")
             start = p
 
-    def emit(point, b, tip_speed, e_add=0.0, comment=""):
+    def emit(self, point, b, tip_speed, e_add=0.0, comment=""):
+        params, rep, state, guard = self.params, self.rep, self.state, self.guard
         prev = state["fw"]
-        fw = machine_to_firmware(point, b, L, None if prev is None else prev[1], params.singularity_radius,
+        fw = machine_to_firmware(point, b, self.L, None if prev is None else prev[1], params.singularity_radius,
                                  params.tilt_sign, params.z_reference, params.b_sign)
         tz = float(point[2])
         rep.tip_z_min = min(rep.tip_z_min, tz)
         rep.tip_below_plate += int(tz < 0.0)
-        if head_zlow is not None:
-            hz = tz + head_zlow(b)
+        if self.head_zlow is not None:
+            hz = tz + self.head_zlow(b)
             rep.head_z_min = min(rep.head_z_min, hz)
             rep.head_below_margin += int(hz < params.platform_margin)
         guard["x"].append(fw[0])
@@ -597,74 +590,87 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
         feed = min(max(feed, 1.0), params.max_feed)
         state["e"] += e_add
         # Six axes XYZABC sur chaque mouvement (file_io/gcode_axes.py) ; A et C restent à 0 sur cette machine.
-        words = axes_words({"X": fw[0], "Y": fw[1], "Z": fw[2], "B": fw[3]}, fmt)
+        words = axes_words({"X": fw[0], "Y": fw[1], "Z": fw[2], "B": fw[3]}, self.fmt)
         if e_add:
-            words.append(f"E{fmt(state['e'])}")
-        out.append("G00 " + " ".join(words) + f" F{fmt(feed)}" + (f" ; {comment}" if comment else ""))
+            words.append(f"E{self.fmt(state['e'])}")
+        self.out.append("G00 " + " ".join(words) + f" F{self.fmt(feed)}" + (f" ; {comment}" if comment else ""))
         state["fw"], state["tip"] = fw, np.asarray(point, dtype=float)
         rep.moves += 1
 
-    def retract(sign):
-        state["e"] += sign * params.retract_length
-        out.append(f"G01 E{fmt(state['e'])} F{fmt(params.retract_speed * 60.0)}")
-        state["retracted"] = sign < 0
+    def retract(self, sign):
+        self.state["e"] += sign * self.params.retract_length
+        self.out.append(f"G01 E{self.fmt(self.state['e'])} F{self.fmt(self.params.retract_speed * 60.0)}")
+        self.state["retracted"] = sign < 0
 
-    last_kind = None
-    for i in range(n_loop):
-        _progress.report(i, n_loop, span=(0.4, 1.0))   # R-017 : points ecrits
-        kind = "lissage" if skin[i] else "corps"
+    def travel(self, i, pos, ang, travel_check):
+        """Trajet a vide vers pos[i] (i > 0) : retraction + degagement si assez long."""
+        params, rep = self.params, self.rep
         b = float(ang[i, 1])
-        if i > 0:
-            y_fw = machine_to_firmware(pos[i], b, L, None, params.singularity_radius,
-                                       params.tilt_sign, params.z_reference, params.b_sign)[1]
-            if np.hypot(*pos[i, :2]) > 1e-3:
-                rep.c_mismatch_deg = max(rep.c_mismatch_deg,
-                                         abs((y_fw - (ang[i, 0] - 90.0) + 180.0) % 360.0 - 180.0))
-        if kind != last_kind:
-            out.append(f"; --- {kind} ---")
-            last_kind = kind
-        if i == 0 or ext[i] <= 0:
-            # trajet a vide vers pos[i]
-            rep.travels += 1
+        length = float(np.linalg.norm(pos[i] - pos[i - 1]))
+        if length < params.retract_min_travel:
+            self.move(pos[i], b, params.travel_speed)
+            return
+        self.retract(-1)
+        rep.retractions += 1
+        b0 = float(ang[i - 1, 1])
+        blk0 = (lambda p, i=i, b0=b0: travel_check(i, p, b0)) if travel_check is not None else None
+        blk1 = (lambda p, i=i, b=b: travel_check(i, p, b)) if travel_check is not None else None
+        axis0, up0 = clearance_move(pos[i - 1], b0, params, self.head_zlow, blocked=blk0)
+        axis1, up1 = clearance_move(pos[i], b, params, self.head_zlow, blocked=blk1)
+        rep.clearance_axes[axis0] += 1
+        if travel_check is not None:
+            rep.travel_collisions += int(travel_check(i, up0, b0)) + int(travel_check(i, up1, b))
+        self.move(up0, b0, params.travel_speed, comment=f"degagement {axis0}")
+        self.move(up1, b, params.travel_speed)
+        self.move(pos[i], b, params.travel_speed)
+        self.retract(+1)
+
+    def python_loop(self, arrays: tuple, n_loop: int, travel_check, fil_area: float) -> None:
+        """Chemin Python : ecrit les `n_loop` points (0 si le natif a deja tout ecrit)."""
+        pos, ang, ext, skin, slow = arrays
+        params, rep = self.params, self.rep
+        L, last_kind = self.L, None
+        for i in range(n_loop):
+            _progress.report(i, n_loop, span=(0.4, 1.0))   # R-017 : points ecrits
+            kind = "lissage" if skin[i] else "corps"
+            b = float(ang[i, 1])
+            if i > 0:
+                y_fw = machine_to_firmware(pos[i], b, L, None, params.singularity_radius,
+                                           params.tilt_sign, params.z_reference, params.b_sign)[1]
+                if np.hypot(*pos[i, :2]) > 1e-3:
+                    rep.c_mismatch_deg = max(rep.c_mismatch_deg,
+                                             abs((y_fw - (ang[i, 0] - 90.0) + 180.0) % 360.0 - 180.0))
+            if kind != last_kind:
+                self.out.append(f"; --- {kind} ---")
+                last_kind = kind
             if i == 0:
-                axis, up = clearance_move(pos[0], b, params, head_zlow)
-                move(up, b, params.travel_speed, comment="approche")
+                rep.travels += 1
+                axis, up = clearance_move(pos[0], b, params, self.head_zlow)
+                self.move(up, b, params.travel_speed, comment="approche")
                 rep.clearance_axes[axis] += 1
-                move(pos[0], b, params.travel_speed)
+                self.move(pos[0], b, params.travel_speed)
                 continue
-            length = float(np.linalg.norm(pos[i] - pos[i - 1]))
-            if length >= params.retract_min_travel:
-                retract(-1)
-                rep.retractions += 1
-                b0 = float(ang[i - 1, 1])
-                blk0 = (lambda p, i=i, b0=b0: travel_check(i, p, b0)) if travel_check is not None else None
-                blk1 = (lambda p, i=i, b=b: travel_check(i, p, b)) if travel_check is not None else None
-                axis0, up0 = clearance_move(pos[i - 1], b0, params, head_zlow, blocked=blk0)
-                axis1, up1 = clearance_move(pos[i], b, params, head_zlow, blocked=blk1)
-                rep.clearance_axes[axis0] += 1
-                if travel_check is not None:
-                    rep.travel_collisions += int(travel_check(i, up0, b0)) + int(travel_check(i, up1, b))
-                move(up0, b0, params.travel_speed, comment=f"degagement {axis0}")
-                move(up1, b, params.travel_speed)
-                move(pos[i], b, params.travel_speed)
-                retract(+1)
-            else:
-                move(pos[i], b, params.travel_speed)
-            continue
-        seg = float(np.linalg.norm(pos[i] - pos[i - 1]))
-        h = params.skin_thickness if skin[i] else params.layer_height
-        e_add = seg * h * params.line_width * params.flow / fil_area
-        rep.filament_mm += e_add
-        speed = params.print_speed * (float(slow[i - 1]) if len(slow) >= i else 1.0)
-        move(pos[i], b, speed, e_add=e_add)
-    if n_loop:
-        retract(-1)
-        axis, up = clearance_move(pos[-1], float(ang[-1, 1]), params, head_zlow)
-        move(up, float(ang[-1, 1]), params.travel_speed, comment=f"degagement final {axis}")
-    if _cpp.enabled() and hasattr(_cpp.module(), "gcode_footer"):
-        out += _cpp.module().gcode_footer().split("\n")
-    else:
-        out += ["M104 S0", "M84"]
+            if ext[i] <= 0:
+                rep.travels += 1
+                self.travel(i, pos, ang, travel_check)
+                continue
+            seg = float(np.linalg.norm(pos[i] - pos[i - 1]))
+            h = params.skin_thickness if skin[i] else params.layer_height
+            e_add = seg * h * params.line_width * params.flow / fil_area
+            rep.filament_mm += e_add
+            speed = params.print_speed * (float(slow[i - 1]) if len(slow) >= i else 1.0)
+            self.move(pos[i], b, speed, e_add=e_add)
+        if n_loop:
+            self.retract(-1)
+            b_end = float(ang[-1, 1])
+            axis, up = clearance_move(pos[-1], b_end, params, self.head_zlow)
+            self.move(up, b_end, params.travel_speed, comment=f"degagement final {axis}")
+
+
+def _finish_report(rep: GcodeReport, out: list, arrays: tuple, params: GcodeParams, guard: dict) -> None:
+    """Temps estimes, nombre de lignes et garde-fous du rapport."""
+    pos, _ang, ext, _skin, slow = arrays
+    n = len(pos)
     printing = ext > 0
     if n > 1:
         seg = np.linalg.norm(np.diff(pos, axis=0), axis=1)
@@ -680,6 +686,43 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
         rep.fw_y_range = (float(min(guard["y"])), float(max(guard["y"])))
         rep.y_turns = (rep.fw_y_range[1] - rep.fw_y_range[0]) / 360.0
         rep.fw_z_range = (float(min(guard["z"])), float(max(guard["z"])))
+
+
+def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[str] = None,
+                 head_zlow: Optional[Callable[[float], float]] = None,
+                 travel_check: Optional[Callable[[int, np.ndarray, float], bool]] = None):
+    """Ecrit le G-code (si `path`) et rend (lignes, GcodeReport).
+
+    `head_zlow(B)` : hauteur du point le plus bas de la vraie tete sous la
+    pointe pour cet angle (negative), pour refuser un degagement vers le
+    plateau. `travel_check(i, point, B) -> bool` : controle de collision d'un
+    point de degagement (vrai = contact), compte dans le rapport."""
+    from core import _cpp
+    pos = np.asarray(toolpath["position"], dtype=float)
+    ang = np.asarray(toolpath["axis_angles"], dtype=float)
+    ext = np.asarray(toolpath["extrusion"], dtype=float)
+    skin = np.asarray(toolpath.get("is_skin", np.zeros(len(pos), bool)), dtype=bool)
+    n = len(pos)
+    if params.tip_at_bead_top and n:
+        half = np.where(skin, params.skin_thickness, params.layer_height) * 0.5
+        pos = pos + head_axis_vectors(pos, ang[:, 1]) * half[:, None]
+    fil_area = np.pi * (params.filament_diameter / 2) ** 2
+    coupled = list(getattr(machine, "position_coupled_axes", None) or [])
+    vmax = float(np.degrees(getattr(machine, "max_angular_velocity", 0.0) or 0.0))
+    amax = float(np.degrees(getattr(machine, "max_angular_acceleration", 0.0) or 0.0))
+    _, _, slow = feed_plan(pos, ang, vmax, amax, coupled, params.print_speed) if n > 1 else (0, 0, np.ones(0))
+    arrays = (pos, ang, ext, skin, slow)
+
+    rep = GcodeReport()
+    out = _header_lines(params, machine, params.pivot_to_tip)
+    writer = _GcodeWriter(params, machine, head_zlow, rep, out)
+    n_loop = writer.native_body(arrays, travel_check, fil_area)
+    writer.python_loop(arrays, n_loop, travel_check, fil_area)
+    if _cpp.enabled() and hasattr(_cpp.module(), "gcode_footer"):
+        out += _cpp.module().gcode_footer().split("\n")
+    else:
+        out += ["M104 S0", "M84"]
+    _finish_report(rep, out, arrays, params, writer.guard)
     if params.strict and (rep.tip_below_plate
                           or (params.max_y_turns is not None and rep.y_turns > params.max_y_turns)):
         return out, rep

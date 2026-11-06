@@ -119,55 +119,11 @@ def _merge_nearby_zones(zones: list[JunctionZone], merge_distance: float) -> lis
         current = merged
 
 
-def detect_junction_zones(
-    mesh_data: MeshData,
-    region_dependency_graph: RegionDependencyGraph,
-    angle_threshold_deg: float,
-    margin: float,
-    merge_distance: float = 5.0,
-) -> list[JunctionZone]:
-    """
-    Identifie les clusters de faces frontiere entre deux regions dont les
-    `target_direction` divergent au-dela de `angle_threshold_deg`, et
-    retourne une zone (centroide + rayon) par cluster spatial - candidate a
-    un raffinement local de maillage (`junction_refinement_resolution`,
-    pipeline/step1_ingest.py) pour corriger l'erreur de discretisation FEM
-    documentee limite #34/#36/#47 (un tetraedre P1 assez grand pour
-    s'etendre sur une zone ou la direction cible change beaucoup ne peut
-    representer qu'un seul gradient constant).
-
-    Args:
-        mesh_data: sortie d'une passe LEGERE de step1 (mesh de surface
-            seul, tetraedrisation fine non necessaire ici).
-        region_dependency_graph: sortie de step3 sur cette meme passe legere.
-        angle_threshold_deg: seuil de divergence directionnelle entre deux
-            regions adjacentes pour marquer leur frontiere comme jonction
-            (meme role que SegmentationParams.max_region_merge_angle_deg,
-            valeur separee car les deux poursuivent des objectifs
-            differents : l'un empeche une fusion de region, l'autre
-            declenche un raffinement de maillage).
-        margin: marge (mm) ajoutee au rayon de chaque zone detectee, pour
-            couvrir les tetraedres immediatement voisins de la frontiere
-            elle-meme, pas seulement les faces exactement dessus.
-        merge_distance: distance (mm) sous laquelle deux zones proches sont
-            fusionnees en une seule (`_merge_nearby_zones`) - necessaire sur
-            une geometrie a jonctions denses ou le graphe d'adjacence de
-            FACES se fragmente en de nombreuses composantes separees par
-            des faces non marquees, alors qu'un seul volume de raffinement
-            les couvrirait tous physiquement (mesure sur death.stl : 301
-            zones brutes, distance mediane au plus proche voisin 1.18mm -
-            sans fusion, `_merged_junction_seed` moyenne des centroides
-            disperses sur toute une region du modele en un point qui ne
-            represente plus aucune zone reelle, mesure : 0 effet sur le
-            nombre d'anomalies de non-monotonie).
-
-    Returns:
-        Liste de `JunctionZone` (centroide + rayon), APRES fusion des zones
-        proches - une par cluster spatial de faces frontiere a forte
-        divergence, regroupe si necessaire. Liste vide si aucune frontiere
-        ne depasse le seuil (cas normal sur un modele a une seule region, ou
-        a regions dont les directions restent proches).
-    """
+def _mark_junction_faces(mesh_data: MeshData, region_dependency_graph: RegionDependencyGraph,
+                         angle_threshold_deg: float):
+    """Faces situees sur une frontiere a forte divergence directionnelle (au moins une face adjacente d'une
+    AUTRE region dont l'angle entre target_direction depasse le seuil). Retourne
+    `(is_junction_face, junction_rows, junction_cols)`."""
     face_ids_to_region: dict[int, int] = {}
     for region in region_dependency_graph.regions.values():
         for face_id in region.face_ids:
@@ -176,10 +132,6 @@ def detect_junction_zones(
     face_count = mesh_data.face_count
     face_adjacency = build_face_adjacency(mesh_data.faces, face_count)
     face_adjacency_coo = face_adjacency.tocoo()
-
-    # Marque les faces situees sur une frontiere a forte divergence
-    # directionnelle (au moins une face adjacente d'une AUTRE region dont
-    # l'angle entre target_direction depasse le seuil).
     is_junction_face = np.zeros(face_count, dtype=bool)
     junction_rows: list[int] = []
     junction_cols: list[int] = []
@@ -198,14 +150,44 @@ def detect_junction_zones(
             is_junction_face[f2] = True
             junction_rows.extend([f1, f2])
             junction_cols.extend([f2, f1])
+    return is_junction_face, junction_rows, junction_cols
 
+
+def detect_junction_zones(
+    mesh_data: MeshData,
+    region_dependency_graph: RegionDependencyGraph,
+    angle_threshold_deg: float,
+    margin: float,
+    merge_distance: float = 5.0,
+) -> list[JunctionZone]:
+    """
+    Identifie les clusters de faces frontiere entre deux regions dont les `target_direction` divergent
+    au-dela de `angle_threshold_deg`, et retourne une zone (centroide + rayon) par cluster spatial -
+    candidate a un raffinement local de maillage (`junction_refinement_resolution`, step1_ingest) pour
+    corriger l'erreur de discretisation FEM documentee limite #34/#36/#47.
+
+    Args:
+        mesh_data / region_dependency_graph: sorties d'une passe LEGERE de step1 puis step3.
+        angle_threshold_deg: seuil de divergence directionnelle entre deux regions adjacentes pour marquer
+            leur frontiere comme jonction (valeur distincte de SegmentationParams.max_region_merge_angle_deg :
+            l'un empeche une fusion, l'autre declenche un raffinement).
+        margin: marge (mm) ajoutee au rayon de chaque zone pour couvrir les tetraedres voisins.
+        merge_distance: distance (mm) sous laquelle deux zones sont fusionnees (`_merge_nearby_zones`) :
+            sur death.stl, 301 zones brutes (distance mediane au plus proche voisin 1.18mm) ; sans fusion,
+            `_merged_junction_seed` moyenne des centroides disperses en un point qui ne represente plus
+            aucune zone reelle.
+
+    Returns:
+        Liste de `JunctionZone` APRES fusion des zones proches ; vide si aucune frontiere ne depasse le seuil.
+    """
+    face_count = mesh_data.face_count
+    is_junction_face, junction_rows, junction_cols = _mark_junction_faces(
+        mesh_data, region_dependency_graph, angle_threshold_deg)
     if not np.any(is_junction_face):
         return []
 
-    # Regroupe les faces marquees en composantes connexes SUR LE SOUS-GRAPHE
-    # des seules aretes de jonction detectees (pas l'adjacence complete) :
-    # deux faces marquees mais reliees seulement par des faces non marquees
-    # ne doivent pas fusionner en une seule zone.
+    # Composantes connexes SUR LE SOUS-GRAPHE des seules aretes de jonction detectees (pas l'adjacence
+    # complete) : deux faces marquees reliees seulement par des faces non marquees ne fusionnent pas.
     junction_adjacency = sp.csr_matrix(
         (np.ones(len(junction_rows)), (junction_rows, junction_cols)),
         shape=(face_count, face_count),

@@ -228,6 +228,22 @@ def _angle_between_deg(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.degrees(np.arccos(np.clip(np.dot(a, b), -1.0, 1.0))))
 
 
+def _merge_passes_quality_gate(
+    r1: int, r2: int, shared_compat: np.ndarray, region_residual: dict, directions: np.ndarray,
+    max_region_merge_angle_deg: float,
+) -> bool:
+    """La direction optimale de la region combinee doit rester a moins de `max_region_merge_angle_deg` de la
+    direction optimale de CHACUNE des deux regions (sinon la scission est preferable)."""
+    combined_residual = region_residual[r1] + region_residual[r2]
+    idx_combined = int(np.argmin(np.where(shared_compat, combined_residual, np.inf)))
+    dir_combined = directions[idx_combined]
+    idx_r1 = int(np.argmin(region_residual[r1]))
+    idx_r2 = int(np.argmin(region_residual[r2]))
+    angle_r1 = _angle_between_deg(directions[idx_r1], dir_combined)
+    angle_r2 = _angle_between_deg(directions[idx_r2], dir_combined)
+    return max(angle_r1, angle_r2) <= max_region_merge_angle_deg
+
+
 def _region_growing(
     face_adjacency: sp.csr_matrix,
     compatibility: np.ndarray,
@@ -236,65 +252,39 @@ def _region_growing(
     max_region_merge_angle_deg: Optional[float],
 ) -> np.ndarray:
     """
-    Regroupe les faces en regions par croissance iterative : deux faces
-    adjacentes fusionnent si elles partagent au moins une direction
-    candidate compatible commune. Les faces a risque eleve sont traitees en
-    priorite (elles contraignent le plus fortement le choix de direction).
+    Regroupe les faces en regions par croissance iterative : deux faces adjacentes fusionnent si elles
+    partagent au moins une direction candidate compatible commune. Les faces a risque eleve sont traitees en
+    priorite (elles contraignent le plus le choix de direction).
 
-    `max_region_merge_angle_deg` (None = desactive, comportement
-    historique) : si fourni, une fusion n'est acceptee que si la direction
-    optimale de la region combinee (argmin du risque residuel, restreint
-    aux directions deja compatibles avec les deux) reste a moins de
-    `max_region_merge_angle_deg` de la direction optimale de CHACUNE des
-    deux regions prises separement - empeche deux sous-volumes
-    geometriquement incompatibles (ex: deux bras perpendiculaires) de
-    fusionner sur la seule base qu'une direction de compromis reste
-    techniquement compatible avec les deux, meme si elle est loin de
-    l'optimum de chacune (CLAUDE.md, cas mesure sur un modele en T).
-
-    Un critere de TOLERANCE SUR LE RISQUE RESIDUEL (plutot qu'un angle) a
-    ete tente en premier et ECARTE apres mesure directe : avec un nombre
-    de candidats meme modere (~26), il existe presque toujours une
-    direction de residu quasi nul pour n'importe quelle region, y compris
-    une fusion geometriquement incoherente - le residu ne capture pas la
-    divergence directionnelle. Un angle entre deux directions ne depend
-    PAS de la densite de candidats (contrairement a un minimum sur un grand
-    ensemble), donc robuste par construction a une cinematique dense ou
-    continue (voir CLAUDE.md limite #18).
+    `max_region_merge_angle_deg` (None = desactive, comportement historique) : une fusion n'est acceptee que
+    si la direction optimale de la region combinee reste a moins de cet angle de la direction optimale de
+    CHACUNE des deux regions (`_merge_passes_quality_gate`) - empeche deux sous-volumes incompatibles (deux
+    bras perpendiculaires) de fusionner sur la seule base d'une direction de compromis. Un critere de
+    TOLERANCE SUR LE RISQUE RESIDUEL a ete tente et ECARTE (avec ~26 candidats, il existe presque toujours une
+    direction de residu quasi nul, meme pour une fusion incoherente) ; un angle ne depend PAS de la densite de
+    candidats (limite #18).
 
     Retourne un tableau region_id (M,) - un identifiant de region par face.
     """
     face_count = compatibility.shape[0]
     region_id = np.arange(face_count)  # chaque face demarre comme sa propre region
-    # ensemble de directions compatibles restantes par region (intersection
-    # cumulative des faces qui la composent)
+    # directions compatibles restantes par region (intersection cumulative)
     region_compat = {i: compatibility[i].copy() for i in range(face_count)}
 
     quality_gate_enabled = max_region_merge_angle_deg is not None
     region_residual: dict[int, np.ndarray] = {}
     if quality_gate_enabled:
-        # risque residuel par direction candidate, cumule par region : une
-        # face contribue son risque a chaque direction pour laquelle elle
-        # N'EST PAS compatible (meme quantite que _select_region_directions,
-        # mais maintenue incrementalement plutot que recalculee a chaque
-        # paire testee - cout O(D) par fusion, pas O(taille de region * D)).
+        # risque residuel par direction candidate, cumule par region (maintenu incrementalement : O(D) par fusion)
         for i in range(face_count):
             region_residual[i] = (~compatibility[i]).astype(np.float64) * risk_score[i]
 
     adjacency_coo = face_adjacency.tocoo()
-    # traite les paires de faces les plus a risque en premier : une fusion
-    # impliquant une face a fort risque contraint plus tot le choix de
-    # direction, ce qui limite les retours en arriere.
+    # paires les plus a risque en premier (limite les retours en arriere)
     edge_risk = risk_score[adjacency_coo.row] + risk_score[adjacency_coo.col]
-    # Tri STABLE (2026-10-01) : chaque arete figure deux fois avec le meme
-    # risque, les ex-aequo sont donc certains, et l'ordre d'un tri NON stable
-    # (le `quicksort` de numpy, en realite introsort) depend de son
-    # implementation. Mesure : sur turkish, le seul passage au tri stable fait
-    # passer la segmentation de 11 a 24 regions. Ex-aequo departages dans
-    # l'ordre (ligne, colonne) de la matrice d'adjacence, reproductible (et
-    # transcrit tel quel par le natif). step9b sur les 4 modeles : death et
-    # les 2 modeles fins inchanges, turkish 0,198 -> 0,172 % de matiere sans
-    # appui, collisions 0,21 -> 0,13 %.
+    # Tri STABLE (2026-10-01) : chaque arete figure deux fois avec le meme risque et l'ordre d'un tri NON stable
+    # depend de l'implementation de numpy (turkish : 11 -> 24 regions). Ex-aequo departages dans l'ordre
+    # (ligne, colonne) de la matrice d'adjacence (transcrit tel quel par le natif). step9b : death et les 2
+    # modeles fins inchanges, turkish 0,198 -> 0,172 % de matiere sans appui, collisions 0,21 -> 0,13 %.
     order = np.argsort(-edge_risk, kind="stable")
 
     def find(f: int) -> int:
@@ -311,23 +301,12 @@ def _region_growing(
 
         shared_compat = region_compat[r1] & region_compat[r2]
         if not np.any(shared_compat):
-            # aucune direction commune ne rend les deux regions imprimables
-            # ensemble : fusion refusee.
+            # aucune direction commune : fusion refusee.
             continue
 
-        if quality_gate_enabled:
-            combined_residual = region_residual[r1] + region_residual[r2]
-            idx_combined = int(np.argmin(np.where(shared_compat, combined_residual, np.inf)))
-            dir_combined = directions[idx_combined]
-            idx_r1 = int(np.argmin(region_residual[r1]))
-            idx_r2 = int(np.argmin(region_residual[r2]))
-            angle_r1 = _angle_between_deg(directions[idx_r1], dir_combined)
-            angle_r2 = _angle_between_deg(directions[idx_r2], dir_combined)
-            if max(angle_r1, angle_r2) > max_region_merge_angle_deg:
-                # la direction combinee s'ecarte trop de l'optimum d'au
-                # moins une des deux regions : fusion refusee, la scission
-                # est preferable.
-                continue
+        if quality_gate_enabled and not _merge_passes_quality_gate(
+                r1, r2, shared_compat, region_residual, directions, max_region_merge_angle_deg):
+            continue
 
         # fusionne r2 dans r1
         region_id[r2] = r1
@@ -507,40 +486,18 @@ def _build_dependency_graph(
     up_vector: np.ndarray,
 ) -> RegionDependencyGraph:
     """
-    Construit le graphe de dependances entre regions sous forme
-    d'ARBORESCENCE DE CROISSANCE DEPUIS LE PLATEAU : une region A doit etre
-    imprimee avant une region B si B ne rejoint le plateau qu'a travers A.
+    Construit le graphe de dependances entre regions sous forme d'ARBORESCENCE DE CROISSANCE DEPUIS LE
+    PLATEAU : une region A doit etre imprimee avant une region B si B ne rejoint le plateau qu'a travers A.
 
-    L'ordre suit la facon dont la matiere se depose reellement - de proche
-    en proche depuis le plateau - et NON une comparaison de hauteur. Le
-    critere de hauteur (historique : centroide global le plus bas imprime
-    en premier) est faux pour toute piece PENDANTE : une excroissance
-    suspendue sous une plateforme est plus basse que ce a quoi elle est
-    accrochee, mais ne peut exister qu'apres elle. Deux regions voisines se
-    touchent d'ailleurs par une ARETE, cote a cote et jamais empilees :
-    aucune comparaison de hauteur entre elles, globale ou locale, ne peut
-    exprimer "qui supporte qui".
+    L'ordre suit la facon dont la matiere se depose - de proche en proche depuis le plateau - et NON une
+    comparaison de hauteur, fausse pour toute piece PENDANTE (une excroissance suspendue est plus basse que ce
+    a quoi elle est accrochee mais ne peut exister qu'apres). Mecanisme : parcours en largeur multi-sources
+    depuis les regions au contact du plateau (`_compute_print_depths`), puis orientation de chaque arete
+    d'adjacence de la profondeur FAIBLE vers la FORTE. Deux regions de meme profondeur ne portent aucune arete.
 
-    Mecanisme : parcours en largeur multi-sources depuis les regions au
-    contact du plateau (`_compute_print_depths`), puis orientation de
-    chaque arete d'adjacence de la profondeur FAIBLE vers la profondeur
-    FORTE. Deux regions de meme profondeur ne portent aucune arete : elles
-    poussent en parallele depuis le plateau, aucune contrainte physique ne
-    les ordonne.
-
-    ACYCLICITE GARANTIE PAR CONSTRUCTION : la profondeur croit strictement
-    le long de chaque arete conservee. C'est une garantie plus forte que
-    celle de la reference globale `up_vector` historique, qui existait
-    precisement pour eviter les cycles artificiels sur un anneau de regions
-    (sphere segmentee en tranches) - ce cas est desormais couvert sans
-    dependre d'une reference de direction. Le controle de cycle ci-dessous
-    est conserve (contrat documente de `run()`), mais il est devenu
-    structurellement inatteignable.
-
-    Corollaire : une region au contact du plateau est a profondeur 0, le
-    minimum, donc aucune arete ne peut pointer vers elle - la suppression
-    forcee des aretes entrantes des regions plateau, necessaire avec
-    l'ancien critere de hauteur, n'a plus lieu d'etre.
+    ACYCLICITE GARANTIE PAR CONSTRUCTION (la profondeur croit strictement le long de chaque arete) ; le
+    controle de cycle est conserve (contrat documente de `run()`) mais structurellement inatteignable. Une
+    region plateau est a profondeur 0, aucune arete ne pointe vers elle.
     """
     face_adjacency = build_face_adjacency(mesh_data.faces, mesh_data.face_count)
 

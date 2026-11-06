@@ -293,6 +293,47 @@ def _build_full_index(
     return index
 
 
+def _candidate_directions(machine_profile: MachineProfile, params: SupportCheckParams) -> np.ndarray:
+    """Directions candidates pour la classification finale "surplomb reel" : memes fonction et defaut que
+    step3 (`_generate_candidate_directions`), y compris le prefixage manuel de `up`
+    (composed_rotation_directions n'inclut la direction de reference que si un axe echantillonne l'angle 0).
+    `rotation_axes` vide/None -> `up` seul (comportement historique : verticale uniquement)."""
+    up = np.array([0.0, 0.0, 1.0])
+    rotation_axes = machine_profile.rotation_axes or []
+    if not rotation_axes:
+        return up.reshape(1, 3)
+    samples_per_axis = _samples_per_axis(params.direction_candidate_count, len(rotation_axes))
+    return np.vstack([up.reshape(1, 3), composed_rotation_directions(rotation_axes, up, samples_per_axis)])
+
+
+def _find_unsupported(
+    points: list[ToolpathPoint], params: SupportCheckParams, platform_z: Optional[float],
+    nozzle_diameter: float, horizontal_radius: float, vertical_height: float,
+) -> tuple[int, list[int]]:
+    """Passe principale : teste chaque point de depot echantillonne contre la matiere strictement anterieure.
+    Retourne `(nombre de points testes, indices non supportes)`."""
+    platform_tolerance = params.platform_contact_tolerance_factor * nozzle_diameter
+    sample_indices = _sample_point_indices(points, params.path_sampling_step)
+    printed_index = _PrintedGeometryIndex(nozzle_diameter, params.grid_cell_size_multiplier)
+    last_grown_idx = 0
+    tested = 0
+    unsupported_indices: list[int] = []
+    for point_idx in sample_indices:
+        point = points[point_idx]
+        # L'index grossit AVANT le test, comme step9 : il ne contient que la matiere strictement anterieure,
+        # jamais le cordon qui se termine au point teste (confondu avec la buse : faux negatif structurel).
+        last_grown_idx = _grow_printed_index_to(printed_index, points, point_idx, last_grown_idx)
+        if point.extrusion <= 0.0:
+            continue
+        tested += 1
+        position = np.asarray(point.position, dtype=float)
+        if platform_z is not None and position[2] <= platform_z + platform_tolerance:
+            continue  # pose sur le plateau : aucun support en dessous requis
+        if not _has_support_below(printed_index, position, horizontal_radius, vertical_height):
+            unsupported_indices.append(point_idx)
+    return tested, unsupported_indices
+
+
 def run(
     toolpath: ToolpathMachine,
     machine_profile: MachineProfile,
@@ -306,22 +347,16 @@ def run(
     Args:
         toolpath: sortie de step8 (ou step8b si le routage est actif).
         machine_profile: pour `nozzle_diameter` (echelle du cordon).
-        layer_height_base: `LayerParams.layer_height_base`, passe
-            explicitement - step9b ne le redevine jamais depuis la
-            trajectoire, deux sources de verite qui divergeraient en silence.
-        platform_z: niveau du plateau, source de verite =
-            `IngestReport.platform_z_used` (meme valeur que celle donnee a
-            step3). `None` = plateau inconnu : aucun point n'est alors
-            exempte au titre du contact plateau, ce qui SURESTIME le nombre
-            d'evenements plutot que de masquer un vrai defaut.
+        layer_height_base: `LayerParams.layer_height_base`, passe explicitement - jamais redevine depuis la
+            trajectoire (deux sources de verite qui divergeraient en silence).
+        platform_z: niveau du plateau (`IngestReport.platform_z_used`). `None` = plateau inconnu : aucun point
+            n'est exempte, ce qui SURESTIME le nombre d'evenements plutot que de masquer un vrai defaut.
         params: seuils de recherche.
 
     Returns:
-        SupportCheckReport. `checked=False` si la trajectoire est vide : signal
-        explicite, jamais une liste vide ambigue.
+        SupportCheckReport. `checked=False` si la trajectoire est vide : signal explicite.
 
-    Ne leve jamais : un depot non supporte est une DONNEE, pas une erreur -
-    meme discipline que `Step8Diagnostic` et `CollisionReport`.
+    Ne leve jamais : un depot non supporte est une DONNEE, pas une erreur (comme `Step8Diagnostic`).
     """
     points = toolpath.points
     if not points:
@@ -330,55 +365,10 @@ def run(
     nozzle_diameter = max(float(machine_profile.nozzle_diameter), 1e-6)
     horizontal_radius = params.horizontal_search_radius_factor * nozzle_diameter
     vertical_height = params.vertical_search_height_factor * max(float(layer_height_base), 1e-6)
-    platform_tolerance = params.platform_contact_tolerance_factor * nozzle_diameter
+    candidate_directions = _candidate_directions(machine_profile, params)   # UNE SEULE FOIS
 
-    # Directions candidates pour la classification finale "surplomb reel"
-    # (voir docstring de module) - calculees UNE SEULE FOIS, memes fonction
-    # et defaut que step3 (`_generate_candidate_directions`), y compris le
-    # prefixage manuel de `up` (composed_rotation_directions n'inclut la
-    # direction de reference que si un axe echantillonne l'angle 0, jamais
-    # garanti en general). `rotation_axes` vide/None -> `up` seul, repli
-    # exact sur le comportement historique (verticale uniquement).
-    up = np.array([0.0, 0.0, 1.0])
-    rotation_axes = machine_profile.rotation_axes or []
-    if rotation_axes:
-        samples_per_axis = _samples_per_axis(params.direction_candidate_count, len(rotation_axes))
-        candidate_directions = np.vstack(
-            [up.reshape(1, 3), composed_rotation_directions(rotation_axes, up, samples_per_axis)]
-        )
-    else:
-        candidate_directions = up.reshape(1, 3)
-
-    sample_indices = _sample_point_indices(points, params.path_sampling_step)
-
-    printed_index = _PrintedGeometryIndex(nozzle_diameter, params.grid_cell_size_multiplier)
-    last_grown_idx = 0
-    tested = 0
-    unsupported_indices: list[int] = []
-
-    for point_idx in sample_indices:
-        point = points[point_idx]
-        # L'index grossit AVANT le test, exactement comme step9 : il ne
-        # contient alors que la matiere strictement anterieure, et jamais le
-        # cordon qui se termine au point teste (celui-ci est confondu avec la
-        # buse - le compter comme support serait un faux negatif structurel).
-        last_grown_idx = _grow_printed_index_to(
-            printed_index, points, point_idx, last_grown_idx
-        )
-
-        if point.extrusion <= 0.0:
-            continue
-        tested += 1
-
-        position = np.asarray(point.position, dtype=float)
-        if platform_z is not None and position[2] <= platform_z + platform_tolerance:
-            continue  # pose sur le plateau : aucun support en dessous requis
-
-        if not _has_support_below(
-            printed_index, position, horizontal_radius, vertical_height
-        ):
-            unsupported_indices.append(point_idx)
-
+    tested, unsupported_indices = _find_unsupported(
+        points, params, platform_z, nozzle_diameter, horizontal_radius, vertical_height)
     events = _classify_unsupported(
         points,
         unsupported_indices,
@@ -389,8 +379,42 @@ def run(
         candidate_directions,
         params.locate_supporting_point,
     )
-
     return SupportCheckReport(events=events, checked=True, tested_extruded_points=tested)
+
+
+def _locate_supporting_points(
+    points: list[ToolpathPoint], ordering_defects: list[int], nozzle_diameter: float,
+    cell_size_multiplier: float, horizontal_radius: float, vertical_height: float,
+) -> dict[int, int]:
+    """Passe 2 : quel point precis aurait supporte chaque defaut d'ordre ? Exige de rejouer la croissance
+    incrementale, donc O(defauts d'ordre x segments)."""
+    supporting: dict[int, int] = {}
+    pending = set(ordering_defects)
+    index = _PrintedGeometryIndex(nozzle_diameter, cell_size_multiplier)
+    for i in range(1, len(points)):
+        if not pending:
+            break
+        if not (points[i].extrusion > 0.0 and points[i - 1].extrusion > 0.0):
+            continue
+        index.append_segment(points[i - 1].position, points[i].position)
+
+        # Un evenement ne peut etre resolu que par de la matiere POSTERIEURE a lui : l'anterieure a deja ete
+        # testee par la passe principale, qui l'a precisement declare non supporte.
+        resolved = [
+            event_idx
+            for event_idx in pending
+            if i > event_idx
+            and _has_support_below(
+                index,
+                np.asarray(points[event_idx].position, dtype=float),
+                horizontal_radius,
+                vertical_height,
+            )
+        ]
+        for event_idx in resolved:
+            supporting[event_idx] = i
+            pending.discard(event_idx)
+    return supporting
 
 
 def _classify_unsupported(
@@ -404,43 +428,21 @@ def _classify_unsupported(
     locate_supporting_point: bool = True,
 ) -> list[UnsupportedDepositEvent]:
     """
-    Separe les depots non supportes en defauts d'ORDRE, surplombs RESOLUS PAR
-    INCLINAISON, et surplombs REELS.
+    Separe les depots non supportes en defauts d'ORDRE, surplombs RESOLUS PAR INCLINAISON, et surplombs REELS.
+    Trois passes de couts tres differents :
 
-    Trois passes de couts tres differents, dans cet ordre precis :
+    1. **Ordre/surplomb** (bon marche, O(evenements)) : un index de TOUTE la matiere extrudee (l'etat FINAL de
+       la piece) est construit une fois ; un evenement qui y trouve un support vertical est un defaut
+       d'ORDRE (matiere porteuse deposee trop tard), sinon un candidat surplomb.
+    2. **Localisation** (`_locate_supporting_points`, desactivable par `locate_supporting_point=False`) du
+       premier point qui aurait supporte chaque defaut d'ordre.
+    3. **Surplomb reel vs resolu par inclinaison** (docstring de module, "Validite du test vertical") : les
+       candidats surplomb sont retestes contre le MEME index final le long de CHACUNE de
+       `candidate_directions` ; un support dans une direction inclinee = un point que la machine depose sans
+       surplomb en orientant la tete.
 
-    1. **Classification ordre/surplomb** (bon marche, cout borne) : un index
-       contenant TOUTE la matiere extrudee - l'etat FINAL de la piece - est
-       construit une fois, puis chaque evenement y est teste une fois
-       (verticalement). Un evenement qui y trouve un support a bien de la
-       matiere porteuse quelque part : elle est simplement deposee trop tard
-       (defaut d'ORDRE). Un evenement qui n'en trouve pas n'a pas de support
-       vertical, meme dans la piece finie - candidat surplomb, a affiner par
-       la passe 3. Cout : O(evenements), pas O(evenements x segments).
-
-    2. **Localisation** du premier point qui aurait supporte chaque defaut
-       d'ordre (`supporting_point_index`) : celle-ci exige de rejouer la
-       croissance incrementale, donc O(defauts d'ordre x segments). Elle n'est
-       lancee QUE sur les defauts d'ordre deja identifies par la passe 1, et
-       peut etre desactivee (`locate_supporting_point=False`) quand seuls les
-       totaux importent - la distinction ordre/surplomb, elle, reste toujours
-       calculee.
-
-    3. **Classification surplomb reel vs resolu par inclinaison** (voir
-       docstring de module, "Validite du test vertical") : les candidats
-       surplomb de la passe 1 sont retestes contre le MEME `final_index`,
-       mais le long de CHACUNE de `candidate_directions` - un point qui
-       trouve un support dans une direction inclinee est un point que la
-       machine peut deposer sans surplomb en orientant la tete, PAS un
-       defaut d'ordre (aucun reordonnancement ne le concerne) ni un vrai
-       surplomb geometrique. Cout : O(candidats surplomb x directions),
-       negligeable car cette passe ne s'applique jamais a la masse des
-       defauts d'ordre (deja ecartes par la passe 1).
-
-    Cette separation est ce qui rend l'etape utilisable : la version initiale
-    testait TOUS les evenements en attente a CHAQUE segment de la trajectoire,
-    ce qui ne terminait pas en 10 minutes sur le pire cas mesure (22 393
-    evenements x 199 000 segments sur death.stl avant correction du champ).
+    Cette separation rend l'etape utilisable : la version initiale testait TOUS les evenements en attente a
+    CHAQUE segment (22 393 evenements x 199 000 segments sur death.stl : plus de 10 minutes).
     """
     if not unsupported_indices:
         return []
@@ -458,8 +460,7 @@ def _classify_unsupported(
         )
     ]
 
-    # --- Passe 3 : parmi les candidats surplomb, lesquels sont resolus par
-    # une orientation de tete atteignable ? (voir docstring de module)
+    # --- Passe 3 : parmi les candidats surplomb, lesquels sont resolus par une orientation atteignable ? ---
     overhang_candidates = [idx for idx in unsupported_indices if idx not in set(ordering_defects)]
     tilt_resolved = {
         event_idx
@@ -476,32 +477,8 @@ def _classify_unsupported(
     # --- Passe 2 : quel point precis aurait supporte ce defaut d'ordre ? ---
     supporting: dict[int, int] = {}
     if locate_supporting_point and ordering_defects:
-        pending = set(ordering_defects)
-        index = _PrintedGeometryIndex(nozzle_diameter, cell_size_multiplier)
-        for i in range(1, len(points)):
-            if not pending:
-                break
-            if not (points[i].extrusion > 0.0 and points[i - 1].extrusion > 0.0):
-                continue
-            index.append_segment(points[i - 1].position, points[i].position)
-
-            # Un evenement ne peut etre resolu que par de la matiere
-            # POSTERIEURE a lui : la matiere anterieure a deja ete testee par
-            # la passe principale, qui l'a precisement declare non supporte.
-            resolved = [
-                event_idx
-                for event_idx in pending
-                if i > event_idx
-                and _has_support_below(
-                    index,
-                    np.asarray(points[event_idx].position, dtype=float),
-                    horizontal_radius,
-                    vertical_height,
-                )
-            ]
-            for event_idx in resolved:
-                supporting[event_idx] = i
-                pending.discard(event_idx)
+        supporting = _locate_supporting_points(
+            points, ordering_defects, nozzle_diameter, cell_size_multiplier, horizontal_radius, vertical_height)
 
     ordering_set = set(ordering_defects)
     return [

@@ -296,26 +296,15 @@ def refine_axis_angles_local_search(
     initial_step_deg: float,
 ) -> tuple[np.ndarray, float]:
     """
-    Affine `initial_angles_deg` (typiquement le meilleur candidat d'une
-    grille composed_rotation_angles_and_directions) pour approcher au plus
-    pres `target_direction`, par coordinate-descent generique : a chaque
-    iteration, chaque axe est tour a tour nudge de +-`step` (clampe a son
-    `angle_range_deg`), le mouvement n'est garde que s'il reduit l'erreur
-    angulaire ; `step` est divise par 2 a chaque iteration.
+    Affine `initial_angles_deg` (typiquement le meilleur candidat d'une grille
+    composed_rotation_angles_and_directions) vers `target_direction`, par coordinate-descent generique :
+    chaque axe est tour a tour nudge de +-`step` (clampe a son `angle_range_deg`), le mouvement n'est garde
+    que s'il reduit l'erreur angulaire ; `step` est divise par 2 a chaque iteration. Generalise a N axes SANS
+    jacobien analytique par-N ; un axe verrouille (min==max) reste immobile par la meme boucle.
 
-    Seule primitive par-axe utilisee : _rodrigues_rotate (deja existante) -
-    generalise a N axes SANS jacobien analytique par-N (qui devrait etre
-    re-derive a chaque nombre/configuration d'axes, contraire a l'objectif
-    de cinematique arbitraire). Un axe verrouille (min==max) ne produit
-    aucun nudge valide et reste immobile - degenerescence geree par la
-    meme boucle, pas un cas special.
-
-    IMPORTANT : `initial_step_deg` doit demarrer a l'echelle de l'ecart
-    entre deux points voisins de la grille NN d'origine (ex: 360/samples_per_axis),
-    PAS une petite constante fixe - sinon l'affinement reste piege pres du
-    candidat NN au lieu de converger vers le vrai optimum local (mesure :
-    un pas fixe de 2deg laisse un residu de 15-20deg quand l'ecart de grille
-    est ~36deg ; un pas derive de l'ecart de grille converge sous 0.1deg).
+    IMPORTANT : `initial_step_deg` doit demarrer a l'echelle de l'ecart entre deux points voisins de la grille
+    NN (ex: 360/samples_per_axis), PAS une petite constante (un pas fixe de 2deg laisse un residu de 15-20deg
+    pour un ecart de grille de ~36deg ; un pas derive de l'ecart converge sous 0.1deg).
 
     Retourne (angles_affines_deg, erreur_angulaire_residuelle_rad).
     """
@@ -328,10 +317,7 @@ def refine_axis_angles_local_search(
 
     angles = np.array(initial_angles_deg, dtype=float).copy()
 
-    # Axes unitaires precalcules UNE FOIS (pas a chaque nudge - spec.axis ne
-    # change jamais pendant la recherche) : evite de refaire N normalisations
-    # par appel a _direction_for, redondance pure, pas seulement un surcout
-    # de dispatch numpy (voir CLAUDE.md, perf step8).
+    # Axes unitaires precalcules UNE FOIS (spec.axis ne change jamais pendant la recherche).
     reversed_axes_unit = [
         np.asarray(spec.axis, dtype=float) / np.linalg.norm(spec.axis) for spec in reversed(axes)
     ]
@@ -344,10 +330,7 @@ def refine_axis_angles_local_search(
         return direction
 
     def _angular_error(direction: np.ndarray) -> float:
-        # dot/clip/arccos scalaires purs : np.dot/np.clip sur des scalaires
-        # passent par le dispatch numpy generique, un surcout mesure comme
-        # dominant sur ~700000 appels (CLAUDE.md, perf step8) pour une
-        # operation triviale.
+        # dot/clip/arccos scalaires purs : le dispatch numpy dominait sur ~700000 appels (perf step8).
         cos_angle = direction[0] * tx + direction[1] * ty + direction[2] * tz
         if cos_angle > 1.0:
             cos_angle = 1.0
@@ -547,36 +530,17 @@ def _resolve_single_axis_analytic(
     return _clamp_into_range(delta, lo, hi)
 
 
-def _resolve_axis_pair_analytic(
-    outer_spec: RotationAxisSpec,
-    inner_spec: RotationAxisSpec,
-    reference_effective: np.ndarray,
-    target: np.ndarray,
-    fallback_angles_deg: tuple[float, float],
-) -> Optional[tuple[float, float]]:
-    """
-    Resout la PAIRE (outer_spec, inner_spec) pour amener
-    `reference_effective` sur `target`, par bissection sur l'angle interne
-    puis atan2 pour l'angle externe (voir CLAUDE.md/plan pour la
-    justification geometrique complete de l'invariant utilise).
+_NOT_DEGENERATE = object()
 
-    Retourne None si aucune racine n'a pu etre bracketee sur la plage de
-    l'axe interne - CA ARRIVE REELLEMENT (pas juste en theorie, verifie
-    numeriquement pendant la conception) quand la paire externe est
-    geometriquement incapable d'atteindre l'angle cible par rapport a
-    outer_spec, meme en balayant tout l'axe interne (l'ensemble atteignable
-    de angle(.,outer_axis) est un ANNEAU borne par les angles entre les
-    deux axes et la reference effective, pas [0,180] en general) - dans ce
-    cas l'appelant doit retomber sur le repli grille+raffinement.
-    """
-    outer_axis = np.asarray(outer_spec.axis, dtype=float)
-    outer_axis = outer_axis / np.linalg.norm(outer_axis)
-    inner_axis = np.asarray(inner_spec.axis, dtype=float)
-    inner_axis = inner_axis / np.linalg.norm(inner_axis)
 
+def _resolve_degenerate_pair(
+    outer_spec: RotationAxisSpec, inner_spec: RotationAxisSpec, outer_axis: np.ndarray, inner_axis: np.ndarray,
+    reference_effective: np.ndarray, target: np.ndarray, fallback_angles_deg: tuple[float, float],
+):
+    """Cas ou la paire n'a qu'un DOF effectif (axe verrouille ou axes paralleles). Retourne `(outer, inner)`,
+    ou `_NOT_DEGENERATE` quand la bissection est necessaire."""
     outer_lo, outer_hi = outer_spec.angle_range_deg
     inner_lo, inner_hi = inner_spec.angle_range_deg
-
     outer_locked = outer_hi <= outer_lo
     inner_locked = inner_hi <= inner_lo
 
@@ -584,8 +548,7 @@ def _resolve_axis_pair_analytic(
         return outer_lo, inner_lo
 
     if inner_locked:
-        # un seul DOF libre (outer) : reduit au cas N=1 contre une
-        # reference deja tournee par l'angle verrouille de l'axe interne.
+        # un seul DOF libre (outer) : cas N=1 contre une reference deja tournee par l'angle verrouille.
         rotated_reference = _rodrigues_rotate_single(
             reference_effective, inner_axis, np.radians(inner_lo)
         )
@@ -595,8 +558,7 @@ def _resolve_axis_pair_analytic(
         return angle, inner_lo
 
     if outer_locked:
-        # un seul DOF libre (inner) : la cible doit d'abord etre "devissee"
-        # de la rotation externe verrouillee avant de resoudre l'interne.
+        # un seul DOF libre (inner) : la cible est d'abord "devissee" de la rotation externe verrouillee.
         unwound_target = _rodrigues_rotate_single(target, outer_axis, np.radians(-outer_lo))
         angle = _resolve_single_axis_analytic(
             inner_spec, reference_effective, unwound_target, fallback_angles_deg[1]
@@ -604,12 +566,8 @@ def _resolve_axis_pair_analytic(
         return outer_lo, angle
 
     if abs(np.dot(outer_axis, inner_axis)) > 1.0 - _AXES_PARALLEL_EPS:
-        # axes paralleles : 1 seul DOF effectif pour la paire (deux
-        # rotations autour de la meme droite s'additionnent). Reduit a
-        # l'axe interne seul, avec la plage COMBINEE (seule la somme des
-        # deux angles compte pour la direction resultante) ; l'angle
-        # externe est fixe a sa borne basse, la difference est absorbee
-        # par l'interne.
+        # axes paralleles : 1 seul DOF effectif (seule la somme des deux angles compte). Reduit a l'axe
+        # interne seul avec la plage COMBINEE ; l'angle externe est fixe a sa borne basse.
         combined_spec = RotationAxisSpec(
             axis=inner_axis, angle_range_deg=(inner_lo + outer_lo, inner_hi + outer_hi)
         )
@@ -618,6 +576,58 @@ def _resolve_axis_pair_analytic(
         )
         inner_angle = _clamp_into_range(combined - outer_lo, inner_lo, inner_hi)
         return outer_lo, inner_angle
+    return _NOT_DEGENERATE
+
+
+def _bracket_inner_root(reference_effective, inner_axis, outer_axis, inner_lo, inner_hi, target_angle_to_outer):
+    """Bracketing VECTORISE (un seul appel `_rodrigues_rotate` batch, limite #37) d'une racine du residu
+    angle(rotation(inner), outer) - cible. Retourne `(lo_t, hi_t, lo_r, hi_r)` ou None."""
+    samples = np.linspace(inner_lo, inner_hi, max(_BRACKETING_SAMPLES, 2))
+    rotated_batch = _rodrigues_rotate(
+        np.tile(reference_effective, (len(samples), 1)), inner_axis, np.radians(samples)
+    )
+    cos_angles = np.clip(rotated_batch @ outer_axis, -1.0, 1.0)
+    achieved_batch = np.degrees(np.arccos(cos_angles))
+    residuals = achieved_batch - target_angle_to_outer
+
+    sign_changes = np.where(np.diff(np.sign(residuals)) != 0)[0]
+    if len(sign_changes) > 0:
+        i = int(sign_changes[0])
+        return (samples[i], samples[i + 1], residuals[i], residuals[i + 1])
+    exact = np.where(residuals == 0.0)[0]
+    if len(exact) > 0:
+        i = int(exact[0])
+        return (samples[i], samples[i], residuals[i], residuals[i])
+    return None
+
+
+def _resolve_axis_pair_analytic(
+    outer_spec: RotationAxisSpec,
+    inner_spec: RotationAxisSpec,
+    reference_effective: np.ndarray,
+    target: np.ndarray,
+    fallback_angles_deg: tuple[float, float],
+) -> Optional[tuple[float, float]]:
+    """
+    Resout la PAIRE (outer_spec, inner_spec) pour amener `reference_effective` sur `target`, par bissection
+    sur l'angle interne puis atan2 pour l'angle externe.
+
+    Retourne None si aucune racine n'a pu etre bracketee sur la plage de l'axe interne - CA ARRIVE
+    REELLEMENT : l'ensemble atteignable de angle(., outer_axis) est un ANNEAU borne par les angles entre les
+    deux axes et la reference effective, pas [0,180] en general. L'appelant doit alors retomber sur le repli
+    grille+raffinement.
+    """
+    outer_axis = np.asarray(outer_spec.axis, dtype=float)
+    outer_axis = outer_axis / np.linalg.norm(outer_axis)
+    inner_axis = np.asarray(inner_spec.axis, dtype=float)
+    inner_axis = inner_axis / np.linalg.norm(inner_axis)
+    outer_lo, outer_hi = outer_spec.angle_range_deg
+    inner_lo, inner_hi = inner_spec.angle_range_deg
+
+    degenerate = _resolve_degenerate_pair(
+        outer_spec, inner_spec, outer_axis, inner_axis, reference_effective, target, fallback_angles_deg)
+    if degenerate is not _NOT_DEGENERATE:
+        return degenerate
 
     target_angle_to_outer = _angle_between(target, outer_axis)
 
@@ -627,31 +637,8 @@ def _resolve_axis_pair_analytic(
         )
         return _angle_between(rotated, outer_axis)
 
-    # Bracketing VECTORISE (un seul appel _rodrigues_rotate batch sur tous
-    # les echantillons, pas une boucle Python de _BRACKETING_SAMPLES appels
-    # scalaires) - meme discipline de performance que le reste du fichier
-    # (limite #37, CLAUDE.md) : cette fonction est appelee une fois par
-    # point de trajectoire, le cout du bracketing doit rester marginal face
-    # a la bissection elle-meme.
-    samples = np.linspace(inner_lo, inner_hi, max(_BRACKETING_SAMPLES, 2))
-    rotated_batch = _rodrigues_rotate(
-        np.tile(reference_effective, (len(samples), 1)), inner_axis, np.radians(samples)
-    )
-    cos_angles = np.clip(rotated_batch @ outer_axis, -1.0, 1.0)
-    achieved_batch = np.degrees(np.arccos(cos_angles))
-    residuals = achieved_batch - target_angle_to_outer
-
-    bracket = None
-    sign_changes = np.where(np.diff(np.sign(residuals)) != 0)[0]
-    if len(sign_changes) > 0:
-        i = int(sign_changes[0])
-        bracket = (samples[i], samples[i + 1], residuals[i], residuals[i + 1])
-    else:
-        exact = np.where(residuals == 0.0)[0]
-        if len(exact) > 0:
-            i = int(exact[0])
-            bracket = (samples[i], samples[i], residuals[i], residuals[i])
-
+    bracket = _bracket_inner_root(reference_effective, inner_axis, outer_axis, inner_lo, inner_hi,
+                                  target_angle_to_outer)
     if bracket is None:
         return None
 
@@ -680,6 +667,16 @@ def _resolve_axis_pair_analytic(
     return outer_angle, inner_angle
 
 
+def _previous_angle_for(axes: list, previous_angles: Optional[list], index: int) -> float:
+    """Valeur de repliement de l'axe `index` : angle du point precedent, sinon 0 / milieu de plage."""
+    if previous_angles is not None and index < len(previous_angles):
+        return previous_angles[index]
+    lo, hi = axes[index].angle_range_deg
+    if hi - lo >= 360.0:
+        return 0.0
+    return lo if lo <= 0.0 <= hi else 0.5 * (lo + hi)
+
+
 def resolve_axis_angles_analytic(
     axes: "list",
     reference_direction: np.ndarray,
@@ -688,35 +685,22 @@ def resolve_axis_angles_analytic(
     fallback: Optional[Callable[[], tuple[list, float]]] = None,
 ) -> tuple[list, float]:
     """
-    Resolution cinematique inverse ANALYTIQUE, generique pour N axes (voir
-    docstring de module). Remplace la recherche par grille de step8 pour le
-    chemin principal ; ne leve jamais d'exception et ne renvoie jamais de
-    NaN, quelle que soit la configuration d'axes.
+    Resolution cinematique inverse ANALYTIQUE, generique pour N axes. Remplace la recherche par grille de
+    step8 pour le chemin principal ; ne leve jamais d'exception et ne renvoie jamais de NaN.
 
     Args:
-        axes: list[RotationAxisSpec], meme convention d'ordre que partout
-            ailleurs dans ce fichier (axes[0] = le plus externe/applique en
-            dernier, axes[-1] = le plus interne/applique en premier).
+        axes: list[RotationAxisSpec] (axes[0] = le plus externe/applique en dernier).
         reference_direction: direction de depart (angles tous nuls).
-        target_direction: direction desiree (n'a pas besoin d'etre unitaire,
-            normalisee ici).
-        previous_angles: angles resolus au point de trajectoire precedent,
-            utilises comme (a) valeur de repliement des axes internes
-            (axes[2:], regle de continuite explicite - voir plan) et (b)
-            repli en cas de singularite locale (vecteur (anti)parallele a
-            un axe). None au premier point : repli sur 0/milieu de plage.
-        fallback: fonction `() -> (list[float], float)` appelee UNIQUEMENT
-            si la paire externe est geometriquement incapable d'atteindre
-            la cible (verifie que ca arrive reellement, pas juste en
-            theorie - voir _resolve_axis_pair_analytic). Si None, une
-            erreur de config serait un bug appelant : ne devrait jamais
-            arriver en pratique cote step8, qui fournit toujours le repli
-            grille+raffinement existant.
+        target_direction: direction desiree (normalisee ici).
+        previous_angles: angles du point precedent, valeur de repliement des axes internes (axes[2:], regle de
+            continuite explicite) et repli en cas de singularite locale. None au premier point : 0/milieu.
+        fallback: `() -> (list[float], float)` appelee UNIQUEMENT si la paire externe est geometriquement
+            incapable d'atteindre la cible (cela arrive reellement). Si None : paire gelee a son etat
+            precedent (step8 fournit toujours le repli grille+raffinement).
 
     Returns:
-        (angles_deg, residual_error_rad) - meme contrat que
-        refine_axis_angles_local_search : la residuelle est TOUJOURS
-        recalculee par cinematique directe, jamais supposee nulle.
+        (angles_deg, residual_error_rad) - meme contrat que refine_axis_angles_local_search : la residuelle
+        est TOUJOURS recalculee par cinematique directe, jamais supposee nulle.
     """
     reference_direction = np.asarray(reference_direction, dtype=float)
     reference_direction = reference_direction / np.linalg.norm(reference_direction)
@@ -726,32 +710,21 @@ def resolve_axis_angles_analytic(
         target = target / target_norm
 
     n = len(axes)
-
     if n == 0:
         return [], _angle_between(reference_direction, target) * np.pi / 180.0
 
-    def _previous_for(index: int) -> float:
-        if previous_angles is not None and index < len(previous_angles):
-            return previous_angles[index]
-        lo, hi = axes[index].angle_range_deg
-        if hi - lo >= 360.0:
-            return 0.0
-        return lo if lo <= 0.0 <= hi else 0.5 * (lo + hi)
-
     if n == 1:
         angle = _resolve_single_axis_analytic(
-            axes[0], reference_direction, target, _previous_for(0)
+            axes[0], reference_direction, target, _previous_angle_for(axes, previous_angles, 0)
         )
         achieved = _forward_direction(axes, [angle], reference_direction)
         residual_rad = np.radians(_angle_between(achieved, target))
         return [angle], float(residual_rad)
 
-    # Repliement des axes internes (axes[2:]) a une valeur fixe - regle de
-    # continuite explicite (herite du point precedent), PAS une necessite
-    # mathematique : voir plan/CLAUDE.md pour la discussion de ce choix de
-    # conception et de son risque (la paire externe peut alors se
-    # retrouver incapable d'atteindre la cible - d'ou le repli).
-    inner_angles = [_previous_for(i) for i in range(2, n)]
+    # Repliement des axes internes (axes[2:]) a une valeur fixe - regle de continuite explicite (herite du
+    # point precedent), PAS une necessite mathematique : la paire externe peut alors se retrouver incapable
+    # d'atteindre la cible (d'ou le repli).
+    inner_angles = [_previous_angle_for(axes, previous_angles, i) for i in range(2, n)]
     reference_effective = reference_direction
     for spec, angle_deg in zip(reversed(axes[2:]), reversed(inner_angles)):
         axis = np.asarray(spec.axis, dtype=float)
@@ -760,20 +733,15 @@ def resolve_axis_angles_analytic(
             reference_effective, axis, np.radians(angle_deg)
         )
 
-    fallback_angles = (_previous_for(0), _previous_for(1))
+    fallback_angles = (_previous_angle_for(axes, previous_angles, 0), _previous_angle_for(axes, previous_angles, 1))
     solved_pair = _resolve_axis_pair_analytic(
         axes[0], axes[1], reference_effective, target, fallback_angles
     )
 
     if solved_pair is None:
-        if fallback is None:
-            # Ne devrait jamais arriver (step8 fournit toujours un repli) -
-            # geler la paire a son etat precedent plutot que planter, meme
-            # discipline "jamais d'exception pour une orientation
-            # inatteignable" que le reste du fichier.
-            outer_angle, inner_angle = fallback_angles
-        else:
+        if fallback is not None:
             return fallback()
+        outer_angle, inner_angle = fallback_angles    # jamais d'exception pour une orientation inatteignable
     else:
         outer_angle, inner_angle = solved_pair
 

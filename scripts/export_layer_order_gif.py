@@ -129,7 +129,7 @@ def build_gif(
     )
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mesh_path")
     parser.add_argument("-o", "--output-gif", default="layer_order.gif")
@@ -166,7 +166,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="max_region_merge_angle_deg de step3 (decoupage plus fin)")
     parser.add_argument("--elev", type=float, default=20.0, help="Elevation de la camera (degres)")
     parser.add_argument("--azim", type=float, default=-60.0, help="Azimut de la camera (degres)")
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
 
     params = PipelineParams()
     if args.resolution is not None:

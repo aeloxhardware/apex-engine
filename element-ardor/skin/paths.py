@@ -26,6 +26,7 @@ Usage (venv d'Apex) :
       [--overlap=0.2] [--thickness=0.2] [--concentric-order=outside_in] [--zones=3,7]
 """
 import os
+from dataclasses import dataclass
 import pickle
 import sys
 import time
@@ -196,6 +197,54 @@ class TraceOptions:
     dedupe: bool = True
 
 
+@dataclass
+class _TraceOptions:
+    overlap: float
+    thickness: float
+    order: str
+    width: float
+    edge_rings: int
+    edge_overlap: float
+
+
+def _zone_cache_key(skin, faces, normals, settings: tuple) -> str:
+    """Empreinte de TOUT ce que le calcul d'une zone lit (indices et coordonnees de ses sommets, normales,
+    aires, parametres)."""
+    import hashlib
+    h = hashlib.sha256()
+    zf = skin["faces"][faces]
+    for arr in (zf, skin["vertices"][zf], normals[faces], skin["areas"][faces]):
+        h.update(np.ascontiguousarray(arr).tobytes())
+    h.update(repr(settings).encode())
+    return h.hexdigest()
+
+
+def _trace_zone(entry: dict, skin, faces, normals, pattern, angle, remedy, opts: _TraceOptions) -> None:
+    """Trace une zone dans `entry` ; une erreur est signalee dans `entry["error"]`, jamais ignoree."""
+    thickness, width = opts.thickness, opts.width
+    try:
+        zm = sp.ZoneMesh(skin["vertices"], skin["faces"][faces])
+        paths, pnormals, _d, warning = zone_paths(
+            zm, normals[faces],
+            ZoneStyle(pattern, angle, opts.overlap, thickness, opts.order, width, opts.edge_rings, opts.edge_overlap,
+                      remedy))
+        if warning:
+            entry["warning"] = warning
+        entry.update(paths=paths, normals=pnormals, extrusion=[1.0] * len(paths))
+        if paths:
+            allp = np.vstack(paths)
+            sub = trimesh.Trimesh(skin["vertices"], skin["faces"][faces], process=False)
+            depth = trimesh.proximity.closest_point(sub, allp)[1]
+            entry["depth_ok"] = float((np.abs(depth - thickness / 2) <= DEPTH_TOLERANCE).mean())
+            tree = cKDTree(np.vstack([sp.densify(p + n * thickness / 2) for p, n in zip(paths, pnormals)]))
+            samples = trimesh.sample.sample_surface(sub, max(200, int(entry["area"] * 20)), seed=0)[0]
+            entry["coverage"] = float((tree.query(samples)[0] <= width / 2 + 0.02).mean())
+        else:
+            entry["depth_ok"] = entry["coverage"] = 0.0
+    except Exception as exc:                      # zone signalee, jamais ignoree en silence
+        entry.update(paths=[], normals=[], extrusion=[], error=f"{type(exc).__name__}: {exc}")
+
+
 def trace(skin, options: TraceOptions | None = None, log=False, cache=None):
     """Trajectoires de lissage de toutes les zones (P4), en memoire. `skin` :
     sortie de zones.compute. Rend {zone: entree} (ce que la recherche ecrivait
@@ -209,6 +258,7 @@ def trace(skin, options: TraceOptions | None = None, log=False, cache=None):
     o = options or TraceOptions()
     pattern, line_angle, overlap, thickness, order = o.pattern, o.line_angle, o.overlap, o.thickness, o.order
     only, edge_rings, edge_overlap, remedy, dedupe = o.only, o.edge_rings, o.edge_overlap, o.remedy, o.dedupe
+    import copy
     general = pattern
     zone_pattern = o.zone_pattern or {}
     zone_angle = o.zone_angle or {}
@@ -221,10 +271,11 @@ def trace(skin, options: TraceOptions | None = None, log=False, cache=None):
             raise ValueError(f"remede Hilbert inconnu : {r} (A, B ou C)")
     normals = skin["normals"]
     width = float(skin["nozzle_width"])
+    opts = _TraceOptions(overlap, thickness, order, width, edge_rings, edge_overlap)
     zone, zone_moment = skin["zone"], {z: int(m) for z, m in enumerate(skin["zone_moment"])}
     merges = [tuple(r) for r in skin["zone_merges"]] if "zone_merges" in skin else []
     zones = [z for z in sorted(zone_moment) if (zone == z).any() and (only is None or z in only)]
-    out, t_all = {}, time.time()
+    out = {}
     for z in zones:
         faces = np.flatnonzero(zone == z)
         pattern = zone_pattern.get(z, general)
@@ -233,49 +284,22 @@ def trace(skin, options: TraceOptions | None = None, log=False, cache=None):
                  "area": float(skin["areas"][faces].sum()), "thickness": thickness, "edge_rings": edge_rings,
                  "merged_from": [int(m[1]) for m in merges if m[0] == z]}
         t0 = time.time()
+        zone_remedy_z = zone_remedy.get(z, remedy)
         key = None
         if cache is not None:
-            import copy
-            import hashlib
-            h = hashlib.sha256()
-            zf = skin["faces"][faces]
-            for arr in (zf, skin["vertices"][zf], normals[faces], skin["areas"][faces]):
-                h.update(np.ascontiguousarray(arr).tobytes())
-            h.update(repr((pattern, angle, overlap, thickness, order, width, edge_rings, edge_overlap,
-                           zone_remedy.get(z, remedy))).encode())
-            key = h.hexdigest()
+            key = _zone_cache_key(skin, faces, normals, (pattern, angle, overlap, thickness, order, width,
+                                                         edge_rings, edge_overlap, zone_remedy_z))
             if key in cache:
                 cache["_hits"] = cache.get("_hits", 0) + 1
                 entry.update(copy.deepcopy(cache[key]))
                 entry["seconds"] = time.time() - t0
                 out[z] = entry
                 continue
-        try:
-            zm = sp.ZoneMesh(skin["vertices"], skin["faces"][faces])
-            paths, pnormals, _d, warning = zone_paths(
-                zm, normals[faces],
-                ZoneStyle(pattern, angle, overlap, thickness, order, width, edge_rings, edge_overlap,
-                          zone_remedy.get(z, remedy)))
-            if warning:
-                entry["warning"] = warning
-            entry.update(paths=paths, normals=pnormals, extrusion=[1.0] * len(paths))
-            if paths:
-                allp = np.vstack(paths)
-                sub = trimesh.Trimesh(skin["vertices"], skin["faces"][faces], process=False)
-                depth = trimesh.proximity.closest_point(sub, allp)[1]
-                entry["depth_ok"] = float((np.abs(depth - thickness / 2) <= DEPTH_TOLERANCE).mean())
-                tree = cKDTree(np.vstack([sp.densify(p + n * thickness / 2) for p, n in zip(paths, pnormals)]))
-                samples = trimesh.sample.sample_surface(sub, max(200, int(entry["area"] * 20)), seed=0)[0]
-                entry["coverage"] = float((tree.query(samples)[0] <= width / 2 + 0.02).mean())
-            else:
-                entry["depth_ok"] = entry["coverage"] = 0.0
-        except Exception as exc:                      # zone signalee, jamais ignoree en silence
-            entry.update(paths=[], normals=[], extrusion=[], error=f"{type(exc).__name__}: {exc}")
+        _trace_zone(entry, skin, faces, normals, pattern, angle, zone_remedy_z, opts)
         entry["seconds"] = time.time() - t0
         out[z] = entry
         if key is not None:
             cache["_misses"] = cache.get("_misses", 0) + 1
-            import copy
             cache[key] = copy.deepcopy({k: entry[k] for k in ("paths", "normals", "extrusion", "warning", "depth_ok",
                                                               "coverage", "error") if k in entry})
         msg = entry.get("error") or (f"{len(entry['paths']):4d} passes, profondeur ok {entry['depth_ok']:6.1%}, "

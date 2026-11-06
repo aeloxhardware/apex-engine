@@ -288,6 +288,40 @@ def _assemble_divergence_rhs(
     return rhs
 
 
+def _heat_distance_native(tet_mesh, shape_gradients, volumes, source_nodes, params: FieldSolverParams):
+    """Chemin natif (tolerance, pas le bit : LDLT/CG d'Eigen contre SuperLU/CG de scipy). Retourne None
+    quand le natif est indisponible ou non convergent : on retombe sur Python, qui leve l'erreur habituelle."""
+    if not (_cpp.enabled() and not params.use_ilu_preconditioner and hasattr(_cpp.module(), "heat_method_distance")):
+        return None
+    project = params.heat_project_reachable and params.radial_tilt_origin is not None
+    up = np.asarray(params.up_vector if params.up_vector is not None else [0.0, 0.0, 1.0], dtype=float)
+    return _cpp.module().heat_method_distance(
+        np.ascontiguousarray(tet_mesh.tet_vertices, dtype=np.float64),
+        np.ascontiguousarray(tet_mesh.tetrahedra, dtype=np.int64),
+        np.ascontiguousarray(shape_gradients, dtype=np.float64),
+        np.ascontiguousarray(volumes, dtype=np.float64),
+        np.ascontiguousarray(source_nodes, dtype=np.int64),
+        float(params.heat_method_time_factor),
+        float(params.platform_anchor_weight),
+        float(params.convergence_tolerance),
+        int(params.max_solver_iterations),
+        int(params.direct_solve_node_threshold),
+        np.asarray(params.radial_tilt_origin, dtype=float) if project else None,
+        up,
+    )
+
+
+def _solve_with_retry(A, b, params: FieldSolverParams) -> np.ndarray:
+    """Le systeme de diffusion (temps t = 100 h^2) est mal conditionne sur un grand modele (fig.stl, 165 mm,
+    309 000 noeuds : 2 000 iterations de CG ne suffisent pas). Repli UNIQUE avec 10x plus d'iterations, jamais
+    en premiere intention : le chemin habituel reste inchange."""
+    try:
+        return _solve_linear_system(A, b, params)
+    except FieldSolverError:
+        more = dataclasses.replace(params, max_solver_iterations=max(20000, 10 * params.max_solver_iterations))
+        return _solve_linear_system(A, b, more)
+
+
 def _heat_method_distance(
     tet_mesh: TetMesh,
     shape_gradients: np.ndarray,
@@ -296,59 +330,27 @@ def _heat_method_distance(
     params: FieldSolverParams,
 ) -> np.ndarray:
     """
-    Distance geodesique LISSE au plateau, par la methode de la chaleur
-    (Crane, Weischedel, Wardetzky).
+    Distance geodesique LISSE au plateau, par la methode de la chaleur (Crane, Weischedel, Wardetzky).
 
-    Pourquoi elle plutot que Dijkstra sur les aretes : Dijkstra suit les
-    aretes du maillage en zigzag, ce qui donne une distance dont la norme du
-    gradient vaut 4,81 en mediane sur death.stl au lieu de 1,0 attendu pour
-    une distance. Cette irregularite la rend inutilisable comme champ
-    generateur de couches. La methode de la chaleur produit une distance
-    CONTINUE dont `||grad|| ~ 1` par construction, sur le meme domaine et
-    avec les memes matrices FEM deja assemblees ici.
+    Pourquoi elle plutot que Dijkstra sur les aretes : Dijkstra suit les aretes du maillage en zigzag (norme
+    du gradient 4,81 en mediane sur death.stl au lieu de 1,0), inutilisable comme champ generateur de
+    couches. La methode de la chaleur produit une distance CONTINUE dont `||grad|| ~ 1` par construction.
 
-    Trois etapes :
-      1. diffusion `(M + t*L) u = source` sur un temps court `t` ;
-      2. direction du flux `X = -grad(u)/||grad(u)||` par tetraedre - seule
-         la DIRECTION est retenue, c'est ce qui elimine l'irregularite
-         d'amplitude ;
-      3. integration `L*phi = div(X)`, puis recalage a 0 sur la source.
+    Trois etapes : 1. diffusion `(M + t*L) u = source` sur un temps court `t` ; 2. direction du flux
+    `X = -grad(u)/||grad(u)||` par tetraedre (seule la DIRECTION est retenue : elimine l'irregularite
+    d'amplitude) ; 3. integration `L*phi = div(X)`, puis recalage a 0 sur la source.
 
-    `t` est derive de la taille caracteristique du maillage (carre de la
-    longueur d'arete mediane), jamais une constante absolue : la formulation
-    de la chaleur est dimensionnee en longueur au carre, une valeur fixe
-    n'aurait pas de sens d'un modele a l'autre.
-
-    Retourne un tableau par NOEUD. Les deux systemes sont singuliers du seul
-    champ constant (Laplacien pur), ce que la source pour le premier et le
-    recalage final pour le second suffisent a lever.
+    `t` est derive de la taille caracteristique du maillage (carre de la longueur d'arete mediane), jamais une
+    constante absolue. Retourne un tableau par NOEUD. Les deux systemes sont singuliers du seul champ constant,
+    ce que la source pour le premier et le recalage final pour le second suffisent a lever.
     """
     node_count = tet_mesh.node_count
     if len(source_nodes) == 0:
         return np.full(node_count, np.inf)
 
-    if _cpp.enabled() and not params.use_ilu_preconditioner and hasattr(_cpp.module(), "heat_method_distance"):
-        # Chemin natif (tolerance, pas le bit : LDLT/CG d'Eigen contre
-        # SuperLU/CG de scipy). None = non convergence : on retombe sur Python,
-        # qui leve l'erreur habituelle.
-        project = params.heat_project_reachable and params.radial_tilt_origin is not None
-        up = np.asarray(params.up_vector if params.up_vector is not None else [0.0, 0.0, 1.0], dtype=float)
-        native = _cpp.module().heat_method_distance(
-            np.ascontiguousarray(tet_mesh.tet_vertices, dtype=np.float64),
-            np.ascontiguousarray(tet_mesh.tetrahedra, dtype=np.int64),
-            np.ascontiguousarray(shape_gradients, dtype=np.float64),
-            np.ascontiguousarray(volumes, dtype=np.float64),
-            np.ascontiguousarray(source_nodes, dtype=np.int64),
-            float(params.heat_method_time_factor),
-            float(params.platform_anchor_weight),
-            float(params.convergence_tolerance),
-            int(params.max_solver_iterations),
-            int(params.direct_solve_node_threshold),
-            np.asarray(params.radial_tilt_origin, dtype=float) if project else None,
-            up,
-        )
-        if native is not None:
-            return native
+    native = _heat_distance_native(tet_mesh, shape_gradients, volumes, source_nodes, params)
+    if native is not None:
+        return native
 
     L = _assemble_stiffness_matrix(tet_mesh, shape_gradients, volumes)
     M = _assemble_lumped_mass_matrix(tet_mesh, volumes)
@@ -360,18 +362,7 @@ def _heat_method_distance(
 
     source = np.zeros(node_count)
     source[source_nodes] = 1.0
-    def solve(A, b):
-        # Le systeme de diffusion (temps t = 100 h^2) est mal conditionne sur un
-        # grand modele (fig.stl, 165 mm, 309 000 noeuds : 2 000 iterations de CG
-        # ne suffisent pas). Repli UNIQUE avec 10x plus d'iterations, jamais en
-        # premiere intention : le chemin habituel reste inchange.
-        try:
-            return _solve_linear_system(A, b, params)
-        except FieldSolverError:
-            more = dataclasses.replace(params, max_solver_iterations=max(20000, 10 * params.max_solver_iterations))
-            return _solve_linear_system(A, b, more)
-
-    u = solve((M + t * L).tocsr(), source)
+    u = _solve_with_retry((M + t * L).tocsr(), source, params)
 
     gradients = _compute_per_tet_gradient(tet_mesh, shape_gradients, u)
     norms = np.linalg.norm(gradients, axis=1)
@@ -388,19 +379,16 @@ def _heat_method_distance(
 
     rhs = _assemble_divergence_rhs(tet_mesh, shape_gradients, volumes, flow)
 
-    # Le Laplacien pur est singulier (noyau = constantes). On ancre les
-    # noeuds source a 0 par penalite forte plutot que d'eliminer des lignes :
-    # meme mecanisme que l'ancrage plateau deja en place, et le systeme reste
-    # symetrique defini positif.
+    # Le Laplacien pur est singulier (noyau = constantes). On ancre les noeuds source a 0 par penalite forte
+    # plutot que d'eliminer des lignes (meme mecanisme que l'ancrage plateau ; le systeme reste SPD).
     anchor = sp.diags(
         np.where(np.isin(np.arange(node_count), source_nodes),
                  params.platform_anchor_weight, 0.0),
         format="csr",
     )
-    phi = solve((L + anchor).tocsr(), rhs)
+    phi = _solve_with_retry((L + anchor).tocsr(), rhs, params)
 
-    # Une distance est positive et nulle a la source ; le signe de la
-    # solution de Poisson n'est pas garanti par le systeme lui-meme.
+    # Une distance est positive et nulle a la source ; le signe de la solution de Poisson n'est pas garanti.
     if phi[source_nodes].mean() > phi.mean():
         phi = -phi
     return phi - phi[source_nodes].min()

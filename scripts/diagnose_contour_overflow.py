@@ -40,17 +40,8 @@ OUTSIDE_TOL_MM = 0.005  # abaisse par rapport a la limite #31 (0.05mm) - l'utili
 # precedent - besoin de ne pas manquer un debordement sous 0.05mm
 
 
-def main() -> None:
-    params = PipelineParams()
-
-    result = run_slicing_only(MODEL_PATH, params)
-    # colored_layers (sortie step7) : c'est EXACTEMENT ce que le GLB affiche
-    # (file_io/visualization_export.py ligne 186, _layers_path3d(result.colored_layers, ...)),
-    # pas result.layers (step5+step6) - contour_3d n'est modifie ni par step6
-    # ni par step7 en theorie (jamais reecrit, verifie par lecture de code),
-    # mais on mesure sur la donnee REELLEMENT rendue pour ecarter tout doute.
-    layers = result.colored_layers
-
+def _contour_points(layers) -> tuple[np.ndarray, np.ndarray]:
+    """Points de tous les contours (point de fermeture duplique exclu) et couche de chaque point."""
     all_points: list[np.ndarray] = []
     layer_of_point: list[int] = []
     for layer in layers:
@@ -60,35 +51,12 @@ def main() -> None:
                 pts = pts[:-1]  # exclut le point de fermeture duplique
             all_points.append(pts)
             layer_of_point.extend([layer.id] * len(pts))
+    return np.concatenate(all_points, axis=0), np.array(layer_of_point)
 
-    all_points = np.concatenate(all_points, axis=0)
-    layer_of_point = np.array(layer_of_point)
 
-    # Mesure contre le mesh SOURCE original (pas le mesh interne
-    # potentiellement repare par pymeshfix, limite #43) : on veut savoir si
-    # le contour deborde du modele tel que fourni par l'utilisateur.
-    # ProximityQuery uniquement (limite #15 : jamais mesh.contains(), qui
-    # explose en RAM/temps sur ~165k points sans backend embree - mesure
-    # directe : >4.6 Go RSS et >15 min sans terminer, process tue).
-    source_mesh = trimesh.load(MODEL_PATH, force="mesh")
-    prox = trimesh.proximity.ProximityQuery(source_mesh)
-
-    closest, dist, triangle_id = prox.on_surface(all_points)
-    # Signe du debordement via la normale de la face la plus proche : un
-    # point est "dehors" si (point - closest) pointe globalement dans le
-    # meme sens que la normale de la face la plus proche (produit scalaire
-    # positif). Approximation locale suffisante pour ce diagnostic (pas
-    # besoin d'un test d'inclusion global couteux).
-    face_normals = source_mesh.face_normals[triangle_id]
-    to_point = all_points - closest
-    signed = np.einsum("ij,ij->i", to_point, face_normals)
-    outside_mask = (dist > OUTSIDE_TOL_MM) & (signed > 0)
-    n_outside = int(outside_mask.sum())
-    n_total = len(all_points)
-
-    # Distribution complete des distances signees (dehors uniquement), meme
-    # si n_outside=0 a un seuil donne - un debordement fin mais reel doit
-    # apparaitre ici, pas seulement dans le compte binaire.
+def _print_outside_distribution(dist, signed, n_total: int) -> None:
+    """Distribution complete des distances (cote exterieur uniquement), meme si aucun point ne depasse le
+    seuil : un debordement fin mais reel doit apparaitre ici, pas seulement dans le compte binaire."""
     outside_only_dist = dist[signed > 0]
     if len(outside_only_dist) > 0:
         percentiles = [50, 90, 99, 99.9, 100]
@@ -100,18 +68,8 @@ def main() -> None:
         print(f"  max = {outside_only_dist.max():.5f}mm sur {len(outside_only_dist)}/{n_total} points "
               f"du cote exterieur (avant tout seuil)")
 
-    print(f"\n=== RESULTAT : {n_outside}/{n_total} points de contour_3d hors solide "
-          f"(tol={OUTSIDE_TOL_MM}mm) ===")
 
-    if n_outside == 0:
-        print("Aucun point hors solide sur contour_3d brut a ce seuil : l'artefact "
-              "visuel ne vient PAS de la geometrie de step5 (Layer.contour_3d), "
-              "meme a une tolerance fine. Voir la distribution ci-dessus pour la "
-              "distance reelle max mesuree. A chercher cote export GLB "
-              "(file_io/visualization_export.py, ex: Path3D/Line qui relie des "
-              "boucles DIFFERENTES entre elles) ou rendu du visualiseur.")
-        return
-
+def _print_overflow_details(all_points, dist, layer_of_point, outside_mask, source_mesh, n_layers: int) -> None:
     outside_points = all_points[outside_mask]
     outside_dist = dist[outside_mask]
     outside_layers = layer_of_point[outside_mask]
@@ -128,11 +86,9 @@ def main() -> None:
     print(f"\nCentroide des points hors-solide : {centroid}")
     print(f"Bounding box : min={bbox_min}  max={bbox_max}")
 
-    # Combien de couches distinctes sont touchees, et sur quelle plage
-    # d'isovaleur/altitude Z - utile pour juger si ca correspond a UNE zone
-    # localisee (surplomb) ou un probleme diffus.
+    # Combien de couches distinctes sont touchees : UNE zone localisee (surplomb) ou un probleme diffus ?
     touched_layers = np.unique(outside_layers)
-    print(f"\n{len(touched_layers)} couche(s) distincte(s) touchee(s) sur {len(layers)} : "
+    print(f"\n{len(touched_layers)} couche(s) distincte(s) touchee(s) sur {n_layers} : "
           f"ids {touched_layers.tolist()[:20]}{'...' if len(touched_layers) > 20 else ''}")
 
     r_xy = np.linalg.norm(outside_points[:, :2], axis=1)
@@ -141,6 +97,46 @@ def main() -> None:
     all_r_xy = np.linalg.norm(source_mesh.vertices[:, :2], axis=1)
     print(f"Rayon XY du mesh source        : min={all_r_xy.min():.2f} max={all_r_xy.max():.2f} "
           f"median={np.median(all_r_xy):.2f}")
+
+
+def main() -> None:
+    params = PipelineParams()
+
+    result = run_slicing_only(MODEL_PATH, params)
+    # colored_layers (sortie step7) : c'est EXACTEMENT ce que le GLB affiche (_layers_path3d), pas
+    # result.layers ; contour_3d n'est modifie ni par step6 ni par step7, mais on mesure la donnee RENDUE.
+    layers = result.colored_layers
+    all_points, layer_of_point = _contour_points(layers)
+
+    # Mesure contre le mesh SOURCE original (pas le mesh interne potentiellement repare par pymeshfix,
+    # limite #43). ProximityQuery uniquement (limite #15 : jamais mesh.contains(), >4.6 Go RSS et >15 min
+    # sur ~165k points sans backend embree).
+    source_mesh = trimesh.load(MODEL_PATH, force="mesh")
+    prox = trimesh.proximity.ProximityQuery(source_mesh)
+
+    closest, dist, triangle_id = prox.on_surface(all_points)
+    # Signe du debordement via la normale de la face la plus proche : un point est "dehors" si
+    # (point - closest) pointe dans le meme sens que cette normale. Approximation locale suffisante.
+    face_normals = source_mesh.face_normals[triangle_id]
+    to_point = all_points - closest
+    signed = np.einsum("ij,ij->i", to_point, face_normals)
+    outside_mask = (dist > OUTSIDE_TOL_MM) & (signed > 0)
+    n_outside = int(outside_mask.sum())
+    n_total = len(all_points)
+
+    _print_outside_distribution(dist, signed, n_total)
+    print(f"\n=== RESULTAT : {n_outside}/{n_total} points de contour_3d hors solide "
+          f"(tol={OUTSIDE_TOL_MM}mm) ===")
+
+    if n_outside == 0:
+        print("Aucun point hors solide sur contour_3d brut a ce seuil : l'artefact "
+              "visuel ne vient PAS de la geometrie de step5 (Layer.contour_3d), "
+              "meme a une tolerance fine. Voir la distribution ci-dessus pour la "
+              "distance reelle max mesuree. A chercher cote export GLB "
+              "(file_io/visualization_export.py, ex: Path3D/Line qui relie des "
+              "boucles DIFFERENTES entre elles) ou rendu du visualiseur.")
+        return
+    _print_overflow_details(all_points, dist, layer_of_point, outside_mask, source_mesh, len(layers))
 
 
 if __name__ == "__main__":
