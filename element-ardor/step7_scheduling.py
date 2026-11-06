@@ -459,15 +459,21 @@ def _escape_samples_per_axis(escape_direction_count: int, axis_count: int) -> in
     return max(int(round(escape_direction_count ** (1.0 / axis_count))), 2)
 
 
+@dataclass(frozen=True)
+class DeadlineContext:
+    """Donnees partagees par le calcul des deadlines de trous (maillage, champ, couches)."""
+    mesh_data: MeshData
+    field_tree: KDTree
+    field_values: np.ndarray
+    sorted_isovalues: np.ndarray
+    layer_count: int
+
+
 def _blocking_layer_along_ray(
     origin: np.ndarray,
     direction: np.ndarray,
     hole_layer_index: int,
-    mesh_data: MeshData,
-    field_tree: KDTree,
-    field_values: np.ndarray,
-    sorted_isovalues: np.ndarray,
-    layer_count: int,
+    context: DeadlineContext,
     samples: int,
 ) -> int:
     """
@@ -486,6 +492,8 @@ def _blocking_layer_along_ray(
     Le couloir est scelle des que N'IMPORTE QUELLE section transversale est
     remplie, donc par le MINIMUM des indices de couche futurs rencontres.
     """
+    mesh_data, field_tree, field_values = context.mesh_data, context.field_tree, context.field_values
+    sorted_isovalues, layer_count = context.sorted_isovalues, context.layer_count
     epsilon = 1e-6
     hits, _index_ray, _index_tri = mesh_data.bvh.intersects_location(
         origin.reshape(1, 3), direction.reshape(1, 3)
@@ -516,11 +524,7 @@ def _blocking_layer_along_ray(
 def compute_hole_deadline(
     position_3d: np.ndarray,
     hole_layer_index: int,
-    mesh_data: MeshData,
-    field_tree: KDTree,
-    field_values: np.ndarray,
-    sorted_isovalues: np.ndarray,
-    layer_count: int,
+    context: DeadlineContext,
     directions: np.ndarray,
     params: Step7Params,
 ) -> int:
@@ -550,17 +554,13 @@ def compute_hole_deadline(
             position_3d,
             direction,
             hole_layer_index,
-            mesh_data,
-            field_tree,
-            field_values,
-            sorted_isovalues,
-            layer_count,
+            context,
             params.deadline_ray_samples,
         )
         best_blocking = max(best_blocking, blocking)
 
     deadline = best_blocking - 1
-    return int(np.clip(deadline, hole_layer_index, layer_count - 1))
+    return int(np.clip(deadline, hole_layer_index, context.layer_count - 1))
 
 
 def _group_position_3d(layer: Layer, group: _ColorGroup) -> np.ndarray:
@@ -882,11 +882,7 @@ def run(
             deadline_cache[key] = compute_hole_deadline(
                 position,
                 layer_index,
-                mesh_data,
-                field_tree,
-                field_values,
-                sorted_isovalues,
-                layer_count,
+                DeadlineContext(mesh_data, field_tree, field_values, sorted_isovalues, layer_count),
                 directions,
                 params,
             )

@@ -35,6 +35,7 @@ from pipeline.step6_toolpath2d import (
     _offset_walls,
     _lift_to_3d,
     _oscillating_spiral_polyline,
+    _SpiralShape,
     _plate_axis_in_local_2d,
     _merge_short_runs,
     _monotonic_runs,
@@ -1306,7 +1307,7 @@ def _disk(radius=13.0):
 def _raw_spiral(rho, pitch=3.1, amplitude=0.48, seed=0, rank=0):
     rng = np.random.default_rng([seed, rank])
     return _oscillating_spiral_polyline(
-        np.zeros(2), 0.0, 13.0, pitch, amplitude, 1.6, rho, 0.4, rng,
+        _SpiralShape(np.zeros(2), 0.0, 13.0, pitch, amplitude, 1.6, rho, 0.4), rng,
         first_sign=1.0, angle_offset=0.0,
     )
 

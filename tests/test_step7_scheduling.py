@@ -424,6 +424,7 @@ def test_deadline_is_within_layer_bounds(flat_box_pipeline):
         _group_position_3d,
         _group_segments_by_color,
         compute_hole_deadline,
+        DeadlineContext,
     )
     import scipy.spatial
 
@@ -445,9 +446,10 @@ def test_deadline_is_within_layer_bounds(flat_box_pipeline):
         for group in groups:
             position = _group_position_3d(colored[layer_index], group)
             deadline = compute_hole_deadline(
-                position, layer_index, mesh_data, field_tree,
-                np.asarray(field.values, dtype=float), sorted_isovalues,
-                len(colored), directions, params,
+                position, layer_index,
+                DeadlineContext(mesh_data, field_tree, np.asarray(field.values, dtype=float),
+                                sorted_isovalues, len(colored)),
+                directions, params,
             )
             assert layer_index <= deadline <= len(colored) - 1
             checked += 1

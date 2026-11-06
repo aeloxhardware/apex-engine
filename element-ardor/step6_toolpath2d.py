@@ -782,10 +782,21 @@ def _plate_axis_in_local_2d(
     return np.array([float(d @ axis_u), float(d @ axis_v)])
 
 
+@dataclass(frozen=True)
+class _SpiralShape:
+    """Geometrie d'une spirale oscillante (entree de `_oscillating_spiral_polyline`)."""
+    center: np.ndarray
+    r_min_zone: float
+    r_max: float
+    pitch: float
+    amplitude: float
+    wavelength: float
+    randomization: float
+    nozzle_width: float
+
+
 def _oscillating_spiral_polyline(
-    center: np.ndarray, r_min_zone: float, r_max: float, pitch: float, amplitude: float,
-    wavelength: float, randomization: float, nozzle_width: float, rng: np.random.Generator,
-    first_sign: float, angle_offset: float,
+    shape: _SpiralShape, rng: np.random.Generator, first_sign: float, angle_offset: float,
 ) -> np.ndarray:
     """
     Spirale r = pitch * theta / 2pi, oscillante, en coordonnees polaires
@@ -795,6 +806,9 @@ def _oscillating_spiral_polyline(
     une droite (pic net) ou un cosinus (courbe), toujours monotone en theta.
     `angle_offset` pivote toute la spirale (pi = decalage d'un demi-pas).
     """
+    center, r_min_zone, r_max, pitch = shape.center, shape.r_min_zone, shape.r_max, shape.pitch
+    amplitude, wavelength = shape.amplitude, shape.wavelength
+    randomization, nozzle_width = shape.randomization, shape.nozzle_width
     rho = float(np.clip(randomization, 0.0, 1.0))
     cap = max(0.0, 0.5 * (pitch - nozzle_width))   # deux tours voisins restent a >= 1 buse
     amp = min(amplitude, cap)
@@ -902,8 +916,8 @@ def _generate_spiral_infill(
     for _ in range(_SPIRAL_DENSITY_ITERATIONS):
         rng = np.random.default_rng([int(params.spiral_seed) & 0xFFFFFFFF, int(rank)])
         line = _oscillating_spiral_polyline(
-            center, r_min_zone, r_max, pitch, amplitude, wavelength,
-            params.spiral_randomization_threshold, width, rng,
+            _SpiralShape(center, r_min_zone, r_max, pitch, amplitude, wavelength,
+                         params.spiral_randomization_threshold, width), rng,
             first_sign=-1.0 if odd else 1.0, angle_offset=0.0,
         )
         clipped = LineString(line).intersection(zone)
