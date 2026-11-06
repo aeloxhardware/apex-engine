@@ -360,7 +360,7 @@ def test_support_check_wired_in_both_orchestrators():
     import main as main_module
     import scripts.export_slicing_preview as preview_module
 
-    main_source = inspect.getsource(main_module.run_pipeline)
+    main_source = inspect.getsource(main_module)  # module entier : run_pipeline delegue a des helpers
     preview_source = inspect.getsource(preview_module.run_slicing_only)
 
     for name, source in (("run_pipeline", main_source), ("run_slicing_only", preview_source)):
@@ -382,5 +382,5 @@ def test_support_check_runs_before_collision_sim():
 
     import main as main_module
 
-    source = inspect.getsource(main_module.run_pipeline)
+    source = inspect.getsource(main_module)  # module entier : run_pipeline delegue a des helpers
     assert source.index("support_check_run(") < source.index("collision_run(")

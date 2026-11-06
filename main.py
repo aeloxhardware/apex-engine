@@ -413,6 +413,201 @@ PIPELINE_STEPS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _make_stage(progress: Optional[Callable[[str, float], None]]):
+    _current: list = [None]
+
+    def _stage(slug: Optional[str]) -> None:
+        """Termine l'etape en cours (1.0) puis ouvre `slug` (0.0) ; `None` termine seulement."""
+        _core_progress.end()
+        if progress is None:
+            return
+        if _current[0] is not None:
+            progress(_current[0], 1.0)
+        _current[0] = slug
+        if slug is not None:
+            progress(slug, 0.0)
+            # fractions intermediaires reelles des boucles de l'etape (R-017, core/progress.py)
+            _core_progress.begin(lambda fraction, _slug=slug: progress(_slug, fraction))
+
+    return _stage, _current
+
+
+def _detect_junction_zones(mesh_path: str, params: PipelineParams):
+    """Passe LEGERE, jetable : mesh + step2 + step3 seulement (limite #47/#48), avant la vraie tetraedrisation."""
+    print(f"[main] Passe legere - detection des zones de jonction : {mesh_path}")
+    light_mesh_data, light_tet_mesh, light_ingest_report = ingest_run(
+        mesh_path, resolution=params.resolution, allow_multi_mesh=params.allow_multi_mesh,
+        place_on_platform=params.place_on_platform,
+        mesher=params.mesher,
+        tetranet_refuse_ratio=params.tetranet_refuse_ratio,
+    )
+    light_overhang_map = overhang_run(light_mesh_data, params.overhang)
+    light_segmentation_params = (
+        replace(params.segmentation, platform_z=light_ingest_report.platform_z_used)
+        if params.segmentation.platform_z is None
+        else params.segmentation
+    )
+    light_region_graph = segmentation_run(
+        light_mesh_data, light_overhang_map, light_segmentation_params, light_tet_mesh
+    )
+    junction_zones = detect_junction_zones(
+        light_mesh_data, light_region_graph, params.junction_refinement_angle_deg,
+        params.junction_refinement_margin,
+    )
+    print(f"[main]   {len(junction_zones)} zone(s) de jonction detectee(s)")
+    return junction_zones
+
+
+def _ingest_stage(mesh_path: str, params: PipelineParams, junction_zones, progress, stage, current):
+    """Etape 1 (R-022 : « import » passe a « tetrahedralization » quand le maillage de surface est pret)."""
+    stage("import")
+    _core_progress.set_stage_switcher(
+        (lambda slug: stage(slug) if current[0] == "import" else None) if progress is not None else None)
+    print(f"[main] Etape 1/10 - ingestion : {mesh_path}")
+    mesh_data, tet_mesh, ingest_report = ingest_run(
+        mesh_path,
+        resolution=params.resolution,
+        allow_multi_mesh=params.allow_multi_mesh,
+        near_platform_resolution=params.near_platform_resolution,
+        near_platform_margin=params.near_platform_margin,
+        junction_zones=junction_zones,
+        junction_refinement_resolution=params.junction_refinement_resolution,
+        place_on_platform=params.place_on_platform,
+        mesher=params.mesher,
+        tetranet_refuse_ratio=params.tetranet_refuse_ratio,
+    )
+    _core_progress.set_stage_switcher(None)
+    if current[0] == "import":      # jamais bascule (chemin sans jalon) : l'etape existe quand meme, de 0 a 1
+        stage("tetrahedralization")
+    print(
+        f"[main]   watertight avant/apres reparation : "
+        f"{ingest_report.was_watertight_initially}/{ingest_report.is_watertight_after_repair}, "
+        f"{ingest_report.tetrahedra_generated} tetraedres"
+    )
+    return mesh_data, tet_mesh, ingest_report
+
+
+def _layers_stage(params: PipelineParams, tet_mesh, mesh_data, scalar_field, region_dependency_graph):
+    """Etape 5 (+ ordre contraint par la tete)."""
+    print("[main] Etape 5/10 - extraction des couches courbes")
+    with _core_progress.phase(0.0, 0.7 if params.collision_order is not None else 1.0):
+        layers = layers_run(tet_mesh, mesh_data, scalar_field, region_dependency_graph, params.layers)
+    if params.collision_order is not None:
+        with _core_progress.phase(0.7, 1.0):
+            layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)
+        print(f"[main]   ordre contraint par la tete : {order_report.constraints} contrainte(s), "
+              f"{order_report.moved_layers} couche(s) deplacee(s), {order_report.cycle_breaks} violee(s)")
+    print(f"[main]   {len(layers)} couche(s)")
+    return layers
+
+
+def _toolpath2d_stage(params: PipelineParams, tet_mesh, scalar_field, layers, mesh_data, overhang_map):
+    """Etape 6. Retourne `(layers, skin_result)`."""
+    print("[main] Etape 6/10 - remplissage 2D par couche")
+    skin_result = None
+    if params.skin is not None:
+        # lissage non-planaire (opt-in) : zones, creusement du corps, trajectoires de surface et ordre sont calcules
+        # ici, l'etape 6 y est jouee sur les couches creusees ; les passes de lissage sont inserees apres l'etape 8
+        skin_result = skin_chain.run(tet_mesh, scalar_field, layers, mesh_data, overhang_map,
+                                     _effective_toolpath2d_params(params), params.machine_profile, params.collision,
+                                     params.skin)
+        layers = skin_result.layers
+        print(f"[main]   lissage non-planaire : {len([z for z in skin_result.paths if z not in skin_result.excluded_zones])}"
+              f" zone(s) gardee(s), {len(skin_result.excluded_zones)} retiree(s), propre={skin_result.clean}")
+    else:
+        layers = toolpath2d_run(layers, mesh_data, overhang_map, _effective_toolpath2d_params(params))
+    return layers, skin_result
+
+
+def _machine_toolpath_stage(params: PipelineParams, tet_mesh, scalar_field, colored_layers, schedule, skin_result):
+    """Etape 8 (+ insertion des passes de lissage). Retourne `(toolpath, step8_diagnostics)`."""
+    print("[main] Etape 8/10 - trajectoire machine (resolution IK)")
+    toolpath, step8_diagnostics = machine_toolpath_run(
+        colored_layers, schedule, params.machine_profile, params.machine_toolpath,
+        direction_field=(gradient_direction_field(tet_mesh, scalar_field,
+                                                  nodal=params.machine_toolpath.per_point_normal_nodal)
+                         if params.machine_toolpath.per_point_normal else None),
+    )
+    print(
+        f"[main]   {len(toolpath.points)} point(s) de trajectoire, "
+        f"{len(step8_diagnostics)} orientation(s) inatteignable(s)"
+    )
+    if skin_result is not None:
+        toolpath, _old_to_new = skin_inject(toolpath, skin_result.layers, skin_result.print_order["passes"],
+                                            params.machine_toolpath.default_feedrate)
+        step8_diagnostics = [replace(d, point_index=int(_old_to_new[d.point_index])) for d in step8_diagnostics]
+        print(f"[main]   {len(toolpath.points)} point(s) apres insertion du lissage")
+    return toolpath, step8_diagnostics
+
+
+def _post_toolpath_stages(params: PipelineParams, toolpath, ingest_report):
+    """Etapes 8b (routage des trajets a vide), 8c (support de depot) et borne de hauteur de tete.
+    Retourne `(toolpath, travel_routing_diagnostics, support_check_report)`."""
+    travel_routing_diagnostics: list[TravelRoutingDiagnostic] = []
+    if params.travel_routing is not None:
+        # Palliatif pour CLAUDE.md limite #46 (trajets a vide sans routage) - lift-and-traverse
+        # valide par collision, PAS un vrai path-planning 3D. Voir pipeline/step8b_travel_routing.py.
+        print("[main] Etape 8b/10 - routage des trajets a vide longs")
+        toolpath, travel_routing_diagnostics = route_long_travels(
+            toolpath, params.machine_profile, params.collision, params.travel_routing
+        )
+        print(
+            f"[main]   {len(toolpath.points)} point(s) de trajectoire apres routage, "
+            f"{len(travel_routing_diagnostics)} trajet(s) encore en collision apres routage"
+        )
+
+    support_check_report = SupportCheckReport(checked=False)
+    if params.support_check is not None:
+        # Place APRES step8b (la trajectoire routee est celle reellement executee) et AVANT step9 :
+        # ne depend ni du CollisionReport ni de step10, qui ne modifie jamais `position`.
+        print("[main] Etape 8c/10 - verification du support de depot")
+        support_check_report = support_check_run(
+            toolpath,
+            params.machine_profile,
+            params.layers.layer_height_base,
+            ingest_report.platform_z_used,
+            params.support_check,
+        )
+        print(
+            f"[main]   {len(support_check_report.events)} depot(s) sans support "
+            f"({support_check_report.unsupported_fraction:.2%} de la matiere extrudee) : "
+            f"{support_check_report.ordering_defect_count} defaut(s) d'ordre, "
+            f"{support_check_report.true_overhang_count} surplomb(s) reel(s)"
+        )
+
+    if params.height_clamp:
+        toolpath, clamped, _deviations = clamp_head_height(toolpath, params.machine_profile, params.collision)
+        print(f"[main]   borne de l'angle de tete selon la hauteur : {clamped} point(s) ramene(s)")
+    return toolpath, travel_routing_diagnostics, support_check_report
+
+
+def _collision_stage(params: PipelineParams, toolpath):
+    """Etape 9 (+ reorientation par paliers). Retourne `(toolpath, collision_report)`."""
+    print("[main] Etape 9/10 - simulation de collision")
+    with _core_progress.phase(0.0, 0.8):
+        collision_report = collision_run(toolpath, params.machine_profile, params.collision)
+    print(
+        f"[main]   {len(collision_report.events)} collision(s) detectee(s) "
+        f"(nozzle_model_checked={collision_report.nozzle_model_checked}, "
+        f"chuck_checked={collision_report.chuck_checked})"
+    )
+    if params.coupled_reorientation_tiers and collision_report.events:
+        for _round in range(params.coupled_reorientation_rounds):
+            contacts = sorted({e.point_index for e in collision_report.events})
+            toolpath, reorient_log = reorient_coupled_tiers(
+                toolpath, contacts, params.machine_profile, params.collision,
+                tiers_deg=tuple(params.coupled_reorientation_tiers),
+            )
+            collision_report = collision_run(toolpath, params.machine_profile, params.collision)
+            print(f"[main]   reorientation par paliers : {sum(1 for _i, b, _t in reorient_log if b is not None)}"
+                  f"/{len(contacts)} point(s) resolu(s) ; {len(collision_report.events)} collision(s) restante(s)")
+            if not collision_report.events:
+                break
+            if not any(found is not None for _i, found, _t in reorient_log):
+                break   # aucun point resolu : trajectoire inchangee, le tour suivant serait identique
+    return toolpath, collision_report
+
+
 def run_pipeline(mesh_path: str, params: PipelineParams,
                  progress: Optional[Callable[[str, float], None]] = None) -> PipelineResult:
     """
@@ -437,83 +632,13 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
     ensure_toolhead(params.machine_profile)
     check_model_fits_machine(mesh_path, params.machine_profile)
     _core_progress.set_stage_switcher(None)   # jamais un rappel laisse par une execution interrompue
-    _current: list = [None]
-
-    def _stage(slug: Optional[str]) -> None:
-        """Termine l'etape en cours (1.0) puis ouvre `slug` (0.0) ; `None` termine seulement."""
-        _core_progress.end()
-        if progress is None:
-            return
-        if _current[0] is not None:
-            progress(_current[0], 1.0)
-        _current[0] = slug
-        if slug is not None:
-            progress(slug, 0.0)
-            # fractions intermediaires reelles des boucles de l'etape (R-017, core/progress.py)
-            _core_progress.begin(lambda fraction, _slug=slug: progress(_slug, fraction))
+    _stage, _current = _make_stage(progress)
 
     junction_zones = None
     if params.junction_refinement_resolution is not None:
-        # Passe LEGERE, jetable : mesh + step2 (overhang) + step3
-        # (segmentation) SEULEMENT, jamais la tetraedrisation fine ni
-        # step4-10 - juste pour localiser les frontieres inter-region a
-        # forte divergence directionnelle AVANT la vraie tetraedrisation
-        # (CLAUDE.md limite #47/#48). Chicken-and-egg resolu ainsi : step2/
-        # step3 ne dependent que de MeshData (le mesh de SURFACE), jamais du
-        # TetMesh volumique - `_light_tet_mesh` ci-dessous n'est jamais
-        # utilise. Chaque step reste pur (run(input, params) -> output) ;
-        # c'est UNIQUEMENT cette fonction d'orchestration qui sait qu'elle
-        # rejoue une partie du pipeline, jamais un step lui-meme.
-        print(f"[main] Passe legere - detection des zones de jonction : {mesh_path}")
-        light_mesh_data, light_tet_mesh, light_ingest_report = ingest_run(
-            mesh_path, resolution=params.resolution, allow_multi_mesh=params.allow_multi_mesh,
-            place_on_platform=params.place_on_platform,
-            mesher=params.mesher,
-            tetranet_refuse_ratio=params.tetranet_refuse_ratio,
-        )
-        light_overhang_map = overhang_run(light_mesh_data, params.overhang)
-        light_segmentation_params = (
-            replace(params.segmentation, platform_z=light_ingest_report.platform_z_used)
-            if params.segmentation.platform_z is None
-            else params.segmentation
-        )
-        # light_tet_mesh EST utilise si branch_cut_threshold est actif (la
-        # segmentation par branche a besoin du volume) - inchange sinon.
-        light_region_graph = segmentation_run(
-            light_mesh_data, light_overhang_map, light_segmentation_params, light_tet_mesh
-        )
-        junction_zones = detect_junction_zones(
-            light_mesh_data, light_region_graph, params.junction_refinement_angle_deg,
-            params.junction_refinement_margin,
-        )
-        print(f"[main]   {len(junction_zones)} zone(s) de jonction detectee(s)")
+        junction_zones = _detect_junction_zones(mesh_path, params)
 
-    _stage("import")
-    # L'etape 1 passe d'« import » a « tetrahedralization » quand le maillage de surface est pret (R-022) ;
-    # le rappel n'agit que si « import » est l'etape courante (la passe legere des jonctions ne le declenche pas).
-    _core_progress.set_stage_switcher(
-        (lambda slug: _stage(slug) if _current[0] == "import" else None) if progress is not None else None)
-    print(f"[main] Etape 1/10 - ingestion : {mesh_path}")
-    mesh_data, tet_mesh, ingest_report = ingest_run(
-        mesh_path,
-        resolution=params.resolution,
-        allow_multi_mesh=params.allow_multi_mesh,
-        near_platform_resolution=params.near_platform_resolution,
-        near_platform_margin=params.near_platform_margin,
-        junction_zones=junction_zones,
-        junction_refinement_resolution=params.junction_refinement_resolution,
-        place_on_platform=params.place_on_platform,
-        mesher=params.mesher,
-        tetranet_refuse_ratio=params.tetranet_refuse_ratio,
-    )
-    _core_progress.set_stage_switcher(None)
-    if _current[0] == "import":      # jamais bascule (chemin sans jalon) : l'etape existe quand meme, de 0 a 1
-        _stage("tetrahedralization")
-    print(
-        f"[main]   watertight avant/apres reparation : "
-        f"{ingest_report.was_watertight_initially}/{ingest_report.is_watertight_after_repair}, "
-        f"{ingest_report.tetrahedra_generated} tetraedres"
-    )
+    mesh_data, tet_mesh, ingest_report = _ingest_stage(mesh_path, params, junction_zones, progress, _stage, _current)
 
     _stage("overhang")
     print("[main] Etape 2/10 - detection des surplombs")
@@ -522,11 +647,8 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
 
     _stage("segmentation")
     print("[main] Etape 3/10 - segmentation en regions")
-    # step1 a deja resolu platform_z (fourni ou detecte automatiquement,
-    # IngestReport.platform_z_used) - propage cette MEME valeur a step3
-    # plutot que de la laisser re-deriver independamment (source de
-    # divergence silencieuse potentielle si les deux calculs different),
-    # sauf si l'appelant a explicitement fixe params.segmentation.platform_z.
+    # step1 a deja resolu platform_z : propage cette MEME valeur a step3 plutot que de la laisser
+    # re-deriver independamment, sauf si l'appelant a explicitement fixe params.segmentation.platform_z.
     segmentation_params = (
         replace(params.segmentation, platform_z=ingest_report.platform_z_used)
         if params.segmentation.platform_z is None
@@ -541,30 +663,10 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
     scalar_field = field_solver_run(tet_mesh, mesh_data, overhang_map, region_dependency_graph, _fs_params)
 
     _stage("layers")
-    print("[main] Etape 5/10 - extraction des couches courbes")
-    with _core_progress.phase(0.0, 0.7 if params.collision_order is not None else 1.0):
-        layers = layers_run(tet_mesh, mesh_data, scalar_field, region_dependency_graph, params.layers)
-    if params.collision_order is not None:
-        with _core_progress.phase(0.7, 1.0):
-            layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)
-        print(f"[main]   ordre contraint par la tete : {order_report.constraints} contrainte(s), "
-              f"{order_report.moved_layers} couche(s) deplacee(s), {order_report.cycle_breaks} violee(s)")
-    print(f"[main]   {len(layers)} couche(s)")
+    layers = _layers_stage(params, tet_mesh, mesh_data, scalar_field, region_dependency_graph)
 
     _stage("toolpath2d")
-    print("[main] Etape 6/10 - remplissage 2D par couche")
-    skin_result = None
-    if params.skin is not None:
-        # lissage non-planaire (opt-in) : zones, creusement du corps, trajectoires de surface et ordre sont calcules
-        # ici, l'etape 6 y est jouee sur les couches creusees ; les passes de lissage sont inserees apres l'etape 8
-        skin_result = skin_chain.run(tet_mesh, scalar_field, layers, mesh_data, overhang_map,
-                                     _effective_toolpath2d_params(params), params.machine_profile, params.collision,
-                                     params.skin)
-        layers = skin_result.layers
-        print(f"[main]   lissage non-planaire : {len([z for z in skin_result.paths if z not in skin_result.excluded_zones])}"
-              f" zone(s) gardee(s), {len(skin_result.excluded_zones)} retiree(s), propre={skin_result.clean}")
-    else:
-        layers = toolpath2d_run(layers, mesh_data, overhang_map, _effective_toolpath2d_params(params))
+    layers, skin_result = _toolpath2d_stage(params, tet_mesh, scalar_field, layers, mesh_data, overhang_map)
 
     _stage("scheduling")
     print("[main] Etape 7/10 - couleur + ordonnancement")
@@ -574,85 +676,12 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
     print(f"[main]   {len(schedule.passes)} passe(s) d'impression")
 
     _stage("machine_toolpath")
-    print("[main] Etape 8/10 - trajectoire machine (resolution IK)")
-    toolpath, step8_diagnostics = machine_toolpath_run(
-        colored_layers, schedule, params.machine_profile, params.machine_toolpath,
-        direction_field=(gradient_direction_field(tet_mesh, scalar_field,
-                                                  nodal=params.machine_toolpath.per_point_normal_nodal)
-                         if params.machine_toolpath.per_point_normal else None),
-    )
-    print(
-        f"[main]   {len(toolpath.points)} point(s) de trajectoire, "
-        f"{len(step8_diagnostics)} orientation(s) inatteignable(s)"
-    )
-
-    if skin_result is not None:
-        toolpath, _old_to_new = skin_inject(toolpath, skin_result.layers, skin_result.print_order["passes"],
-                                            params.machine_toolpath.default_feedrate)
-        step8_diagnostics = [replace(d, point_index=int(_old_to_new[d.point_index])) for d in step8_diagnostics]
-        print(f"[main]   {len(toolpath.points)} point(s) apres insertion du lissage")
-
-    travel_routing_diagnostics: list[TravelRoutingDiagnostic] = []
-    if params.travel_routing is not None:
-        # 🔴 Palliatif pour CLAUDE.md limite #46 (trajets a vide sans
-        # routage) - lift-and-traverse valide par collision, PAS un vrai
-        # path-planning 3D. Voir pipeline/step8b_travel_routing.py.
-        print("[main] Etape 8b/10 - routage des trajets a vide longs")
-        toolpath, travel_routing_diagnostics = route_long_travels(
-            toolpath, params.machine_profile, params.collision, params.travel_routing
-        )
-        print(
-            f"[main]   {len(toolpath.points)} point(s) de trajectoire apres routage, "
-            f"{len(travel_routing_diagnostics)} trajet(s) encore en collision apres routage"
-        )
-
-    support_check_report = SupportCheckReport(checked=False)
-    if params.support_check is not None:
-        # Place APRES step8b (la trajectoire routee est celle reellement
-        # executee) et AVANT step9 : ne depend ni du CollisionReport ni de
-        # step10, qui ne modifie jamais `position` - seulement `axis_angles`.
-        print("[main] Etape 8c/10 - verification du support de depot")
-        support_check_report = support_check_run(
-            toolpath,
-            params.machine_profile,
-            params.layers.layer_height_base,
-            ingest_report.platform_z_used,
-            params.support_check,
-        )
-        print(
-            f"[main]   {len(support_check_report.events)} depot(s) sans support "
-            f"({support_check_report.unsupported_fraction:.2%} de la matiere extrudee) : "
-            f"{support_check_report.ordering_defect_count} defaut(s) d'ordre, "
-            f"{support_check_report.true_overhang_count} surplomb(s) reel(s)"
-        )
-
-    if params.height_clamp:
-        toolpath, clamped, _deviations = clamp_head_height(toolpath, params.machine_profile, params.collision)
-        print(f"[main]   borne de l'angle de tete selon la hauteur : {clamped} point(s) ramene(s)")
+    toolpath, step8_diagnostics = _machine_toolpath_stage(params, tet_mesh, scalar_field, colored_layers, schedule,
+                                                          skin_result)
+    toolpath, travel_routing_diagnostics, support_check_report = _post_toolpath_stages(params, toolpath, ingest_report)
 
     _stage("collision")
-    print("[main] Etape 9/10 - simulation de collision")
-    with _core_progress.phase(0.0, 0.8):
-        collision_report = collision_run(toolpath, params.machine_profile, params.collision)
-    print(
-        f"[main]   {len(collision_report.events)} collision(s) detectee(s) "
-        f"(nozzle_model_checked={collision_report.nozzle_model_checked}, "
-        f"chuck_checked={collision_report.chuck_checked})"
-    )
-    if params.coupled_reorientation_tiers and collision_report.events:
-        for _round in range(params.coupled_reorientation_rounds):
-            contacts = sorted({e.point_index for e in collision_report.events})
-            toolpath, reorient_log = reorient_coupled_tiers(
-                toolpath, contacts, params.machine_profile, params.collision,
-                tiers_deg=tuple(params.coupled_reorientation_tiers),
-            )
-            collision_report = collision_run(toolpath, params.machine_profile, params.collision)
-            print(f"[main]   reorientation par paliers : {sum(1 for _i, b, _t in reorient_log if b is not None)}"
-                  f"/{len(contacts)} point(s) resolu(s) ; {len(collision_report.events)} collision(s) restante(s)")
-            if not collision_report.events:
-                break
-            if not any(found is not None for _i, found, _t in reorient_log):
-                break   # aucun point resolu : trajectoire inchangee, le tour suivant serait identique
+    toolpath, collision_report = _collision_stage(params, toolpath)
 
     _stage("adjustment")
     print("[main] Etape 10/10 - ajustement")
