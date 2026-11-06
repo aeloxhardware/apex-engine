@@ -1,6 +1,7 @@
 """Suite découpée de `test_cpp_equivalence.py` (R-030 point 1, limite de 800 lignes par fichier) : tests déplacés tels quels."""
 
 from __future__ import annotations
+from test_cpp_equivalence import restore_switch  # noqa: F401  (fixtures)
 
 import dataclasses
 import numpy as np
