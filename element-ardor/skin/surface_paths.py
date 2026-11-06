@@ -523,11 +523,12 @@ def parallel_lines(zm, width, overlap, angle_deg, aligned, d_edge):
     return out
 
 
-def rectilinear(zm, width=NOZZLE_WIDTH, overlap=0.2, angle_deg=45.0, aligned=False, d_edge=None,
-                zigzag=True, max_connector=2.5, **_):
+def rectilinear(zm, width=NOZZLE_WIDTH, overlap=0.2, angle_deg=45.0, aligned=False, d_edge=None, **options):
     """Rectiligne : lignes paralleles en zigzag, extremites voisines
     raccordees le long du premier anneau si le raccord fait moins de
-    max_connector largeurs (sinon trajet a vide)."""
+    max_connector largeurs (sinon trajet a vide). Options nommees : `zigzag`
+    (defaut True), `max_connector` (defaut 2.5) ; les autres sont ignorees."""
+    zigzag, max_connector = options.get("zigzag", True), options.get("max_connector", 2.5)
     d_edge = zm.distance_to_boundary() if d_edge is None else d_edge
     lines = parallel_lines(zm, width, overlap, angle_deg, aligned, d_edge)
     level_lines = [(k, pl.points) for k, pl in lines]
