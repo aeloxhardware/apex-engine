@@ -29,8 +29,8 @@ def heat():
 @pytest.fixture(scope="module")
 def result(heat):
     p, md, tm, om, field, layers = heat
-    return chain.run(tm, field, layers, md, om, M._effective_toolpath2d_params(p), p.machine_profile, p.collision,
-                     chain.SkinParams(face_sample=300, max_iter=4))
+    return chain.run(chain.SkinInputs(tm, field, layers, md, om, M._effective_toolpath2d_params(p)),
+                     p.machine_profile, p.collision, chain.SkinParams(face_sample=300, max_iter=4))
 
 
 def test_zone_statuses_partition_the_surface(heat):

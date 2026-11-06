@@ -64,18 +64,26 @@ def body_from_layers(layers: list[Layer]) -> list[dict]:
     return out
 
 
+@dataclass(frozen=True)
+class SkinInputs:
+    """Donnees des etapes amont consommees par `run`."""
+    tet_mesh: TetMesh
+    scalar_field: ScalarField
+    layers: list[Layer]
+    mesh_data: object
+    overhang_map: object
+    toolpath2d_params: s6.Step6Params
+
+
 def run(
-    tet_mesh: TetMesh,
-    scalar_field: ScalarField,
-    layers: list[Layer],
-    mesh_data,
-    overhang_map,
-    toolpath2d_params: s6.Step6Params,
+    inputs: SkinInputs,
     machine: MachineProfile,
     sim,
     params: SkinParams = SkinParams(),
     log: bool = False,
 ) -> SkinResult:
+    tet_mesh, scalar_field, layers = inputs.tet_mesh, inputs.scalar_field, inputs.layers
+    mesh_data, overhang_map, toolpath2d_params = inputs.mesh_data, inputs.overhang_map, inputs.toolpath2d_params
     messages: list[str] = []
     timings: dict = {}
 

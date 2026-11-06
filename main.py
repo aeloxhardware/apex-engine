@@ -557,9 +557,10 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
     if params.skin is not None:
         # lissage non-planaire (opt-in) : zones, creusement du corps, trajectoires de surface et ordre sont calcules
         # ici, l'etape 6 y est jouee sur les couches creusees ; les passes de lissage sont inserees apres l'etape 8
-        skin_result = skin_chain.run(tet_mesh, scalar_field, layers, mesh_data, overhang_map,
-                                     _effective_toolpath2d_params(params), params.machine_profile, params.collision,
-                                     params.skin)
+        skin_result = skin_chain.run(
+            skin_chain.SkinInputs(tet_mesh, scalar_field, layers, mesh_data, overhang_map,
+                                  _effective_toolpath2d_params(params)),
+            params.machine_profile, params.collision, params.skin)
         layers = skin_result.layers
         print(f"[main]   lissage non-planaire : {len([z for z in skin_result.paths if z not in skin_result.excluded_zones])}"
               f" zone(s) gardee(s), {len(skin_result.excluded_zones)} retiree(s), propre={skin_result.clean}")

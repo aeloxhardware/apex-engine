@@ -498,25 +498,21 @@ class _RawPoint:
     is_travel: bool
 
 
+@dataclass(slots=True, eq=False)
 class _RawPoints:
     """Les points bruts de la trajectoire en TABLEAUX (une ligne par point),
     au lieu de ~300 000 objets `_RawPoint` (death @ 0,8). Memes valeurs, au
     bit pres ; l'acces point par point (`raw[i]`, iteration) reste possible
     pour les chemins de repli, qui recoivent alors un `_RawPoint`."""
 
-    __slots__ = ("position", "desired_direction", "layer_id", "segment_index", "color_id",
-                 "feedrate", "extrusion", "is_travel")
-
-    def __init__(self, position, desired_direction, layer_id, segment_index, color_id, feedrate,
-                 extrusion, is_travel):
-        self.position = position                    # (N,3)
-        self.desired_direction = desired_direction  # (N,3)
-        self.layer_id = layer_id                    # (N,) int64
-        self.segment_index = segment_index          # (N,) int64
-        self.color_id = color_id                    # list, None autorise
-        self.feedrate = feedrate                    # (N,)
-        self.extrusion = extrusion                  # (N,)
-        self.is_travel = is_travel                  # (N,) bool
+    position: np.ndarray            # (N,3)
+    desired_direction: np.ndarray   # (N,3)
+    layer_id: np.ndarray            # (N,) int64
+    segment_index: np.ndarray       # (N,) int64
+    color_id: list                  # None autorise
+    feedrate: np.ndarray            # (N,)
+    extrusion: np.ndarray           # (N,)
+    is_travel: np.ndarray           # (N,) bool
 
     def __len__(self) -> int:
         return len(self.position)
