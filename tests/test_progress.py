@@ -83,7 +83,8 @@ def test_native_step6_chunks_match_a_single_call(monkeypatch):
 
     class FakeModule:
         @staticmethod
-        def fill_layers(frames, loop_begin, point_begin, points, sweep, config, kdtree, is_bridge, span, threads):
+        def fill_layers(*args):          # signature du noyau natif : frames, loop_begin, point_begin, points, sweep, ...
+            frames, loop_begin, point_begin, points, sweep = args[:5]
             calls.append(len(frames))
             assert loop_begin[0] == 0 and point_begin[0] == 0
             assert loop_begin[-1] == len(point_begin) - 1 and point_begin[-1] == len(points)
