@@ -14,6 +14,7 @@ Sortie : (MeshData, TetMesh, IngestReport)
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import pickle
 import re
@@ -2534,19 +2535,27 @@ def _ingest_with_tetranet(
     return mesh_data, tet_mesh, report
 
 
+@dataclass(frozen=True)
+class IngestOptions:
+    """Options de `run` (memes noms et defauts que les anciens parametres nommes)."""
+
+    allow_multi_mesh: bool = False
+    near_platform_resolution: Optional[float] = None
+    near_platform_margin: float = 5.0
+    platform_z: Optional[float] = None
+    junction_zones: Optional[list[JunctionZone]] = None
+    junction_refinement_resolution: Optional[float] = None
+    check_surface_coverage: bool = False
+    place_on_platform: bool = False
+    mesher: str = "tetgen"
+    tetranet_refuse_ratio: float = 0.05
+
+
 def run(
     mesh_path: str,
     resolution: float,
-    allow_multi_mesh: bool = False,
-    near_platform_resolution: Optional[float] = None,
-    near_platform_margin: float = 5.0,
-    platform_z: Optional[float] = None,
-    junction_zones: Optional[list[JunctionZone]] = None,
-    junction_refinement_resolution: Optional[float] = None,
-    check_surface_coverage: bool = False,
-    place_on_platform: bool = False,
-    mesher: str = "tetgen",
-    tetranet_refuse_ratio: float = 0.05,
+    options: Optional[IngestOptions] = None,
+    **overrides,
 ) -> tuple[MeshData, TetMesh, IngestReport]:
     """
     Charge, nettoie et prepare le mesh source pour le reste du pipeline.
@@ -2613,6 +2622,12 @@ def run(
         MeshIngestError: si le fichier est illisible, vide, ou ne peut pas
             etre reduit a un volume tetraedrisable meme apres reparation.
     """
+    opts = dataclasses.replace(options or IngestOptions(), **overrides)
+    allow_multi_mesh, near_platform_resolution = opts.allow_multi_mesh, opts.near_platform_resolution
+    near_platform_margin, platform_z, junction_zones = opts.near_platform_margin, opts.platform_z, opts.junction_zones
+    junction_refinement_resolution = opts.junction_refinement_resolution
+    check_surface_coverage, place_on_platform = opts.check_surface_coverage, opts.place_on_platform
+    mesher, tetranet_refuse_ratio = opts.mesher, opts.tetranet_refuse_ratio
     raw_mesh = _load_raw_mesh(mesh_path, allow_multi_mesh)
     _progress.milestone(0.5)                 # R-017 : fichier lu (etape « import »)
     if mesher == "tetranet":
