@@ -72,7 +72,6 @@ from pipeline.step10_adjustment import (AdjustmentReport, Step10Params, clamp_he
 
 
 
-
 def _effective_field_solver_params(params: "PipelineParams"):
     """FieldSolverParams effectifs : `radial_tilt_origin` derive de la machine
     quand `reachable_tilt_from_machine` est actif et que le premier axe est
