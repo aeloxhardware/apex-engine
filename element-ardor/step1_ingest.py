@@ -1640,250 +1640,95 @@ def _finish_geometric_resolution(
     return current, None
 
 
-def _tetrahedralize(
-    mesh: trimesh.Trimesh,
-    resolution: float,
-    near_platform_resolution: Optional[float] = None,
-    near_platform_margin: float = 5.0,
-    platform_z: float = 0.0,
-    junction_zones: Optional[list[JunctionZone]] = None,
-    junction_refinement_resolution: Optional[float] = None,
-) -> TetMesh:
-    """
-    Genere un maillage tetraedrique volumique respectant la frontiere du mesh
-    de surface, via TetGen. `resolution` est converti en volume maximal
-    autorise par tetraedre (parametre -a de tetgen), qui reste le plafond
-    global.
+@dataclass(frozen=True)
+class _TetOptions:
+    """Reglages communs a toutes les tentatives de la cascade de tetraedrisation."""
+    resolution: float
+    near_platform_margin: float
+    platform_z: float
+    junction_zones: Optional[list]
+    junction_refinement_resolution: Optional[float]
 
-    `near_platform_resolution` (opt-in, None = desactive par defaut - meme
-    discipline que `direction_blend_radius=0.0` en step4) raffine LOCALEMENT
-    la densite pres du plateau (z < platform_z + near_platform_margin), via
-    deux regions TetGen (`_split_for_platform_refinement` + `add_region`,
-    une pour la tranche pres du plateau a `near_platform_resolution`, une
-    pour le reste a `resolution`) - PAS via un maillage de fond
-    (`bgmesh`/`metric`), mecanisme teste et ecarte : silencieusement ignore
-    par le binding tetgen installe (0.8.4) des qu'un `switches=` non vide
-    est passe, et provoque un segfault natif reproductible si on force `-m`
-    malgre tout (teste sous plusieurs formes, voir CLAUDE.md). Corrige une
-    erreur de discretisation FEM mesuree pres du plateau (CLAUDE.md) : un
-    tetraedre P1 assez grand pour s'etendre du contact plateau jusqu'a une
-    zone ou la direction cible a deja beaucoup tourne ne peut representer
-    qu'un seul gradient constant sur toute son etendue, produisant un
-    artefact d'« escalier » visible dans l'inclinaison des couches - affine
-    localement plutot que globalement pour ne pas payer le cout d'un
-    maillage fin partout ou ce n'est pas necessaire (mesure sur
-    l_shape_overhang.stl : amelioration angulaire quasi identique a un
-    raffinement global complet, pour ~5.4x moins de tetraedres).
 
-    Bug corrige (CLAUDE.md limite #42) : `add_region` ignorait
-    silencieusement le volume de la region "rest" (donc `resolution`
-    perdait tout effet hors de la tranche pres du plateau) quand le seed de
-    cette region tombait hors de sa propre coque sur une geometrie non
-    convexe - `_split_for_platform_refinement` garantit desormais un seed
-    valide pour les deux regions (`_find_guaranteed_interior_point`).
-
-    `junction_zones`/`junction_refinement_resolution` (opt-in, None =
-    desactive par defaut - meme discipline) raffinent LOCALEMENT les
-    jonctions multi-region a forte divergence directionnelle (CLAUDE.md
-    limite #47/#48), generalisant le mecanisme ci-dessus au-dela du seul
-    cas plateau. Contrairement au plateau, une jonction n'a pas de plan de
-    coupe unique : pas de decoupe de surface, juste un seed interne
-    supplementaire (voir `_merged_junction_seed`) - PLUSIEURS zones
-    detectees sont FUSIONNEES en un seul seed avant d'etre passees a
-    `add_region`, jamais une par zone : mesure directe
-    (scripts/measure_add_region_n_zones.py) que le bug limite #42 se
-    generalise a N regions actives simultanement (aucune des zones fines
-    n'atteignait le facteur de densite attendu, une meme MOINS dense que
-    la region censee etre grossiere) - le fallback fusionne fonctionne
-    correctement (scripts/measure_add_region_merged_zone.py, facteur ~48x).
-    """
-    if not mesh.is_watertight:
-        raise MeshIngestError(
-            "Impossible de tetraedriser un mesh non etanche apres reparation. "
-            "Verifiez la geometrie source."
-        )
-
-    # Strategie de repli, du moins invasif au plus invasif. TetGen est le
-    # seul juge fiable des auto-intersections qui le bloquent : ce sont
-    # souvent des contacts EXACTS ("Two segments exactly intersect", "A
-    # vertex lies on a facet") que ni trimesh (watertight/winding
-    # coherents), ni manifold3d (rend le maillage a l'identique), ni un test
-    # geometrique de traversee ne signalent - mesure sur
-    # res/test_models/death.stl : 3 triangles fautifs sur 12662, zero
-    # detecte par le test SAT de _count_self_intersecting_faces. D'ou une
-    # reparation REACTIVE (on repare parce que TetGen a refuse), jamais
-    # preventive : un maillage deja accepte n'est jamais modifie.
-    attempts: list[tuple[str, trimesh.Trimesh, Optional[float]]] = [
-        ("tel quel", mesh, near_platform_resolution),
-    ]
-
-    # Resolution GEOMETRIQUE des auto-intersections (decoupe le long de la
-    # courbe d'intersection + extraction de l'enveloppe exterieure par
-    # nombre d'enroulement) - tentee EN PREMIER, avant pymeshfix :
-    # contrairement a pymeshfix (qui reecrit tout le maillage), elle
-    # preserve la topologie et l'aire de la geometrie non affectee, donc
-    # strictement moins invasive. Best-effort : ne leve jamais, retourne
-    # None si le defaut n'est pas de cette nature ou si le resultat ne
-    # satisfait pas ses propres post-conditions (voir docstring du module).
-    # Meme garde-fou anti-effondrement que pour pymeshfix ci-dessous (limite
-    # #51/#52) : un resultat radicalement plus petit que l'entree est rejete
-    # plutot qu'accepte silencieusement. Mesure sur turkish.stl (session
-    # ayant introduit ce mecanisme) : reduit les auto-intersections de 50 a
-    # 0 faces SAT et de 51 a 2 segments nommes par TetGen, mais ne suffit
-    # pas encore a lui seul a faire accepter ce modele precis (recouvrements
-    # coplanaires non traites) - reste neanmoins utile en cascade, avant le
-    # repli plus destructeur pymeshfix.
-    speculative_attempts: dict = {}
-    probe_results: dict = {}
+def _geometric_resolution_attempt(
+    mesh: trimesh.Trimesh, opts: _TetOptions, near_platform_resolution: Optional[float],
+    speculative_attempts: dict, probe_results: dict,
+):
+    """Resolution GEOMETRIQUE des auto-intersections, tentee EN PREMIER (avant pymeshfix) : elle preserve la
+    topologie et l'aire de la geometrie non affectee. Best-effort : ne leve jamais. Retourne
+    `(resolved, collapsed)` ; `resolved` est None si le defaut n'est pas de cette nature ou si le resultat
+    s'effondre (moins de la moitie des faces : garde-fou limite #51/#52). Alimente `speculative_attempts` et
+    `probe_results` (indexes par `id(resolved)`)."""
     resolved = resolve_self_intersections(mesh)
-    resolved_collapsed = False
     if resolved is not None and len(resolved.faces) < 0.5 * len(mesh.faces):
-        resolved = None
-        resolved_collapsed = True
-    if resolved is not None:
-        # `resolve_self_intersections` peut rendre un mesh etanche et
-        # connexe mais avec quelques auto-intersections RESIDUELLES,
-        # introduites par son propre soudage de trous minuscules
-        # (`_close_small_boundary_loops` - fusionner des sommets proches
-        # peut faire chevaucher deux triangles fins voisins). Ce n'est plus
-        # le defaut d'origine (recouvrement CSG transversal), c'est un
-        # artefact local du soudage - nettoye ici avec le meme mecanisme
-        # que ci-dessous (retrait + retriangulation Klincsek), sans la
-        # garde de caracteristique d'Euler stricte (inadaptee : le soudage
-        # de trous a deja legitimement change l'euler avant cet appel).
-        # Mesure sur turkish.stl : 8 auto-intersections residuelles -> 0,
-        # corps unique preserve, ecart de volume 2.9e-6%.
-        residual_sat = _find_self_intersecting_faces(resolved)
-        if residual_sat:
-            cleaned_resolved = _repair_local_self_intersections(
-                resolved, require_euler_preserved=False,
-            )
-            if cleaned_resolved is not None:
-                resolved = cleaned_resolved
-        # Le test SAT ci-dessus ignore volontairement toute paire de faces
-        # partageant un sommet (contact par construction) - or un contact
-        # EXACT entre deux faces qui partagent DEJA un sommet ailleurs
-        # (ex: un eventail de triangles fins autour d'un sommet issu du
-        # soudage) lui est invisible, alors que TetGen le refuse.
-        # `_finish_geometric_resolution` boucle sur TetGen lui-meme comme
-        # oracle final pour ce residu : mesure sur turkish.stl, un dernier
-        # segment nomme (2 faces partageant le sommet 890) restait apres
-        # le nettoyage SAT ci-dessus ; cible et repare en 1 iteration
-        # supplementaire, TetGen aboutit alors sur la geometrie COMPLETE.
-        # Execution SPECULATIVE (session du 2026-10-01) : la sonde de
-        # `_finish_geometric_resolution` est une vraie tetraedrisation SANS
-        # raffinement, jetee ; la tentative suivante (AVEC raffinement) est
-        # un autre calcul. Mesure sur death.stl : 6,55 s + 6,85 s en serie.
-        # Quand la sonde reussit (cas nominal), elle rend `resolved` INTACT :
-        # la tentative finale porte alors sur ce meme objet. On la lance donc
-        # EN PARALLELE de la sonde (deux sous-processus TetGen) et on ne
-        # garde son issue que si la sonde n'a rien modifie - resultat
-        # identique dans tous les cas, temps = max au lieu de somme.
-        speculative = None
-        if _SPECULATIVE_TETGEN and not junction_zones:
-            import concurrent.futures as _cf
-            _executor = _cf.ThreadPoolExecutor(max_workers=1)
-            speculative = _executor.submit(
-                _tetrahedralize_once_isolated, resolved, resolution, near_platform_resolution,
-                near_platform_margin, platform_z, junction_zones, junction_refinement_resolution,
-            )
-            _executor.shutdown(wait=False)
-        before_finish = resolved
-        resolved, probe_tet_mesh = _finish_geometric_resolution(resolved, resolution)
-        if probe_tet_mesh is not None and not junction_zones:
-            probe_results[id(resolved)] = probe_tet_mesh
-        if speculative is not None and resolved is before_finish:
-            speculative_attempts[id(resolved)] = speculative
-        attempts.append(("apres resolution geometrique", resolved, near_platform_resolution))
-
-    # Meme garde-fou anti-effondrement que `_clean_and_repair` (limite #51) :
-    # MeshFix peut rendre un mesh watertight en supprimant une portion
-    # entiere de la geometrie plutot qu'en la reparant. Bug reel mesure sur
-    # `turkish.stl` : ce deuxieme appel a `_repair_with_pymeshfix`, propre a
-    # la cascade de tetraedrisation et jusqu'ici SANS garde-fou (seul
-    # `_clean_and_repair` en avait un), acceptait un resultat passant de
-    # 10104 a 1488 faces - watertight, donc silencieusement accepte par la
-    # cascade, mais amputant tout le haut du modele (z tronque de 90.78 a
-    # 63.26mm). TetGen tetraedrise alors ce mesh mutile SANS AUCUNE erreur
-    # ni warning (il est parfaitement valide, juste faux) : le pipeline
-    # entier (step2 a step8) traite ensuite fidelement un modele auquel il
-    # manque les deux tiers de sa hauteur, sans jamais lever d'exception -
-    # silence total jusqu'a l'inspection visuelle du GLB final.
-    repaired = _repair_with_pymeshfix(mesh)
-    pymeshfix_collapsed = False
-    if repaired is not None and len(repaired.faces) < 0.5 * len(mesh.faces):
-        # Effondrement detecte : ce resultat n'est utilisable NULLE PART
-        # dans la cascade, ni comme tentative dediee ni comme source de
-        # repli pour "sans raffinement plateau" ci-dessous (meme mesh
-        # mutile, memes deux tiers de hauteur disparus).
-        repaired = None
-        pymeshfix_collapsed = True
-    if repaired is not None:
-        attempts.append(("apres reparation pymeshfix", repaired, near_platform_resolution))
-
-    # Dernier recours : abandonner le raffinement local pres du plateau.
-    # `_split_for_platform_refinement` recolle deux coques obtenues par
-    # slice_plane(cap=True) ; leurs faces de bouchage sont coplanaires et
-    # superposees le long de la frontiere de coupe, ce que TetGen peut
-    # refuser sur une geometrie dense qui touche ce plan en de nombreux
-    # points - mesure sur death.stl repare : 107037 tetraedres SANS
-    # raffinement, refus net AVEC. Mieux vaut un maillage un peu plus
-    # grossier pres du plateau qu'aucun maillage du tout.
-    #
-    # Ordre de preference : `resolved` (resolution geometrique, la moins
-    # invasive) > `repaired` (pymeshfix) > `mesh` (brut). Bug reel mesure
-    # en integrant ce repli avec `resolved` : la source ne considerait
-    # QUE `repaired`/`mesh`, jamais `resolved` - sur turkish.stl, avec
-    # `near_platform_resolution` actif, l'attempt "apres resolution
-    # geometrique" echouait pour une raison PROPRE au raffinement plateau
-    # ("split_segment", nouvelle variante limite #44 sur le PLC combine
-    # avec ce mesh precis), mais ce repli retombait alors sur `mesh` NON
-    # REPARE (51 auto-intersections brutes) au lieu du mesh deja nettoye
-    # par la resolution geometrique - echec garanti pour une raison sans
-    # aucun rapport avec celle qui vient d'etre reglee.
-    if near_platform_resolution is not None:
-        source = resolved if resolved is not None else (
-            repaired if repaired is not None else mesh
+        return None, True
+    if resolved is None:
+        return None, False
+    # Auto-intersections RESIDUELLES introduites par le soudage de trous minuscules : nettoyees sans la garde
+    # d'Euler stricte (le soudage a deja change l'euler). turkish.stl : 8 -> 0, ecart de volume 2.9e-6 %.
+    if _find_self_intersecting_faces(resolved):
+        cleaned_resolved = _repair_local_self_intersections(resolved, require_euler_preserved=False)
+        if cleaned_resolved is not None:
+            resolved = cleaned_resolved
+    # Execution SPECULATIVE (2026-10-01) : la sonde de `_finish_geometric_resolution` est une vraie
+    # tetraedrisation SANS raffinement, jetee ; la tentative suivante (AVEC raffinement) est un autre calcul.
+    # Quand la sonde reussit, elle rend `resolved` INTACT : la tentative finale est lancee EN PARALLELE et son
+    # issue n'est gardee que si la sonde n'a rien modifie (resultat identique, temps = max au lieu de somme).
+    speculative = None
+    if _SPECULATIVE_TETGEN and not opts.junction_zones:
+        import concurrent.futures as _cf
+        _executor = _cf.ThreadPoolExecutor(max_workers=1)
+        speculative = _executor.submit(
+            _tetrahedralize_once_isolated, resolved, opts.resolution, near_platform_resolution,
+            opts.near_platform_margin, opts.platform_z, opts.junction_zones, opts.junction_refinement_resolution,
         )
-        attempts.append(("sans raffinement plateau", source, None))
+        _executor.shutdown(wait=False)
+    before_finish = resolved
+    resolved, probe_tet_mesh = _finish_geometric_resolution(resolved, opts.resolution)
+    if probe_tet_mesh is not None and not opts.junction_zones:
+        probe_results[id(resolved)] = probe_tet_mesh
+    if speculative is not None and resolved is before_finish:
+        speculative_attempts[id(resolved)] = speculative
+    return resolved, False
 
+
+def _pymeshfix_attempt(mesh: trimesh.Trimesh):
+    """Reparation pymeshfix avec le garde-fou anti-effondrement de `_clean_and_repair` (limite #51) : MeshFix
+    peut rendre un mesh watertight en supprimant une portion entiere de la geometrie (turkish.stl : 10104 ->
+    1488 faces, z tronque), que TetGen tetraedrise sans erreur. Retourne `(repaired, collapsed)`."""
+    repaired = _repair_with_pymeshfix(mesh)
+    if repaired is not None and len(repaired.faces) < 0.5 * len(mesh.faces):
+        return None, True
+    return repaired, False
+
+
+def _run_tetgen_attempts(attempts: list, opts: _TetOptions, speculative_attempts: dict, probe_results: dict):
+    """Essaie chaque tentative dans l'ordre. Retourne `(tet_mesh, last_error)` ; `tet_mesh` est None si toutes
+    ont echoue sur une erreur recuperable (crash natif ou auto-intersection)."""
     last_error: Optional[Exception] = None
     for _label, candidate, npr in attempts:
         try:
-            future = speculative_attempts.get(id(candidate)) if npr == near_platform_resolution else None
+            future = speculative_attempts.get(id(candidate)) if npr == attempts[0][2] else None
             if future is not None:
-                return future.result()
+                return future.result(), None
             if npr is None and id(candidate) in probe_results:
-                return probe_results[id(candidate)]
+                return probe_results[id(candidate)], None
             return _tetrahedralize_once_isolated(
-                candidate, resolution, npr, near_platform_margin, platform_z,
-                junction_zones, junction_refinement_resolution,
-            )
+                candidate, opts.resolution, npr, opts.near_platform_margin, opts.platform_z,
+                opts.junction_zones, opts.junction_refinement_resolution,
+            ), None
         except _TetgenCrashError as exc:
-            # Crash NATIF (segfault/access violation) dans le sous-processus
-            # isole, jamais une RuntimeError Python normale - traite comme
-            # le meme signal d'echec que "self-intersection" ci-dessous : le
-            # repli suivant de la cascade (reparation pymeshfix, puis sans
-            # raffinement plateau) a la meme chance de reussir, un crash sur
-            # auto-intersection etant la cause la plus probable mesuree
-            # (voir CLAUDE.md limite #43 et le worker isole plus bas).
-            # DOIT rester AVANT `except RuntimeError` ci-dessous :
-            # `_TetgenCrashError` en est une sous-classe, et Python retient
-            # le PREMIER except applicable - inverser l'ordre ferait
-            # tomber tout crash natif dans la branche "self-intersection"
-            # (dont le message ne contient jamais ce texte), le relevant
-            # immediatement au lieu de tenter le repli suivant. Bug reel
-            # mesure sur `death.stl` modifie par l'utilisateur (2340
-            # triangles) : le crash etait bien detecte (code de sortie
-            # 3221225477 = 0xC0000005, access violation Windows) mais
-            # remontait quand meme jusqu'a l'appelant au lieu de declencher
-            # la reparation pymeshfix, a cause de cet ordre incorrect.
+            # Crash NATIF dans le sous-processus isole : meme signal d'echec qu'une auto-intersection, le repli
+            # suivant a la meme chance de reussir. DOIT rester AVANT `except RuntimeError` (sous-classe).
             last_error = exc
         except RuntimeError as exc:
             if not _is_recoverable_tetgen_error(exc):
                 raise
             last_error = exc
+    return None, last_error
 
+
+def _tetgen_failure_hint(repaired, pymeshfix_collapsed: bool, resolved_collapsed: bool) -> str:
     if repaired is not None:
         hint = ""
     elif pymeshfix_collapsed:
@@ -1904,6 +1749,63 @@ def _tetrahedralize(
             "resultat radicalement plus petit que le mesh source (rejete par "
             "garde-fou)."
         )
+    return hint
+
+
+def _tetrahedralize(
+    mesh: trimesh.Trimesh,
+    resolution: float,
+    near_platform_resolution: Optional[float] = None,
+    near_platform_margin: float = 5.0,
+    platform_z: float = 0.0,
+    junction_zones: Optional[list[JunctionZone]] = None,
+    junction_refinement_resolution: Optional[float] = None,
+) -> TetMesh:
+    """
+    Genere un maillage tetraedrique volumique respectant la frontiere du mesh de surface, via TetGen.
+    `resolution` donne le volume maximal par tetraedre (`-a`), plafond global.
+
+    `near_platform_resolution` (opt-in) raffine LOCALEMENT pres du plateau (z < platform_z +
+    near_platform_margin) via deux regions TetGen (`_split_for_platform_refinement` + `add_region`) ; le
+    mecanisme `bgmesh`/`metric` est ecarte (ignore par tetgen 0.8.4 avec `switches=`, segfault avec `-m`,
+    limite #35). Corrige l'artefact d'« escalier » des couches pres du plateau pour ~5.4x moins de tetraedres
+    qu'un raffinement global. Limite #42 : `_split_for_platform_refinement` garantit un seed valide pour les
+    deux regions (`_find_guaranteed_interior_point`).
+
+    `junction_zones`/`junction_refinement_resolution` (opt-in) raffinent les jonctions multi-region a forte
+    divergence directionnelle (limite #47/#48) : un seed interne supplementaire, PLUSIEURS zones FUSIONNEES en
+    un seul seed (`_merged_junction_seed`), jamais une par zone (le bug #42 se generalise a N regions).
+
+    Cascade reactive (TetGen est le seul juge fiable des auto-intersections ; un maillage accepte n'est jamais
+    modifie) : tel quel, apres resolution geometrique, apres pymeshfix, puis sans raffinement plateau.
+    """
+    if not mesh.is_watertight:
+        raise MeshIngestError(
+            "Impossible de tetraedriser un mesh non etanche apres reparation. "
+            "Verifiez la geometrie source."
+        )
+    opts = _TetOptions(resolution, near_platform_margin, platform_z, junction_zones, junction_refinement_resolution)
+    attempts: list[tuple[str, trimesh.Trimesh, Optional[float]]] = [("tel quel", mesh, near_platform_resolution)]
+    speculative_attempts: dict = {}
+    probe_results: dict = {}
+    resolved, resolved_collapsed = _geometric_resolution_attempt(
+        mesh, opts, near_platform_resolution, speculative_attempts, probe_results)
+    if resolved is not None:
+        attempts.append(("apres resolution geometrique", resolved, near_platform_resolution))
+    repaired, pymeshfix_collapsed = _pymeshfix_attempt(mesh)
+    if repaired is not None:
+        attempts.append(("apres reparation pymeshfix", repaired, near_platform_resolution))
+    # Dernier recours : abandonner le raffinement plateau (faces de bouchage coplanaires que TetGen peut
+    # refuser). Preference : `resolved` > `repaired` > `mesh` (sur turkish.stl, retomber sur `mesh` brut
+    # donnait un echec garanti pour une raison sans rapport avec celle deja reglee).
+    if near_platform_resolution is not None:
+        source = resolved if resolved is not None else (repaired if repaired is not None else mesh)
+        attempts.append(("sans raffinement plateau", source, None))
+
+    tet_mesh, last_error = _run_tetgen_attempts(attempts, opts, speculative_attempts, probe_results)
+    if tet_mesh is not None:
+        return tet_mesh
+    hint = _tetgen_failure_hint(repaired, pymeshfix_collapsed, resolved_collapsed)
     raise MeshIngestError(
         f"Le maillage contient des auto-intersections (ou un autre defaut) que "
         f"TetGen refuse ou sur lequel il plante, et que la reparation "
