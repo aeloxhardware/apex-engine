@@ -52,7 +52,6 @@
  "fn:element-ardor/step8b_travel_routing.py::route_long_travels#1": 105,
  "fn:element-ardor/step9b_support_check.py::_classify_unsupported#1": 121,
  "fn:element-ardor/step9b_support_check.py::run#1": 98,
- "fn:file_io/gcode_export.py::export_gcode#1": 257,
  "fn:file_io/visualization_export.py::export_parts_glb#1": 101,
  "fn:file_io/visualization_export.py::export_visualization_glb#1": 83,
  "fn:scripts/diagnose_contour_overflow.py::main#1": 101,
