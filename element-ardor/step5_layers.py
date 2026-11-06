@@ -847,49 +847,24 @@ def _build_continuity_graph(
     progress: Optional[np.ndarray] = None,
 ) -> nx.DiGraph:
     """
-    Graphe oriente : un noeud par entree de `raw_layers` (indice dans cette
-    liste), une arete i->j si le cluster i (isovaleur v_i) et le cluster j
-    (isovaleur v_j) sont connectes (`_loops_connected`) ET v_i/v_j sont des
-    isovaleurs distinctes ADJACENTES dans la sequence reellement presente
-    dans `raw_layers` (pas la grille theorique de `_generate_isovalues` -
-    une isovaleur sans contour exploitable est simplement absente et ne doit
-    pas casser la continuite de ses voisines survivantes).
+    Graphe oriente : un noeud par entree de `raw_layers`, une arete i->j si le cluster i (isovaleur v_i) et le
+    cluster j (v_j) sont connectes (`_loops_connected`) ET v_i/v_j sont des isovaleurs distinctes ADJACENTES
+    dans la sequence reellement presente dans `raw_layers` (pas la grille theorique : une isovaleur sans
+    contour exploitable ne doit pas casser la continuite de ses voisines).
 
-    Le seuil de connexion est `gap_threshold`, le MEME que celui utilise par
-    `_cluster_contours` pour le clustering intra-isovaleur : deux isovaleurs
-    successives sont physiquement proches en 3D (c'est la definition meme de
-    "couches successives"), un cluster et son prolongement direct a
-    l'isovaleur suivante doit etre au moins aussi proche que deux boucles de
-    la meme couche qui ne fusionnent pas encore - pas une nouvelle constante
-    arbitraire.
+    Le seuil de connexion est `gap_threshold`, le MEME que celui de `_cluster_contours` (un cluster et son
+    prolongement direct a l'isovaleur suivante doivent etre au moins aussi proches que deux boucles de la
+    meme couche qui ne fusionnent pas encore). La projection du test d'imbrication reutilise le `local_frame`
+    DEJA calcule par cluster, dans le repere du cluster i (le test d'imbrication teste les deux sens).
 
-    La projection necessaire au test d'imbrication de `_loops_connected`
-    reutilise le `local_frame` DEJA calcule par cluster dans `raw_layers`
-    (contrairement a `_cluster_contours`, qui doit encore utiliser un plan
-    provisoire commun avant que les clusters n'existent) : chaque cluster a
-    deja son propre plan local coherent depuis le clustering. Projection
-    faite dans le repere du cluster i (choix arbitraire mais coherent pour
-    le test de distance ; le test d'imbrication teste deja les deux sens).
+    `progress` (optionnel, une valeur par entree) remplace l'isovaleur pour ORIENTER les aretes, sans toucher
+    au critere d'ADJACENCE (geometrie : deux isosurfaces successives sont voisines) : "laquelle vient avant
+    l'autre" est une question de progression d'impression (un tri global par distance geodesique seule fait
+    x4 de degradation). Une arete peut donc etre INVERSEE par rapport a l'isovaleur (coque suspendue dont le
+    champ croit de l'extremite vers l'attache) ; une progression egale ne produit aucune arete.
 
-    `progress` (optionnel, une valeur par entree de `raw_layers`) remplace
-    l'isovaleur pour ORIENTER les aretes, sans jamais toucher au critere
-    d'ADJACENCE, qui reste l'isovaleur : "quelles couches se touchent" est une
-    question de geometrie (deux isosurfaces successives sont voisines), tandis
-    que "laquelle vient avant l'autre" est une question de progression
-    d'impression. Confondre les deux est precisement ce qui fait echouer un
-    tri global par distance geodesique seule (mesure : x4 de degradation,
-    l'ordre entrelacant des couches spatialement eloignees qui n'ont en commun
-    que leur distance au plateau).
-
-    Avec `progress`, une arete peut donc etre INVERSEE par rapport a
-    l'isovaleur : c'est exactement le cas d'une coque suspendue dont le champ
-    croit de l'extremite vers l'attache, ou l'ordre correct est l'inverse de
-    l'isovaleur. Une paire de progression strictement egale ne produit aucune
-    arete (aucun des deux ne precede l'autre).
-
-    Retourne un graphe acyclique par construction : les aretes vont toujours
-    d'une valeur strictement inferieure vers une strictement superieure, que
-    cette valeur soit l'isovaleur ou `progress`.
+    Retourne un graphe acyclique par construction (aretes toujours d'une valeur strictement inferieure vers
+    une strictement superieure).
     """
     graph = nx.DiGraph()
     graph.add_nodes_from(range(len(raw_layers)))

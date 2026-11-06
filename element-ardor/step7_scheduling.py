@@ -645,91 +645,93 @@ def _make_pass(
     )
 
 
-def _schedule_passes(
-    groups_per_layer: list[list[_ColorGroup]],
-    deadline_of: "callable",
-    params: Step7Params,
-) -> PrintSchedule:
-    """
-    Parcourt les couches dans l'ordre topologique de base (l'ordre des Layer
-    de step5 est deja valide), en maintenant une couleur active aussi
-    longtemps que possible. Les couleurs non actives d'une couche sont soit
-    differees en trou temporaire, soit imprimees immediatement au prix d'une
-    purge (Decision 6).
+class _PassScheduler:
+    """Etat de `_schedule_passes` : passes emises, trous en attente et couleur active."""
 
-    Les trous en attente sont combles en earliest-deadline-first : des qu'un
-    trou approche sa deadline, ou que `max_open_holes` est atteint, la passe
-    de comblement est inseree.
-    """
-    passes: list[PrintPass] = []
-    pending: list[_PendingHole] = []
-    active_color: Optional[int] = None
+    def __init__(self, deadline_of: "callable", params: Step7Params):
+        self.deadline_of, self.params = deadline_of, params
+        self.passes: list[PrintPass] = []
+        self.pending: list[_PendingHole] = []
+        self.active_color: Optional[int] = None
 
-    def flush_holes(up_to_layer_index: int, force_all: bool = False) -> None:
+    def flush_holes(self, up_to_layer_index: int, force_all: bool = False) -> None:
         """Comble les trous dont la deadline est atteinte (EDF)."""
-        nonlocal active_color
-        pending.sort(key=lambda hole: hole.deadline)
+        self.pending.sort(key=lambda hole: hole.deadline)
         remaining: list[_PendingHole] = []
-        for hole in pending:
+        for hole in self.pending:
             must_fill = force_all or hole.deadline <= up_to_layer_index
             if not must_fill:
                 remaining.append(hole)
                 continue
             fill_pass = _make_pass([hole.group], hole.group.color_id, is_hole_fill=True)
             if fill_pass is not None:
-                passes.append(fill_pass)
-                active_color = hole.group.color_id
-        pending[:] = remaining
+                self.passes.append(fill_pass)
+                self.active_color = hole.group.color_id
+        self.pending[:] = remaining
 
-    for layer_index, groups in enumerate(groups_per_layer):
+    def schedule_layer(self, layer_index: int, groups: list[_ColorGroup]) -> None:
         free_groups = [g for g in groups if g.color_id is None]
         colored_groups = [g for g in groups if g.color_id is not None]
 
         if not colored_groups:
-            free_pass = _make_pass(free_groups, active_color, is_hole_fill=False)
+            free_pass = _make_pass(free_groups, self.active_color, is_hole_fill=False)
             if free_pass is not None:
-                passes.append(free_pass)
-            flush_holes(layer_index)
-            continue
+                self.passes.append(free_pass)
+            self.flush_holes(layer_index)
+            return
 
-        # Continuer la couleur active si elle est presente dans cette couche,
-        # sinon prendre la couleur la plus representee (moins de switches).
+        # Continuer la couleur active si elle est presente dans cette couche, sinon prendre la couleur la
+        # plus representee (moins de switches).
         present_colors = {g.color_id: g for g in colored_groups}
-        if active_color in present_colors:
-            chosen = present_colors[active_color]
+        if self.active_color in present_colors:
+            chosen = present_colors[self.active_color]
         else:
             chosen = max(colored_groups, key=lambda g: len(g.segment_indices))
 
-        # La matiere invisible part avec la passe courante : elle est
-        # imprimable avec n'importe quelle couleur deja chargee.
+        # La matiere invisible part avec la passe courante : imprimable avec n'importe quelle couleur chargee.
         printed_pass = _make_pass([chosen, *free_groups], chosen.color_id, is_hole_fill=False)
         if printed_pass is not None:
-            passes.append(printed_pass)
-        active_color = chosen.color_id
+            self.passes.append(printed_pass)
+        self.active_color = chosen.color_id
 
         for group in colored_groups:
             if group is chosen:
                 continue
-            deadline = deadline_of(layer_index, group)
+            deadline = self.deadline_of(layer_index, group)
             if _should_defer(
                 open_layer_span=deadline - layer_index,
                 deadline=deadline,
                 fill_layer_index=layer_index + 1,
-                open_hole_count=len(pending),
-                params=params,
+                open_hole_count=len(self.pending),
+                params=self.params,
             ):
-                pending.append(_PendingHole(group=group, deadline=deadline))
+                self.pending.append(_PendingHole(group=group, deadline=deadline))
             else:
                 purge_pass = _make_pass([group], group.color_id, is_hole_fill=False)
                 if purge_pass is not None:
-                    passes.append(purge_pass)
-                active_color = group.color_id
+                    self.passes.append(purge_pass)
+                self.active_color = group.color_id
 
-        flush_holes(layer_index)
+        self.flush_holes(layer_index)
 
-    flush_holes(len(groups_per_layer), force_all=True)
 
-    return PrintSchedule(passes=passes)
+def _schedule_passes(
+    groups_per_layer: list[list[_ColorGroup]],
+    deadline_of: "callable",
+    params: Step7Params,
+) -> PrintSchedule:
+    """
+    Parcourt les couches dans l'ordre topologique de base (l'ordre des Layer de step5 est deja valide), en
+    maintenant une couleur active aussi longtemps que possible. Les couleurs non actives d'une couche sont
+    soit differees en trou temporaire, soit imprimees immediatement au prix d'une purge (Decision 6). Les
+    trous en attente sont combles en earliest-deadline-first : des qu'un trou approche sa deadline, ou que
+    `max_open_holes` est atteint, la passe de comblement est inseree.
+    """
+    scheduler = _PassScheduler(deadline_of, params)
+    for layer_index, groups in enumerate(groups_per_layer):
+        scheduler.schedule_layer(layer_index, groups)
+    scheduler.flush_holes(len(groups_per_layer), force_all=True)
+    return PrintSchedule(passes=scheduler.passes)
 
 
 # ---------------------------------------------------------------------------
@@ -796,69 +798,20 @@ def _native_schedule(layers, mesh_data, tet_mesh, color_map, scalar_field, param
     return colored_layers, schedule
 
 
-def run(
-    layers: list[Layer],
-    mesh_data: MeshData,
-    tet_mesh: TetMesh,
-    color_map: Optional[ColorMap],
-    region_dependency_graph: RegionDependencyGraph,
-    scalar_field: ScalarField,
-    params: Step7Params,
-) -> tuple[list[Layer], PrintSchedule]:
-    """
-    Applique la peinture utilisateur aux trajectoires et produit la sequence
-    d'impression globale.
-
-    Args:
-        layers: sortie de pipeline/step6_toolpath2d.py (toolpath_2d rempli).
-        mesh_data: sortie de step1 (kdtree pour la projection de couleur,
-            bvh pour les rayons d'accessibilite).
-        tet_mesh: sortie de step1. Requis (et pas seulement `scalar_field`)
-            car `ScalarField.values` est indexe par NOEUD du TetMesh :
-            sans la geometrie des noeuds, une valeur de champ ne peut pas
-            etre reliee a une position 3D le long d'un rayon.
-        color_map: peinture utilisateur, ou None (pipeline sans couleur -
-            cas d'usage par defaut, doit rester fonctionnel).
-        region_dependency_graph: sortie de step3.
-        scalar_field: sortie de step4, pour convertir une position en indice
-            de couche lors du calcul des deadlines.
-        params: parametres de projection, de cout et d'ordonnancement.
-
-    Returns:
-        (layers recolorees et re-segmentees, PrintSchedule). Les couches
-        retournees sont de NOUVEAUX objets : `toolpath_2d` y est re-decoupe
-        aux transitions de couleur et `segment_colors` est renseigne. Les
-        `PrintPass` pointent vers CES couches-la, pas vers celles d'entree.
-
-    Raises:
-        SchedulingError: si une couche a un `toolpath_2d` non rempli
-            (step6 n'a pas ete execute).
-    """
-    for layer in layers:
-        if layer.toolpath_2d is None:
-            raise SchedulingError(
-                f"La couche {layer.id} n'a pas de toolpath_2d - "
-                f"pipeline/step6_toolpath2d.py doit etre execute avant l'etape 7."
-            )
-
-    native = _native_schedule(layers, mesh_data, tet_mesh, color_map, scalar_field, params)
-    if native is not None:
-        return native
-
+def _python_schedule(layers, mesh_data, tet_mesh, color_map, region_dependency_graph, scalar_field, params):
+    """Chemin Python : couleurs projetees puis passes ordonnancees."""
     colored_layers = _apply_colors_to_layers(layers, mesh_data, color_map, params)
     _progress.milestone(0.5)                 # R-017 : couleurs projetees ; reste l'ordonnancement
     groups_per_layer = _group_segments_by_color(colored_layers)
 
-    # Construit le graphe (region, color) : sortie intermediaire exploitable
-    # par l'UI pour expliquer un ordre, et garde-fou de coherence.
+    # Graphe (region, color) : sortie intermediaire exploitable par l'UI et garde-fou de coherence.
     build_color_dependency_graph(groups_per_layer, region_dependency_graph)
 
     directions = _escape_directions(params)
     layer_count = len(colored_layers)
 
-    # phi est defini par NOEUD du TetMesh : le kdtree de lecture du champ se
-    # construit donc sur `tet_vertices`, dont `scalar_field.values` partage
-    # exactement l'indexation.
+    # phi est defini par NOEUD du TetMesh : le kdtree de lecture du champ se construit donc sur `tet_vertices`,
+    # dont `scalar_field.values` partage exactement l'indexation.
     field_tree = KDTree(tet_mesh.tet_vertices)
     field_values = np.asarray(scalar_field.values, dtype=float)
 
@@ -872,9 +825,8 @@ def run(
 
     def deadline_of(layer_index: int, group: _ColorGroup) -> int:
         if not has_isovalues:
-            # Sans isovaleur par couche, aucune conversion phi -> indice de
-            # couche n'est possible : on ne contraint alors aucun trou plutot
-            # que d'inventer une deadline arbitraire.
+            # Sans isovaleur par couche, aucune conversion phi -> indice de couche n'est possible : on ne
+            # contraint aucun trou plutot que d'inventer une deadline arbitraire.
             return layer_count - 1
         key = (layer_index, group.color_id)
         if key not in deadline_cache:
@@ -892,6 +844,47 @@ def run(
             )
         return deadline_cache[key]
 
-    schedule = _schedule_passes(groups_per_layer, deadline_of, params)
+    return colored_layers, _schedule_passes(groups_per_layer, deadline_of, params)
 
-    return colored_layers, schedule
+
+def run(
+    layers: list[Layer],
+    mesh_data: MeshData,
+    tet_mesh: TetMesh,
+    color_map: Optional[ColorMap],
+    region_dependency_graph: RegionDependencyGraph,
+    scalar_field: ScalarField,
+    params: Step7Params,
+) -> tuple[list[Layer], PrintSchedule]:
+    """
+    Applique la peinture utilisateur aux trajectoires et produit la sequence d'impression globale.
+
+    Args:
+        layers: sortie de step6 (toolpath_2d rempli).
+        mesh_data: sortie de step1 (kdtree pour la projection de couleur, bvh pour les rayons d'accessibilite).
+        tet_mesh: sortie de step1. Requis (et pas seulement `scalar_field`) : `ScalarField.values` est indexe
+            par NOEUD du TetMesh, sans sa geometrie une valeur de champ ne se relie pas a une position 3D.
+        color_map: peinture utilisateur, ou None (pipeline sans couleur : cas d'usage par defaut).
+        region_dependency_graph: sortie de step3.
+        scalar_field: sortie de step4, pour convertir une position en indice de couche (deadlines).
+        params: parametres de projection, de cout et d'ordonnancement.
+
+    Returns:
+        (layers recolorees et re-segmentees, PrintSchedule). Les couches retournees sont de NOUVEAUX objets
+        (`toolpath_2d` re-decoupe aux transitions de couleur, `segment_colors` renseigne) ; les `PrintPass`
+        pointent vers CES couches-la.
+
+    Raises:
+        SchedulingError: si une couche a un `toolpath_2d` non rempli (step6 n'a pas ete execute).
+    """
+    for layer in layers:
+        if layer.toolpath_2d is None:
+            raise SchedulingError(
+                f"La couche {layer.id} n'a pas de toolpath_2d - "
+                f"pipeline/step6_toolpath2d.py doit etre execute avant l'etape 7."
+            )
+
+    native = _native_schedule(layers, mesh_data, tet_mesh, color_map, scalar_field, params)
+    if native is not None:
+        return native
+    return _python_schedule(layers, mesh_data, tet_mesh, color_map, region_dependency_graph, scalar_field, params)

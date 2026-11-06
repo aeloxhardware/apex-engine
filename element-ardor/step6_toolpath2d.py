@@ -857,42 +857,17 @@ def _angle_nondecreasing(points: np.ndarray, center: np.ndarray, tolerance: floa
     return bool(np.all(np.diff(angles) >= -tolerance))
 
 
-def _generate_spiral_infill(
-    boundary: Polygon, params: "Step6Params", rank: int, axis_local: np.ndarray | None
-) -> list[np.ndarray]:
-    """
-    Remplissage OSCILLATING_SPIRAL d'une zone. Toutes les couches suivent la
-    MEME spirale mediane (elles se superposent) ; seules les asperites
-    different : oscillation en opposition de phase une couche sur deux et
-    tirages differents (graine + rang). Le pas est corrige
-    d'apres la longueur REELLEMENT deposee pour tenir `infill_density`.
-    Les raccords entre morceaux suivent le bord (comme le zigzag) et ne sont
-    pas garantis monotones en theta.
-    """
-    from shapely.prepared import prep
-
-    if boundary is None or boundary.is_empty or params.infill_density <= 0:
-        return []
+def _spiral_density_search(zone, center, r_min_zone: float, r_max: float, params: "Step6Params",
+                           rank: int, min_pitch: float, density: float):
+    """Corrige le pas d'apres la longueur REELLEMENT deposee pour tenir `infill_density`. Retourne
+    `(clipped, line, pitch)` du dernier essai (`clipped` None si aucun)."""
     width = params.nozzle_width
-    zone = boundary.buffer(-width / 2.0, join_style="mitre")
-    if zone.is_empty or zone.area <= 0:
-        return []
-    density = min(params.infill_density, 1.0)
-    coords_all = np.vstack([np.asarray(piece.exterior.coords) for piece in _polygon_pieces(zone)])
-    center = np.asarray(axis_local, dtype=float) if axis_local is not None else np.array(zone.centroid.coords[0])
-    radii = np.linalg.norm(coords_all - center, axis=1)
-    r_max = float(radii.max())
-    r_min_zone = 0.0 if zone.contains(shapely.Point(center)) else float(zone.distance(shapely.Point(center)))
-    minx, miny, maxx, maxy = zone.bounds
-    diagonal = float(np.hypot(maxx - minx, maxy - miny))
-    min_pitch = max(2.0 * diagonal / _MAX_INFILL_LINES, 1e-6)
-
     pitch = max(width / density, min_pitch)
     odd = rank % 2 == 1
     best: LineString | None = None
-    # amplitude et longueur d'onde fixees UNE fois (a partir du pas nominal) :
-    # sinon le pas corrige les ferait varier et la correction de densite ne
-    # convergerait pas.
+    line = None
+    # amplitude et longueur d'onde fixees UNE fois (pas nominal) : sinon le pas corrige les ferait varier et
+    # la correction de densite ne convergerait pas.
     amplitude = (
         params.spiral_alternation_threshold
         if params.spiral_alternation_threshold is not None
@@ -914,17 +889,13 @@ def _generate_spiral_infill(
         if abs(ratio - 1.0) <= _SPIRAL_DENSITY_TOLERANCE or length <= 0:
             break
         pitch = max(pitch * float(np.clip(ratio, 0.5, 2.0)), min_pitch)
-    if best is None or best.is_empty:
-        return []
+    return best, line, pitch
 
-    pieces = [np.asarray(g.coords) for g in (best.geoms if hasattr(best, "geoms") else [best])
-              if g.geom_type == "LineString" and len(g.coords) >= 2]
-    if not pieces:
-        return []
-    # ordre le long de la spirale : position du premier point sur la ligne
-    line_geom = LineString(line)
-    order = shapely.line_locate_point(line_geom, shapely.points(np.array([p[0] for p in pieces])))
-    pieces = [pieces[i] for i in np.argsort(order, kind="stable")]
+
+def _chain_spiral_pieces(pieces: list, zone, center, pitch: float) -> list[np.ndarray]:
+    """Raccords entre morceaux clippes, le long du bord ; un raccord qui ferait reculer le plateau (theta) est
+    refuse : trajet a vide a la place."""
+    from shapely.prepared import prep
 
     inside = prep(zone.buffer(max(1e-6, pitch * 1e-4)))
     max_connector = _ZIGZAG_MAX_CONNECTOR_SPACINGS * pitch
@@ -941,7 +912,6 @@ def _generate_spiral_infill(
             continue
         joint = np.vstack([end[None, :], connector if connector is not None else np.empty((0, 2)), start[None, :]])
         if not _angle_nondecreasing(joint, center):
-            # un raccord qui ferait reculer le plateau : trajet a vide a la place
             chains.append(current)
             current = nxt
             continue
@@ -950,6 +920,43 @@ def _generate_spiral_infill(
     chains.append(current)
     return chains
 
+
+def _generate_spiral_infill(
+    boundary: Polygon, params: "Step6Params", rank: int, axis_local: np.ndarray | None
+) -> list[np.ndarray]:
+    """
+    Remplissage OSCILLATING_SPIRAL d'une zone : toutes les couches suivent la MEME spirale mediane, seules
+    les asperites different (opposition de phase une couche sur deux, tirages graine + rang). Pas corrige
+    d'apres la longueur REELLEMENT deposee ; raccords le long du bord, non garantis monotones en theta.
+    """
+    if boundary is None or boundary.is_empty or params.infill_density <= 0:
+        return []
+    width = params.nozzle_width
+    zone = boundary.buffer(-width / 2.0, join_style="mitre")
+    if zone.is_empty or zone.area <= 0:
+        return []
+    density = min(params.infill_density, 1.0)
+    coords_all = np.vstack([np.asarray(piece.exterior.coords) for piece in _polygon_pieces(zone)])
+    center = np.asarray(axis_local, dtype=float) if axis_local is not None else np.array(zone.centroid.coords[0])
+    radii = np.linalg.norm(coords_all - center, axis=1)
+    r_max = float(radii.max())
+    r_min_zone = 0.0 if zone.contains(shapely.Point(center)) else float(zone.distance(shapely.Point(center)))
+    minx, miny, maxx, maxy = zone.bounds
+    diagonal = float(np.hypot(maxx - minx, maxy - miny))
+    min_pitch = max(2.0 * diagonal / _MAX_INFILL_LINES, 1e-6)
+
+    best, line, pitch = _spiral_density_search(zone, center, r_min_zone, r_max, params, rank, min_pitch, density)
+    if best is None or best.is_empty:
+        return []
+    pieces = [np.asarray(g.coords) for g in (best.geoms if hasattr(best, "geoms") else [best])
+              if g.geom_type == "LineString" and len(g.coords) >= 2]
+    if not pieces:
+        return []
+    # ordre le long de la spirale : position du premier point sur la ligne
+    line_geom = LineString(line)
+    order = shapely.line_locate_point(line_geom, shapely.points(np.array([p[0] for p in pieces])))
+    pieces = [pieces[i] for i in np.argsort(order, kind="stable")]
+    return _chain_spiral_pieces(pieces, zone, center, pitch)
 
 
 def _infill_angle_for_layer(layer: Layer, isovalue_rank: dict) -> float:
@@ -1476,129 +1483,117 @@ def _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank):
     return [replace(layer, toolpath_2d=list(polys)) for layer, polys in zip(layers, result)]
 
 
+def _group_source_data(layer: Layer, contours_2d: list, offsets_3d: list, members: set, outer_idx: int,
+                       mesh_data: MeshData, overhang_map: OverhangMap, params: Step6Params):
+    """Donnees d'un groupe (contour exterieur + trous) : direction de pont, offsets hors-plan du contour
+    exterieur, et sources (points 2D + offsets reels) de l'interpolation. Les TROUS portent eux aussi un offset
+    reel connu : les ignorer degraderait l'interpolation a leur voisinage."""
+    bridge_direction = None
+    outer_out_of_plane = None
+    source_2d_parts: list[np.ndarray] = []
+    source_offset_parts: list[np.ndarray] = []
+    for k, (contour_3d_loop, loop_2d, loop_offsets) in enumerate(zip(layer.contour_3d, contours_2d, offsets_3d)):
+        if k not in members:
+            continue
+        # contour_3d_loop porte toujours un point de fermeture duplique (garanti par step5) alors que les
+        # boucles de _classify_contours sont ouvertes : retire ce doublon pour aligner les longueurs.
+        open_2d = loop_2d[:-1] if np.allclose(loop_2d[0], loop_2d[-1]) else loop_2d
+        open_offsets = loop_offsets[: len(open_2d)]
+        source_2d_parts.append(open_2d)
+        source_offset_parts.append(open_offsets)
+        if k == outer_idx:
+            outer_out_of_plane = open_offsets
+            bridge_direction = _bridge_direction_for_loop(
+                contour_3d_loop, mesh_data, overhang_map, layer.local_frame,
+                params.bridge_contour_ratio_threshold,
+            )
+    source_2d = np.concatenate(source_2d_parts, axis=0) if source_2d_parts else None
+    source_offsets = np.concatenate(source_offset_parts, axis=0) if source_offset_parts else None
+    return bridge_direction, outer_out_of_plane, source_2d, source_offsets
+
+
+def _generate_group_polylines(layer: Layer, outer, holes: list, bridge_direction, params: Step6Params,
+                              isovalue_rank: dict):
+    """Polylignes (remplissage + parois + contours) d'un groupe ; None si la zone est trop fine."""
+    if bridge_direction is not None:
+        return _reorient_bridge_toolpath(outer, holes, bridge_direction, params)
+    sweep_angle = (
+        _infill_angle_for_layer(layer, isovalue_rank)
+        if params.infill_pattern is InfillPattern.CROSSED_ZIGZAG
+        else 0.0
+    )
+    if _native_fill_module(params) is not None and params.infill_pattern in _NATIVE_PATTERN_CODES:
+        valid, infill, offset_walls = _native_fill_module(params).fill_region(
+            outer, holes, params.nozzle_width, params.wall_count, params.degenerate_area_ratio,
+            params.infill_density, _NATIVE_PATTERN_CODES[params.infill_pattern], sweep_angle,
+        )
+        if not valid:
+            return None
+        return list(infill) + list(offset_walls) + [outer] + list(holes)
+    walls, innermost = _offset_walls(
+        outer, holes, params.nozzle_width, params.wall_count, params.degenerate_area_ratio
+    )
+    if not walls:
+        return None
+    if params.infill_pattern is InfillPattern.OSCILLATING_SPIRAL:
+        axis_local = (
+            _plate_axis_in_local_2d(layer.local_frame, params.spiral_axis_origin)
+            if params.spiral_axis_origin is not None else None
+        )
+        infill = _generate_spiral_infill(innermost, params, _layer_rank(layer, isovalue_rank), axis_local)
+    else:
+        infill = _generate_infill(
+            innermost, params.infill_density, params.infill_pattern, params.nozzle_width, sweep_angle,
+        )
+    return infill + walls
+
+
 def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, params: Step6Params,
                 isovalue_rank: dict) -> Layer:
-    if True:
-        contours_2d = [_project_to_local_2d(c, layer.local_frame) for c in layer.contour_3d]
-        # offsets hors-plan REELS de chaque boucle, calcules une fois par
-        # couche : ils servent a la fois au contour n=0 (restitution exacte,
-        # limite #31) et de source d'interpolation pour les points generes.
-        offsets_3d = [_out_of_plane_offset(c, layer.local_frame) for c in layer.contour_3d]
-        open_loops, index_groups = _classify_contour_indices(contours_2d)
+    contours_2d = [_project_to_local_2d(c, layer.local_frame) for c in layer.contour_3d]
+    # offsets hors-plan REELS de chaque boucle, calcules une fois par couche : contour n=0 (restitution
+    # exacte, limite #31) et source d'interpolation pour les points generes.
+    offsets_3d = [_out_of_plane_offset(c, layer.local_frame) for c in layer.contour_3d]
+    open_loops, index_groups = _classify_contour_indices(contours_2d)
 
-        toolpath: list[np.ndarray] = []
+    toolpath: list[np.ndarray] = []
+    for outer_idx, hole_idxs in index_groups:
+        outer = open_loops[outer_idx]
+        holes = [open_loops[h] for h in hole_idxs]
+        members = {outer_idx, *hole_idxs}
+        bridge_direction, outer_out_of_plane, source_2d, source_offsets = _group_source_data(
+            layer, contours_2d, offsets_3d, members, outer_idx, mesh_data, overhang_map, params)
+        generated = _generate_group_polylines(layer, outer, holes, bridge_direction, params, isovalue_rank)
+        if generated is None:
+            continue
 
-        for outer_idx, hole_idxs in index_groups:
-            outer = open_loops[outer_idx]
-            holes = [open_loops[h] for h in hole_idxs]
-            members = {outer_idx, *hole_idxs}
-            bridge_direction = None
-            outer_out_of_plane = None
-            source_2d_parts: list[np.ndarray] = []
-            source_offset_parts: list[np.ndarray] = []
-
-            for k, (contour_3d_loop, loop_2d, loop_offsets) in enumerate(zip(
-                layer.contour_3d, contours_2d, offsets_3d
-            )):
-                # les TROUS du groupe portent eux aussi un offset reel connu :
-                # les ignorer degraderait l'interpolation a leur voisinage.
-                if k not in members:
-                    continue
-                matches_outer = k == outer_idx
-
-                # contour_3d_loop porte toujours un point de fermeture
-                # duplique (premier == dernier, garanti par step5) alors
-                # que les boucles issues de _classify_contours sont toujours
-                # ouvertes (open_loops) - retire ce doublon pour aligner les
-                # longueurs avant d'associer un offset par point.
-                open_2d = loop_2d[:-1] if np.allclose(loop_2d[0], loop_2d[-1]) else loop_2d
-                open_offsets = loop_offsets[: len(open_2d)]
-                source_2d_parts.append(open_2d)
-                source_offset_parts.append(open_offsets)
-
-                if matches_outer:
-                    outer_out_of_plane = open_offsets
-                    bridge_direction = _bridge_direction_for_loop(
-                        contour_3d_loop, mesh_data, overhang_map, layer.local_frame,
-                        params.bridge_contour_ratio_threshold,
-                    )
-
-            source_2d = np.concatenate(source_2d_parts, axis=0) if source_2d_parts else None
-            source_offsets = (
-                np.concatenate(source_offset_parts, axis=0) if source_offset_parts else None
+        # contours d'origine n=0 (exterieur et trous), emis OUVERTS
+        original_ids = {id(outer), *(id(h) for h in holes)}
+        for poly in generated:
+            arr = _to_toolpath_3col(
+                poly,
+                _out_of_plane_for_polyline(
+                    poly, outer, outer_out_of_plane, source_2d, source_offsets,
+                    params.out_of_plane_interpolation_power,
+                ),
             )
+            if (params.continuous_rings and id(poly) in original_ids and len(arr) >= 3
+                    and not np.array_equal(arr[0, :2], arr[-1, :2])):
+                arr = np.vstack([arr, arr[:1]])
+            toolpath.append(arr)
 
-            if bridge_direction is not None:
-                generated = _reorient_bridge_toolpath(outer, holes, bridge_direction, params)
-            elif _native_fill_module(params) is not None and params.infill_pattern in _NATIVE_PATTERN_CODES:
-                sweep_angle = (
-                    _infill_angle_for_layer(layer, isovalue_rank)
-                    if params.infill_pattern is InfillPattern.CROSSED_ZIGZAG
-                    else 0.0
-                )
-                valid, infill, offset_walls = _native_fill_module(params).fill_region(
-                    outer, holes, params.nozzle_width, params.wall_count, params.degenerate_area_ratio,
-                    params.infill_density, _NATIVE_PATTERN_CODES[params.infill_pattern], sweep_angle,
-                )
-                if not valid:
-                    continue
-                generated = list(infill) + list(offset_walls) + [outer] + list(holes)
-            else:
-                walls, innermost = _offset_walls(
-                    outer, holes, params.nozzle_width, params.wall_count, params.degenerate_area_ratio
-                )
-                if not walls:
-                    continue
-                sweep_angle = (
-                    _infill_angle_for_layer(layer, isovalue_rank)
-                    if params.infill_pattern is InfillPattern.CROSSED_ZIGZAG
-                    else 0.0
-                )
-                if params.infill_pattern is InfillPattern.OSCILLATING_SPIRAL:
-                    axis_local = (
-                        _plate_axis_in_local_2d(layer.local_frame, params.spiral_axis_origin)
-                        if params.spiral_axis_origin is not None else None
-                    )
-                    infill = _generate_spiral_infill(
-                        innermost, params, _layer_rank(layer, isovalue_rank), axis_local
-                    )
-                else:
-                    infill = _generate_infill(
-                        innermost, params.infill_density, params.infill_pattern,
-                        params.nozzle_width, sweep_angle,
-                    )
-                generated = infill + walls
+    if params.split_rings_into_runs:
+        toolpath = _split_rings_in_toolpath(
+            toolpath, include_open_polylines=params.split_open_polylines,
+            share_vertices=params.continuous_rings,
+            min_amplitude=params.run_split_min_amplitude,
+        )
 
-            # contours d'origine n=0 (exterieur et trous), emis OUVERTS
-            original_ids = {id(outer), *(id(h) for h in holes)}
-            for poly in generated:
-                arr = _to_toolpath_3col(
-                    poly,
-                    _out_of_plane_for_polyline(
-                        poly, outer, outer_out_of_plane, source_2d, source_offsets,
-                        params.out_of_plane_interpolation_power,
-                    ),
-                )
-                if params.continuous_rings and id(poly) in original_ids and len(arr) >= 3                         and not np.array_equal(arr[0, :2], arr[-1, :2]):
-                    arr = np.vstack([arr, arr[:1]])
-                toolpath.append(arr)
-
-        if params.split_rings_into_runs:
-            toolpath = _split_rings_in_toolpath(
-                toolpath, include_open_polylines=params.split_open_polylines,
-                share_vertices=params.continuous_rings,
-                min_amplitude=params.run_split_min_amplitude,
-            )
-
-        return replace(layer, toolpath_2d=toolpath)
+    return replace(layer, toolpath_2d=toolpath)
 
 
 def _loop_matches(loop_2d: np.ndarray, outer_open: np.ndarray) -> bool:
-    """
-    Rapproche une boucle projetee (avec point de fermeture duplique) du
-    contour "matiere" ouvert issu de _classify_contours (meme boucle,
-    representation differente) - comparaison sur le premier point, unique
-    par construction (les boucles d'une meme couche ne se croisent pas).
-    """
+    """Rapproche une boucle projetee (point de fermeture duplique) du contour "matiere" ouvert de
+    _classify_contours (meme boucle, autre representation)."""
     open_loop = loop_2d[:-1] if np.allclose(loop_2d[0], loop_2d[-1]) else loop_2d
     return open_loop.shape == outer_open.shape and np.allclose(open_loop, outer_open)
