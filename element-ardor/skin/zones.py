@@ -445,6 +445,8 @@ def _partition_core(surf_vertices, faces, surf_phi, normals, angles, status, mom
     status2, piece2, last2 = status[origin], piece[origin], last[origin]
     moment2 = layer_rank(phi[f].max(axis=1), isovalues)
     band = _assign_bands(piece2, band_moments, moment2, last2, n_edge_pieces, len(f))
+    tri2 = v[f]
+    areas2 = 0.5 * np.linalg.norm(np.cross(tri2[:, 1] - tri2[:, 0], tri2[:, 2] - tri2[:, 0]), axis=1)
     zone, zone_moment = _connected_zones(f, areas2, status2, piece2, band, moment2)
     # micro-zones : rattachees a une voisine si la fusion reste accessible,
     # sinon NON lissees (decision utilisateur du 2026-09-28) -- statut 6, hors zone,
