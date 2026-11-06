@@ -545,8 +545,7 @@ def _post_toolpath_stages(params: PipelineParams, toolpath, ingest_report):
     Retourne `(toolpath, travel_routing_diagnostics, support_check_report)`."""
     travel_routing_diagnostics: list[TravelRoutingDiagnostic] = []
     if params.travel_routing is not None:
-        # Palliatif pour CLAUDE.md limite #46 (trajets a vide sans routage) - lift-and-traverse
-        # valide par collision, PAS un vrai path-planning 3D. Voir pipeline/step8b_travel_routing.py.
+        # Palliatif limite #46 : lift-and-traverse, PAS un vrai path-planning 3D (step8b_travel_routing.py)
         print("[main] Etape 8b/10 - routage des trajets a vide longs")
         toolpath, travel_routing_diagnostics = route_long_travels(
             toolpath, params.machine_profile, params.collision, params.travel_routing
@@ -608,26 +607,60 @@ def _collision_stage(params: PipelineParams, toolpath):
     return toolpath, collision_report
 
 
+def _analysis_stages(params: PipelineParams, mesh_data, tet_mesh, ingest_report, stage):
+    """Etapes 2 (surplombs), 3 (segmentation) et 4 (champ scalaire)."""
+    stage("overhang")
+    print("[main] Etape 2/10 - detection des surplombs")
+    overhang_map = overhang_run(mesh_data, params.overhang)
+    print(f"[main]   {int(np.sum(overhang_map.is_overhang))} faces en surplomb sur {mesh_data.face_count}")
+
+    stage("segmentation")
+    print("[main] Etape 3/10 - segmentation en regions")
+    # platform_z resolu par step1 propage a step3 (sauf valeur explicite de l'appelant)
+    segmentation_params = (
+        replace(params.segmentation, platform_z=ingest_report.platform_z_used)
+        if params.segmentation.platform_z is None
+        else params.segmentation
+    )
+    region_dependency_graph = segmentation_run(mesh_data, overhang_map, segmentation_params)
+    print(f"[main]   {len(region_dependency_graph.regions)} region(s)")
+
+    stage("field")
+    print("[main] Etape 4/10 - resolution du champ scalaire")
+    _fs_params = _effective_field_solver_params(params)
+    scalar_field = field_solver_run(tet_mesh, mesh_data, overhang_map, region_dependency_graph, _fs_params)
+    return overhang_map, region_dependency_graph, scalar_field
+
+
+def _adjustment_stage(params: PipelineParams, toolpath, collision_report, step8_diagnostics):
+    """Etape 10. Retourne `(adjusted_toolpath, adjustment_report)`."""
+    print("[main] Etape 10/10 - ajustement")
+    adjusted_toolpath, adjustment_report = adjustment_run(
+        toolpath,
+        collision_report,
+        params.machine_profile,
+        params.collision,
+        params.adjustment,
+        step8_diagnostics=step8_diagnostics,
+        resegmentation_hook=None,
+    )
+    print(
+        f"[main]   converged={adjustment_report.converged}, "
+        f"{len(adjustment_report.entries)} ajustement(s), "
+        f"{len(adjustment_report.unresolved_collisions)} collision(s) non resolue(s)"
+    )
+    return adjusted_toolpath, adjustment_report
+
+
 def run_pipeline(mesh_path: str, params: PipelineParams,
                  progress: Optional[Callable[[str, float], None]] = None) -> PipelineResult:
-    """
-    Enchaine step1 a step10 dans l'ordre exact du pipeline. Trois
-    dependances multi-etapes a respecter (deja verifiees, pas a
-    re-decouvrir) :
-      - step4/step5/step7 ont besoin de `mesh_data`/`tet_mesh` de step1
-        DIRECTEMENT, pas seulement de la sortie de l'etape precedente.
-      - step8 doit consommer `colored_layers` (1er element du tuple
-        retourne par step7), PAS les `layers` d'entree de step7.
-      - step9 et step10 partagent la MEME instance de `machine_profile` et
-        de `CollisionSimParams` (`params.collision`).
+    """Enchaine step1 a step10. step4/5/7 recoivent `mesh_data`/`tet_mesh` de step1 directement ; step8
+    consomme `colored_layers` de step7 ; step9 et step10 partagent `machine_profile` et `params.collision`.
 
-    `progress(slug, fraction)` : appele au debut (0.0) et a la fin (1.0) de chaque etape de
-    `PIPELINE_STEPS`, jamais sur une estimation de duree. Des fractions intermediaires sont emises
-    par les boucles des etapes (`core/progress.py`, R-017) ; une phase indivisible n'en emet qu'a sa fin.
+    `progress(slug, fraction)` : appele a 0.0 et 1.0 pour chaque etape de `PIPELINE_STEPS` (jamais sur une
+    estimation de duree) ; les boucles des etapes emettent des fractions intermediaires (R-017).
 
-    Ne catch aucune exception metier : MeshIngestError, SegmentationError,
-    LayerExtractionError, FieldSolverError, SchedulingError,
-    ToolpathResolutionError remontent telles quelles a l'appelant.
+    Ne catch aucune exception metier : elles remontent telles quelles a l'appelant.
     """
     ensure_toolhead(params.machine_profile)
     check_model_fits_machine(mesh_path, params.machine_profile)
@@ -640,27 +673,8 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
 
     mesh_data, tet_mesh, ingest_report = _ingest_stage(mesh_path, params, junction_zones, progress, _stage, _current)
 
-    _stage("overhang")
-    print("[main] Etape 2/10 - detection des surplombs")
-    overhang_map = overhang_run(mesh_data, params.overhang)
-    print(f"[main]   {int(np.sum(overhang_map.is_overhang))} faces en surplomb sur {mesh_data.face_count}")
-
-    _stage("segmentation")
-    print("[main] Etape 3/10 - segmentation en regions")
-    # step1 a deja resolu platform_z : propage cette MEME valeur a step3 plutot que de la laisser
-    # re-deriver independamment, sauf si l'appelant a explicitement fixe params.segmentation.platform_z.
-    segmentation_params = (
-        replace(params.segmentation, platform_z=ingest_report.platform_z_used)
-        if params.segmentation.platform_z is None
-        else params.segmentation
-    )
-    region_dependency_graph = segmentation_run(mesh_data, overhang_map, segmentation_params)
-    print(f"[main]   {len(region_dependency_graph.regions)} region(s)")
-
-    _stage("field")
-    print("[main] Etape 4/10 - resolution du champ scalaire")
-    _fs_params = _effective_field_solver_params(params)
-    scalar_field = field_solver_run(tet_mesh, mesh_data, overhang_map, region_dependency_graph, _fs_params)
+    overhang_map, region_dependency_graph, scalar_field = _analysis_stages(
+        params, mesh_data, tet_mesh, ingest_report, _stage)
 
     _stage("layers")
     layers = _layers_stage(params, tet_mesh, mesh_data, scalar_field, region_dependency_graph)
@@ -684,21 +698,7 @@ def run_pipeline(mesh_path: str, params: PipelineParams,
     toolpath, collision_report = _collision_stage(params, toolpath)
 
     _stage("adjustment")
-    print("[main] Etape 10/10 - ajustement")
-    adjusted_toolpath, adjustment_report = adjustment_run(
-        toolpath,
-        collision_report,
-        params.machine_profile,
-        params.collision,
-        params.adjustment,
-        step8_diagnostics=step8_diagnostics,
-        resegmentation_hook=None,
-    )
-    print(
-        f"[main]   converged={adjustment_report.converged}, "
-        f"{len(adjustment_report.entries)} ajustement(s), "
-        f"{len(adjustment_report.unresolved_collisions)} collision(s) non resolue(s)"
-    )
+    adjusted_toolpath, adjustment_report = _adjustment_stage(params, toolpath, collision_report, step8_diagnostics)
 
     _stage(None)
     return PipelineResult(
