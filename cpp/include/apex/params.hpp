@@ -159,13 +159,14 @@ struct MachineProfile {
     std::vector<RotationAxisSpec> rotation_axes{std::vector<RotationAxisSpec>{}};
     std::vector<double> platform_origin{};
     // nozzle_model : donnee d'execution, non transcrite
-    std::string toolhead_id{"aetheris-4"};
+    std::string toolhead_id{""};
     double nozzle_diameter{0.4};
     double max_angular_velocity{0.0};
     double max_angular_acceleration{0.0};
     std::optional<AABB> build_volume{std::nullopt};
     double z_clearance_min{0.0};
     std::optional<double> platform_radius{std::nullopt};
+    std::optional<double> platform_thickness{std::nullopt};
     std::vector<int> position_coupled_axes{std::vector<int>{}};
     std::optional<std::vector<double>> radial_direction{std::nullopt};
 };
@@ -214,6 +215,25 @@ struct SkinParams {
     std::optional<int> workers{std::nullopt};
 };
 
+struct SkinProjectionParams {
+    double chord_tolerance{0.02};
+    int max_rounds{3};
+    double max_shift{1.5};
+    double crease_angle_deg{8.0};
+    double crease_tolerance{0.0001};
+    int batch{200000};
+};
+
+struct RuntimeOptions {
+    bool native{false};
+    bool gpu{false};
+    std::string grid_mode{"stamped"};
+    bool tetgen_worker{true};
+    std::optional<std::string> tetgen_log{std::nullopt};
+    bool speculative_tetgen{true};
+    std::optional<int> step6_threads{std::nullopt};
+};
+
 struct PipelineParams {
     double resolution{1.5};
     bool allow_multi_mesh{true};
@@ -225,6 +245,7 @@ struct PipelineParams {
     bool place_on_platform{true};
     std::string mesher{"tetgen"};
     double tetranet_refuse_ratio{0.05};
+    double tetranet_feature_angle_deg{0.0};
     OverhangParams overhang{OverhangParams{.overhang_angle_threshold_deg = 45.0, .bridge_detection_ray_density = 4, .bridge_support_ratio_threshold = 0.7, .bridge_max_gap_distance = 2.0, .bridge_horizontal_angle_tolerance_deg = 10.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
     SegmentationParams segmentation{SegmentationParams{.direction_candidate_count = 26, .max_angle_from_direction_deg = 45.0, .max_region_merge_angle_deg = std::nullopt, .platform_z = std::nullopt, .platform_contact_tolerance = 0.5, .rotation_axes = std::nullopt, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
     FieldSolverParams field_solver{FieldSolverParams{.resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .platform_anchor_weight = 1000000.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .heat_method_time_factor = 100.0, .radial_tilt_origin = std::nullopt, .heat_project_reachable = true}};
@@ -238,12 +259,14 @@ struct PipelineParams {
     bool height_clamp{false};
     std::optional<std::vector<double>> coupled_reorientation_tiers{std::nullopt};
     int coupled_reorientation_rounds{3};
-    MachineProfile machine_profile{MachineProfile{.rotation_axes = std::vector<RotationAxisSpec>{RotationAxisSpec{.axis = std::vector<double>{0.0, 0.0, 1.0}, .angle_range_deg = std::array<double, 2>{0.0, 360.0}}, RotationAxisSpec{.axis = std::vector<double>{1.0, 0.0, 0.0}, .angle_range_deg = std::array<double, 2>{0.0, 185.0}}}, .platform_origin = std::vector<double>{0.0, 0.0, 0.0}, .toolhead_id = "aetheris-4", .nozzle_diameter = 0.4, .max_angular_velocity = 29.08940264298949, .max_angular_acceleration = 22.689280275926283, .build_volume = std::nullopt, .z_clearance_min = 0.0, .platform_radius = 150.0, .position_coupled_axes = std::vector<int>{0}, .radial_direction = std::vector<double>{0.0, -1.0, 0.0}}};
+    MachineProfile machine_profile{MachineProfile{.rotation_axes = std::vector<RotationAxisSpec>{RotationAxisSpec{.axis = std::vector<double>{0.0, 0.0, 1.0}, .angle_range_deg = std::array<double, 2>{0.0, 360.0}}, RotationAxisSpec{.axis = std::vector<double>{1.0, 0.0, 0.0}, .angle_range_deg = std::array<double, 2>{0.0, 185.0}}}, .platform_origin = std::vector<double>{0.0, 0.0, 0.0}, .toolhead_id = "aetheris-4", .nozzle_diameter = 0.4, .max_angular_velocity = 29.08940264298949, .max_angular_acceleration = 22.689280275926283, .build_volume = std::nullopt, .z_clearance_min = 0.0, .platform_radius = 150.0, .platform_thickness = 1.0, .position_coupled_axes = std::vector<int>{0}, .radial_direction = std::vector<double>{0.0, -1.0, 0.0}}};
     std::optional<TravelRoutingParams> travel_routing{std::nullopt};
     std::optional<CollisionOrderParams> collision_order{std::nullopt};
     std::optional<SupportCheckParams> support_check{std::nullopt};
     bool reachable_tilt_from_machine{true};
     std::optional<SkinParams> skin{std::nullopt};
+    std::optional<SkinProjectionParams> skin_projection{std::nullopt};
+    RuntimeOptions runtime{RuntimeOptions{.native = false, .gpu = false, .grid_mode = "stamped", .tetgen_worker = true, .tetgen_log = std::nullopt, .speculative_tetgen = true, .step6_threads = std::nullopt}};
 };
 
 struct GcodeParams {

@@ -13,7 +13,7 @@ sys.path.insert(0, ROOT)
 stl, prefix, out = sys.argv[1:4]
 
 from core.mesh_types import TetMesh
-import pipeline.step1_ingest as s1
+import element_ardor.step1_ingest as s1
 import main
 
 nodes = np.fromfile(prefix + ".nodes", dtype="<f8").reshape(-1, 3)

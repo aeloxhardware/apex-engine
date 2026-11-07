@@ -277,39 +277,8 @@ def _up_arrow(mesh_data) -> trimesh.Trimesh:
     return arrow
 
 
-def export_visualization_glb(
-    result: "PipelineResult",
-    output_path: str,
-    layer_stride: int = 1,
-    color_by_print_order: bool = True,
-    show_toolpath: bool = False,
-) -> None:
-    """
-    Assemble une scene GLB : mesh source (degrade par ordre d'impression
-    par defaut) + couches courbes (degrade par ordre d'impression) +
-    marqueurs rouges aux collisions non resolues (s'il y en a). La
-    trajectoire finale ajustee est omise par defaut (voir show_toolpath).
-
-    Args:
-        result: sortie de main.run_pipeline (contient toutes les etapes
-            intermediaires, cette fonction ne recalcule rien).
-        output_path: chemin du fichier .glb a ecrire.
-        layer_stride: 1 = toutes les couches, N = une couche sur N (utile
-            pour un modele a beaucoup de couches, evite une scene trop
-            dense pour etre lisible).
-        color_by_print_order: True (defaut) = mesh colore en degrade
-            continu suivant l'ordre d'impression reel des couches (BLEU
-            #0000ff depose en premier -> JAUNE #fff700 en dernier). False
-            = mesh source gris semi-transparent (comportement historique).
-            Les COUCHES gardent leur propre degrade (bleu -> rouge) : seul
-            le mesh change. Rend le mesh quasi opaque : c'est le but de
-            l'option (lire l'ordre sur le modele lui-meme).
-        show_toolpath: False (defaut) = trajectoire omise de la scene,
-            desactivee temporairement a la demande de l'utilisateur. True
-            = comportement historique (Path3D vert/bleu par extrusion).
-    """
-    scene = trimesh.Scene()
-
+def _source_mesh_for_scene(result: "PipelineResult", color_by_print_order: bool) -> trimesh.Trimesh:
+    """Mesh source : degrade par ordre d'impression (defaut) ou gris semi-transparent."""
     source_mesh = trimesh.Trimesh(
         vertices=result.mesh_data.vertices, faces=result.mesh_data.faces, process=False
     )
@@ -319,20 +288,41 @@ def export_visualization_glb(
         else None
     )
     if print_order_colors is not None:
-        # glTF stocke les couleurs PAR SOMMET, et les sommets d'un mesh
-        # ferme sont partages entre faces voisines : assigner des
-        # `face_colors` tels quels fait ecraser toutes les couleurs par une
-        # seule ou moyennee a l'export - mesure directe sur le modele en T
-        # (5 regions) : 21 couleurs delavees dans le .glb relu, aucun jaune
-        # ni bleu pur, les frontieres entre regions brouillees par la
-        # moyenne aux sommets partages. Dedoubler les sommets
-        # (`unmerge_vertices`) donne a chaque face les siens, ce qui
-        # preserve exactement la coloration par region. Uniquement sur ce
-        # chemin : le mesh gris uniforme par defaut n'en a pas besoin.
+        # glTF stocke les couleurs PAR SOMMET et les sommets d'un mesh ferme sont partages entre faces
+        # voisines : des `face_colors` tels quels seraient ecrases/moyennes a l'export (modele en T, 5
+        # regions : 21 couleurs delavees, aucun jaune ni bleu pur). Dedoubler les sommets
+        # (`unmerge_vertices`) preserve la coloration par region. Uniquement sur ce chemin.
         source_mesh.unmerge_vertices()
         source_mesh.visual.face_colors = print_order_colors
     else:
         source_mesh.visual.face_colors = [200, 200, 200, 60]  # semi-transparent : voir les couches a travers
+    return source_mesh
+
+
+def export_visualization_glb(
+    result: "PipelineResult",
+    output_path: str,
+    layer_stride: int = 1,
+    color_by_print_order: bool = True,
+    show_toolpath: bool = False,
+) -> None:
+    """
+    Assemble une scene GLB : mesh source (degrade par ordre d'impression par defaut) + couches courbes
+    (degrade par ordre d'impression) + marqueurs rouges aux collisions non resolues. La trajectoire finale
+    ajustee est omise par defaut (voir show_toolpath).
+
+    Args:
+        result: sortie de main.run_pipeline (cette fonction ne recalcule rien).
+        output_path: chemin du fichier .glb a ecrire.
+        layer_stride: 1 = toutes les couches, N = une couche sur N (modele a beaucoup de couches).
+        color_by_print_order: True (defaut) = mesh en degrade continu suivant l'ordre d'impression reel (BLEU
+            #0000ff en premier -> JAUNE #fff700 en dernier) ; False = gris semi-transparent (comportement
+            historique). Les COUCHES gardent leur propre degrade (bleu -> rouge) : seul le mesh change.
+        show_toolpath: False (defaut) = trajectoire omise (desactivee a la demande de l'utilisateur) ;
+            True = comportement historique (Path3D vert/bleu par extrusion).
+    """
+    scene = trimesh.Scene()
+    source_mesh = _source_mesh_for_scene(result, color_by_print_order)
     scene.add_geometry(source_mesh, node_name="source_mesh", geom_name="source_mesh")
 
     up_arrow = _up_arrow(result.mesh_data)
@@ -347,9 +337,8 @@ def export_visualization_glb(
         if toolpath_path is not None:
             scene.add_geometry(toolpath_path, node_name="toolpath", geom_name="toolpath")
 
-    # CollisionEvent ne porte pas de `position` propre (seulement
-    # point_index) - on la retrouve via le point correspondant de la
-    # trajectoire ajustee.
+    # CollisionEvent ne porte pas de `position` propre (seulement point_index) - on la retrouve via le point
+    # correspondant de la trajectoire ajustee.
     unresolved_positions = [
         result.adjusted_toolpath.points[event.point_index].position
         for event in result.adjustment_report.unresolved_collisions
@@ -406,32 +395,44 @@ def _direction_arrow(
     return arrow
 
 
+def _part_arrow(result: "PipelineResult", region, color) -> "trimesh.Trimesh | None":
+    """Fleche d'une partie : centree sur son centroide, dans sa direction d'impression, longue de l'etendue
+    REELLE de la partie projetee sur cette direction (pas la diagonale de la bounding box : une partie fine et
+    longue perpendiculairement ne doit pas gonfler la fleche). None si la partie est vide / sans direction."""
+    face_ids = np.asarray(region.face_ids)
+    if len(face_ids) == 0:
+        return None
+    vertex_ids = np.unique(result.mesh_data.faces[face_ids])
+    points = result.mesh_data.vertices[vertex_ids]
+    direction = np.asarray(region.target_direction, dtype=float)
+    norm = np.linalg.norm(direction)
+    if norm < 1e-9:
+        return None
+    direction = direction / norm
+
+    centroid = points.mean(axis=0)
+    projections = (points - centroid) @ direction
+    length = float(projections.max() - projections.min())
+    if length < 1e-6:
+        length = float(np.ptp(points, axis=0).max()) or 1.0
+    # Origine reculee d'une demi-longueur : la fleche s'etend de part et d'autre du centroide.
+    arrow_origin = centroid - direction * (length / 2.0)
+    return _direction_arrow(arrow_origin, direction, length, color)
+
+
 def export_parts_glb(result: "PipelineResult", output_path: str) -> None:
     """
-    Scene GLB DEDIEE aux PARTIES du modele (regions de
-    `RegionDependencyGraph`, telles que produites par step3 - voir
-    `SegmentationParams.branch_cut_threshold` pour la segmentation par
-    structure volumique plutot que par orientation de face) : le mesh
-    source COLORE PAR PARTIE (chaque face prend la couleur de sa region,
-    meme palette que les fleches - une face sans region assignee reste gris
-    semi-transparent) + UNE FLECHE PAR PARTIE, partant du centroide de la
-    partie, pointant dans sa direction d'impression
-    (`Region.target_direction`), et LONGUE DE L'ETENDUE REELLE de la partie
-    projetee sur cette direction - pas une taille arbitraire, pour que la
-    fleche donne une lecture immediate de quelle portion du modele chaque
-    direction gouverne.
+    Scene GLB DEDIEE aux PARTIES du modele (regions de `RegionDependencyGraph`, step3) : le mesh source COLORE
+    PAR PARTIE (meme palette que les fleches ; une face sans region reste gris semi-transparent) + UNE FLECHE
+    PAR PARTIE, partant du centroide, dans sa direction d'impression (`Region.target_direction`), longue de
+    l'etendue reelle de la partie sur cette direction.
 
-    Fichier SEPARE de `export_visualization_glb` (mecanisme independant,
-    jamais mele a l'export existant) : sert a DIAGNOSTIQUER la segmentation
-    elle-meme (combien de parties, ou, dans quel sens), pas a visualiser le
-    resultat du slicing. Ne fait AUCUN calcul de pipeline, comme le reste de
-    ce fichier - relit uniquement `result.region_dependency_graph` et
+    Fichier SEPARE de `export_visualization_glb` : sert a DIAGNOSTIQUER la segmentation (combien de parties,
+    ou, dans quel sens). Ne fait AUCUN calcul de pipeline : relit `result.region_dependency_graph` et
     `result.mesh_data`.
 
     Args:
-        result: sortie de main.run_pipeline (ou tout objet portant au moins
-            `mesh_data` et `region_dependency_graph`, meme forme que
-            PipelineResult).
+        result: sortie de main.run_pipeline (ou tout objet portant `mesh_data` et `region_dependency_graph`).
         output_path: chemin du fichier .glb a ecrire.
     """
     scene = trimesh.Scene()
@@ -440,21 +441,16 @@ def export_parts_glb(result: "PipelineResult", output_path: str) -> None:
         vertices=result.mesh_data.vertices, faces=result.mesh_data.faces, process=False
     )
 
-    # Une couleur par partie, calculee UNE FOIS (voir `_part_color` :
-    # rouge/vert/bleu pour les 3 premieres, puis aleatoire mais eloigne de
-    # tout ce qui precede) et reutilisee identique pour la face ET la
-    # fleche de chaque partie - jamais deux tirages independants qui
-    # pourraient diverger.
+    # Une couleur par partie, calculee UNE FOIS (voir `_part_color`) et reutilisee identique pour la face ET la
+    # fleche de chaque partie - jamais deux tirages independants qui pourraient diverger.
     regions = result.region_dependency_graph.regions
     sorted_regions = sorted(regions.items())
     part_colors: list[np.ndarray] = []
     for i, _region_id in enumerate([rid for rid, _r in sorted_regions]):
         part_colors.append(_part_color(i, part_colors))
 
-    # Couleur PAR FACE selon sa region - gris semi-transparent par defaut
-    # pour toute face qu'aucune region ne revendique (ne devrait pas arriver
-    # en pratique, step3 couvre toutes les faces, mais explicite plutot que
-    # suppose).
+    # Couleur PAR FACE selon sa region - gris semi-transparent par defaut pour toute face qu'aucune region ne
+    # revendique (ne devrait pas arriver, step3 couvre toutes les faces, mais explicite plutot que suppose).
     face_colors = np.tile(
         np.array([200, 200, 200, 60], dtype=np.uint8), (result.mesh_data.face_count, 1)
     )
@@ -464,46 +460,17 @@ def export_parts_glb(result: "PipelineResult", output_path: str) -> None:
             continue
         face_colors[face_ids] = part_colors[i]
 
-    # Meme precaution que `export_visualization_glb` (voir sa docstring) :
-    # glTF stocke les couleurs PAR SOMMET, et des sommets partages entre
-    # faces de regions differentes seraient moyennes/ecrases a l'export sans
-    # dedoublement prealable.
+    # Meme precaution que `export_visualization_glb` : dedoubler les sommets, sinon les couleurs de regions
+    # differentes seraient moyennees a l'export.
     source_mesh.unmerge_vertices()
     source_mesh.visual.face_colors = face_colors
     scene.add_geometry(source_mesh, node_name="source_mesh", geom_name="source_mesh")
 
     for i, (region_id, region) in enumerate(sorted_regions):
-        face_ids = np.asarray(region.face_ids)
-        if len(face_ids) == 0:
-            continue
-        vertex_ids = np.unique(result.mesh_data.faces[face_ids])
-        points = result.mesh_data.vertices[vertex_ids]
-
-        direction = np.asarray(region.target_direction, dtype=float)
-        norm = np.linalg.norm(direction)
-        if norm < 1e-9:
-            continue
-        direction = direction / norm
-
-        centroid = points.mean(axis=0)
-        # Longueur = etendue REELLE de la partie le long de sa propre
-        # direction (projection des sommets sur `direction`, pas la
-        # diagonale de la bounding box - une partie fine et longue
-        # perpendiculairement a sa direction ne doit pas gonfler la fleche).
-        projections = (points - centroid) @ direction
-        length = float(projections.max() - projections.min())
-        if length < 1e-6:
-            length = float(np.ptp(points, axis=0).max()) or 1.0
-
-        color = part_colors[i]
-        # Centre la fleche sur la partie : origine reculee d'une demi-longueur
-        # depuis le centroide, dans le sens OPPOSE a la direction, pour que la
-        # fleche s'etende de part et d'autre du centroide plutot que de
-        # partir de lui vers l'exterieur uniquement.
-        arrow_origin = centroid - direction * (length / 2.0)
-        arrow = _direction_arrow(arrow_origin, direction, length, color)
-        scene.add_geometry(
-            arrow, node_name=f"part_{region_id}_arrow", geom_name=f"part_{region_id}_arrow"
-        )
+        arrow = _part_arrow(result, region, part_colors[i])
+        if arrow is not None:
+            scene.add_geometry(
+                arrow, node_name=f"part_{region_id}_arrow", geom_name=f"part_{region_id}_arrow"
+            )
 
     scene.export(output_path)

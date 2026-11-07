@@ -53,16 +53,22 @@ def tet_boundary_faces(tetrahedra: np.ndarray) -> np.ndarray:
     return faces[first[count == 1]]
 
 
+@dataclass(frozen=True)
+class CoverageSampling:
+    """Reglages d'echantillonnage de `surface_outside_volume`."""
+    tolerance: float | None = None
+    samples_per_mm2: float = 2.0
+    max_samples: int = 60_000
+    cluster_link: float = 2.0
+    seed: int = 0
+
+
 def surface_outside_volume(
     vertices: np.ndarray,
     faces: np.ndarray,
     tet_vertices: np.ndarray,
     tetrahedra: np.ndarray,
-    tolerance: float | None = None,
-    samples_per_mm2: float = 2.0,
-    max_samples: int = 60_000,
-    cluster_link: float = 2.0,
-    seed: int = 0,
+    sampling: CoverageSampling | None = None,
 ) -> TetCoverageReport:
     """
     Part de la surface du modele (`vertices`, `faces`) a plus de `tolerance`
@@ -73,6 +79,9 @@ def surface_outside_volume(
     conforme (0,04 mm mesure sur le Benchy), bien en dessous d'une coque
     manquante.
     """
+    sampling = sampling or CoverageSampling()
+    tolerance, samples_per_mm2 = sampling.tolerance, sampling.samples_per_mm2
+    max_samples, cluster_link, seed = sampling.max_samples, sampling.cluster_link, sampling.seed
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
     area = float(mesh.area)
     count = int(min(max_samples, max(5_000, area * samples_per_mm2)))

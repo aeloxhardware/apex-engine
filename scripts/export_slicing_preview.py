@@ -38,81 +38,95 @@ from core.mesh_types import (  # noqa: E402
 )
 from file_io.visualization_export import export_visualization_glb  # noqa: E402
 from main import PipelineParams, PipelineResult  # noqa: E402
-from pipeline.step1_ingest import run as ingest_run  # noqa: E402
-from pipeline.step1b_junction_detection import detect_junction_zones  # noqa: E402
-from pipeline.step2_overhang import run as overhang_run  # noqa: E402
-from pipeline.step3_segmentation import run as segmentation_run  # noqa: E402
-from pipeline.step4_field_solver import run as field_solver_run  # noqa: E402
-from pipeline.step5_layers import run as layers_run  # noqa: E402
-from pipeline.step5b_collision_order import run as collision_order_run  # noqa: E402
-from pipeline.step6_toolpath2d import run as toolpath2d_run  # noqa: E402
-from pipeline.step7_scheduling import run as scheduling_run  # noqa: E402
-from pipeline.step8_machine_toolpath import gradient_direction_field
-from pipeline.step8_machine_toolpath import run as machine_toolpath_run  # noqa: E402
-from pipeline.step8b_travel_routing import route_long_travels  # noqa: E402
-from pipeline.step9b_support_check import run as support_check_run  # noqa: E402
+from element_ardor.step1_ingest import run as ingest_run  # noqa: E402
+from element_ardor.step1b_junction_detection import detect_junction_zones  # noqa: E402
+from element_ardor.step2_overhang import run as overhang_run  # noqa: E402
+from element_ardor.step3_segmentation import run as segmentation_run  # noqa: E402
+from element_ardor.step4_field_solver import run as field_solver_run  # noqa: E402
+from element_ardor.step5_layers import run as layers_run  # noqa: E402
+from element_ardor.step5b_collision_order import run as collision_order_run  # noqa: E402
+from element_ardor.step6_toolpath2d import run as toolpath2d_run  # noqa: E402
+from element_ardor.step7_scheduling import run as scheduling_run  # noqa: E402
+from element_ardor.step8_machine_toolpath import gradient_direction_field
+from element_ardor.step8_machine_toolpath import run as machine_toolpath_run  # noqa: E402
+from element_ardor.step8b_travel_routing import route_long_travels  # noqa: E402
+from element_ardor.step9b_support_check import run as support_check_run  # noqa: E402
 
 
-def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
-    """
-    step1 -> step8, puis un CollisionReport/AdjustmentReport vides explicites.
-
-    Les deux rapports vides ne pretendent pas qu'aucune collision n'existe :
-    ils disent qu'aucune verification n'a eu lieu (`nozzle_model_checked` et
-    `chuck_checked` a False, `converged` a False) - meme discipline que le
-    reste du projet, une donnee explicite plutot qu'un silence.
-
-    Reproduit la MEME orchestration de double passe legere que
-    main.run_pipeline pour params.junction_refinement_resolution
-    (CLAUDE.md limite #47/#48) - sans elle, ce script ignorait
-    silencieusement ce parametre (bug reel mesure : deux runs consecutifs
-    avec/sans junction_refinement_resolution actif produisaient un
-    tet_count et un nombre d'anomalies IDENTIQUES, alors que le mecanisme
-    fonctionne correctement quand il est reellement exerce).
-    """
-    t0 = time.time()
-    from main import _effective_field_solver_params, _effective_toolpath2d_params, check_model_fits_machine
-    check_model_fits_machine(mesh_path, params.machine_profile)
-
-    junction_zones = None
-    if params.junction_refinement_resolution is not None:
-        print(f"[preview] Passe legere - detection des zones de jonction : {mesh_path}")
-        light_mesh_data, light_tet_mesh, light_ingest_report = ingest_run(
-            mesh_path, resolution=params.resolution, allow_multi_mesh=params.allow_multi_mesh,
-            place_on_platform=params.place_on_platform,
-        )
-        light_overhang_map = overhang_run(light_mesh_data, params.overhang)
-        light_segmentation_params = (
-            replace(params.segmentation, platform_z=light_ingest_report.platform_z_used)
-            if params.segmentation.platform_z is None
-            else params.segmentation
-        )
-        light_region_graph = segmentation_run(
-            light_mesh_data, light_overhang_map, light_segmentation_params, light_tet_mesh
-        )
-        junction_zones = detect_junction_zones(
-            light_mesh_data, light_region_graph, params.junction_refinement_angle_deg,
-            params.junction_refinement_margin,
-        )
-        print(f"[preview]   {len(junction_zones)} zone(s) de jonction detectee(s)")
-
-    print(f"[preview] Etape 1/8 - ingestion : {mesh_path}")
-    mesh_data, tet_mesh, ingest_report = ingest_run(
-        mesh_path,
-        params.resolution,
-        near_platform_resolution=params.near_platform_resolution,
-        near_platform_margin=params.near_platform_margin,
-        junction_zones=junction_zones,
-        junction_refinement_resolution=params.junction_refinement_resolution,
+def _detect_junction_zones(mesh_path: str, params: PipelineParams):
+    """Double passe legere de main.run_pipeline (limite #47/#48) : mesh + step2 + step3 seulement."""
+    print(f"[preview] Passe legere - detection des zones de jonction : {mesh_path}")
+    light_mesh_data, light_tet_mesh, light_ingest_report = ingest_run(
+        mesh_path, resolution=params.resolution, allow_multi_mesh=params.allow_multi_mesh,
         place_on_platform=params.place_on_platform,
     )
+    light_overhang_map = overhang_run(light_mesh_data, params.overhang)
+    light_segmentation_params = (
+        replace(params.segmentation, platform_z=light_ingest_report.platform_z_used)
+        if params.segmentation.platform_z is None
+        else params.segmentation
+    )
+    light_region_graph = segmentation_run(
+        light_mesh_data, light_overhang_map, light_segmentation_params, light_tet_mesh
+    )
+    junction_zones = detect_junction_zones(
+        light_mesh_data, light_region_graph, params.junction_refinement_angle_deg,
+        params.junction_refinement_margin,
+    )
+    print(f"[preview]   {len(junction_zones)} zone(s) de jonction detectee(s)")
+    return junction_zones
 
+
+def _post_routing_stages(toolpath, params: PipelineParams, ingest_report):
+    """Etapes 8b (routage des trajets a vide) et 8c (support de depot), comme main.run_pipeline : step9b ne
+    depend ni de step9 ni de step10, il tourne donc REELLEMENT ici. Retourne
+    `(toolpath, travel_routing_diagnostics, support_check_report)`."""
+    travel_routing_diagnostics = []
+    if params.travel_routing is not None:
+        # Palliatif limite #46 - meme mecanisme que main.run_pipeline (step8b_travel_routing.py).
+        print("[preview] Etape 8b/8 - routage des trajets a vide longs")
+        toolpath, travel_routing_diagnostics = route_long_travels(
+            toolpath, params.machine_profile, params.collision, params.travel_routing
+        )
+        print(
+            f"[preview]   {len(toolpath.points)} point(s) de trajectoire apres routage, "
+            f"{len(travel_routing_diagnostics)} trajet(s) encore en collision apres routage"
+        )
+
+    support_check_report = SupportCheckReport(checked=False)
+    if params.support_check is not None:
+        print("[preview] Etape 8c/8 - verification du support de depot")
+        support_check_report = support_check_run(
+            toolpath,
+            params.machine_profile,
+            params.layers.layer_height_base,
+            ingest_report.platform_z_used,
+            params.support_check,
+        )
+        print(
+            f"[preview]   {len(support_check_report.events)} depot(s) sans support "
+            f"({support_check_report.unsupported_fraction:.2%} de la matiere extrudee) : "
+            f"{support_check_report.ordering_defect_count} defaut(s) d'ordre, "
+            f"{support_check_report.true_overhang_count} surplomb(s) reel(s)"
+        )
+    return toolpath, travel_routing_diagnostics, support_check_report
+
+
+def _layers_stage(params: PipelineParams, tet_mesh, mesh_data, scalar_field, region_graph):
+    """Etape 5 : celle de main.run_pipeline (une seule implementation, pour que l'apercu ne se desynchronise plus :
+    la copie locale ignorait step5c, trouve le 2026-11-07)."""
+    from main import _layers_stage as main_layers_stage
+    return main_layers_stage(params, tet_mesh, mesh_data, scalar_field, region_graph)
+
+
+def _analysis_stages(params: PipelineParams, mesh_data, tet_mesh, ingest_report):
+    """Etapes 2 (surplombs), 3 (segmentation) et 4 (champ scalaire)."""
+    from main import _effective_field_solver_params
     print("[preview] Etape 2/8 - detection des surplombs")
     overhang_map = overhang_run(mesh_data, params.overhang)
 
     print("[preview] Etape 3/8 - segmentation en regions")
-    # step1 a deja resolu platform_z (fourni ou detecte automatiquement) -
-    # propage cette MEME valeur a step3, meme correctif que main.py.
+    # platform_z resolu par step1 propage a step3, meme correctif que main.py.
     segmentation_params = (
         replace(params.segmentation, platform_z=ingest_report.platform_z_used)
         if params.segmentation.platform_z is None
@@ -123,14 +137,50 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
     print("[preview] Etape 4/8 - resolution du champ scalaire")
     _fs_params = _effective_field_solver_params(params)
     scalar_field = field_solver_run(tet_mesh, mesh_data, overhang_map, region_graph, _fs_params)
+    return overhang_map, region_graph, scalar_field
 
-    print("[preview] Etape 5/8 - extraction des couches courbes")
-    layers = layers_run(tet_mesh, mesh_data, scalar_field, region_graph, params.layers)
-    if params.collision_order is not None:
-        layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)
-        print(f"[preview]   ordre contraint par la tete : {order_report.constraints} contrainte(s), "
-              f"{order_report.moved_layers} couche(s) deplacee(s), {order_report.cycle_breaks} violee(s)")
-    print(f"[preview]   {len(layers)} couche(s)")
+
+def _ingest(mesh_path: str, params: PipelineParams, junction_zones):
+    """Etape 1 avec les MEMES options que main.run_pipeline (mailleur compris : l'oubli de `mesher` faisait
+    comparer TetGen a lui-meme, trouve le 2026-11-07)."""
+    return ingest_run(
+        mesh_path,
+        params.resolution,
+        near_platform_resolution=params.near_platform_resolution,
+        near_platform_margin=params.near_platform_margin,
+        junction_zones=junction_zones,
+        junction_refinement_resolution=params.junction_refinement_resolution,
+        place_on_platform=params.place_on_platform,
+        mesher=params.mesher,
+        tetranet_refuse_ratio=params.tetranet_refuse_ratio,
+        tetranet_feature_angle_deg=params.tetranet_feature_angle_deg,
+    )
+
+
+def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
+    """
+    step1 -> step8, puis un CollisionReport/AdjustmentReport vides explicites.
+
+    Les deux rapports vides ne pretendent pas qu'aucune collision n'existe : ils disent qu'aucune verification
+    n'a eu lieu (`nozzle_model_checked` et `chuck_checked` a False, `converged` a False).
+
+    Reproduit la MEME double passe legere que main.run_pipeline pour params.junction_refinement_resolution
+    (limite #47/#48) : sans elle, ce parametre etait ignore silencieusement.
+    """
+    t0 = time.time()
+    from main import _effective_toolpath2d_params, check_model_fits_machine
+    check_model_fits_machine(mesh_path, params.machine_profile)
+
+    junction_zones = None
+    if params.junction_refinement_resolution is not None:
+        junction_zones = _detect_junction_zones(mesh_path, params)
+
+    print(f"[preview] Etape 1/8 - ingestion : {mesh_path}")
+    mesh_data, tet_mesh, ingest_report = _ingest(mesh_path, params, junction_zones)
+
+    overhang_map, region_graph, scalar_field = _analysis_stages(params, mesh_data, tet_mesh, ingest_report)
+
+    layers = _layers_stage(params, tet_mesh, mesh_data, scalar_field, region_graph)
 
     print("[preview] Etape 6/8 - remplissage 2D par couche")
     layers = toolpath2d_run(layers, mesh_data, overhang_map, _effective_toolpath2d_params(params))
@@ -152,40 +202,8 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
         f"[preview]   {len(toolpath.points)} point(s) de trajectoire, "
         f"{len(diagnostics)} orientation(s) inatteignable(s)"
     )
-
-    travel_routing_diagnostics = []
-    if params.travel_routing is not None:
-        # 🔴 Palliatif pour CLAUDE.md limite #46 - meme mecanisme que
-        # main.run_pipeline, voir pipeline/step8b_travel_routing.py.
-        print("[preview] Etape 8b/8 - routage des trajets a vide longs")
-        toolpath, travel_routing_diagnostics = route_long_travels(
-            toolpath, params.machine_profile, params.collision, params.travel_routing
-        )
-        print(
-            f"[preview]   {len(toolpath.points)} point(s) de trajectoire apres routage, "
-            f"{len(travel_routing_diagnostics)} trajet(s) encore en collision apres routage"
-        )
-
-    support_check_report = SupportCheckReport(checked=False)
-    if params.support_check is not None:
-        # Meme mecanisme et meme position relative que main.run_pipeline
-        # (apres step8b, avant step9) : step9b ne depend ni de step9 ni de
-        # step10, donc il tourne REELLEMENT ici, contrairement au
-        # CollisionReport/AdjustmentReport vides retournes plus bas.
-        print("[preview] Etape 8c/8 - verification du support de depot")
-        support_check_report = support_check_run(
-            toolpath,
-            params.machine_profile,
-            params.layers.layer_height_base,
-            ingest_report.platform_z_used,
-            params.support_check,
-        )
-        print(
-            f"[preview]   {len(support_check_report.events)} depot(s) sans support "
-            f"({support_check_report.unsupported_fraction:.2%} de la matiere extrudee) : "
-            f"{support_check_report.ordering_defect_count} defaut(s) d'ordre, "
-            f"{support_check_report.true_overhang_count} surplomb(s) reel(s)"
-        )
+    toolpath, travel_routing_diagnostics, support_check_report = _post_routing_stages(
+        toolpath, params, ingest_report)
 
     print(f"[preview] step1->step8 termine en {time.time() - t0:.1f}s")
     print("[preview] step9/step10 VOLONTAIREMENT SAUTES (voir docstring)")

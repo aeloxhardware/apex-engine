@@ -51,3 +51,30 @@
 
 ## Non fait / non touché
 Pas de fusion dans `main`, pas de PR, aucun défaut ni seuil modifié, copies de `apex` et UI intactes.
+
+## Fidélité de la coque : pistes C et D (2026-11-07, R-030 point 8)
+
+Mesure : écart de chaque point de contour (sommets + 3 points par segment) à la surface STL d'origine, maille 1,5 mm,
+`scripts/export_slicing_preview.py` (qui n'envoyait pas `mesher` : corrigé le même jour).
+
+| modèle | variante | p99 (mm) | max (mm) | points > 0,1 mm | durée step1→8 | points de contour |
+|---|---|---:|---:|---:|---:|---:|
+| death | TetraNet seul | 0,294 | 0,541 | 7,07 % | 4,3 s | 507 461 |
+| death | + C | 0,318 | 0,637 | 7,72 % | 4,7 s | 507 309 |
+| death | + D | **0,017** | 0,466 | **0,21 %** | 5,3 s | 567 161 |
+| death | + C + D | 0,015 | 0,442 | 0,13 % | 5,4 s | 552 501 |
+| turkish | TetraNet seul | 0,232 | 0,557 | 8,09 % | 15,3 s | 980 369 |
+| turkish | + C | 0,244 | 0,598 | 7,86 % | 15,6 s | 980 588 |
+| turkish | + D | 0,136 | 0,555 | 1,88 % | 18,1 s | 1 134 581 |
+| turkish | + C + D | 0,138 | 0,563 | 1,93 % | 20,0 s | 1 126 068 |
+
+(TetGen : death p99 0,032 / max 0,069 ; turkish p99 0,007 / max 0,315.)
+
+- **D** est la seule piste efficace sur les modèles réels. Plus de tours de raffinement (6, 9) ne changent presque rien
+  sur turkish (1,7 %, 1,5 %).
+- **Reliquat de D** : sur turkish, les segments restants (2,7 % des segments) relient deux points de faces aux normales
+  OPPOSÉES (angle médian 180°, aucun sommet commun) et leur milieu est à 0,25 mm de la surface : des parois plus fines
+  que la maille que le contour traverse. Ni D ni C ne peuvent les corriger ; il faut une maille locale plus fine ou une
+  détection des parois minces.
+- **C** : sur une boîte, p99 de peau 0,13 → 0,015 mm et rapport de volume 0,995 → 0,9996 à maille 1,5 mm ; à maille 1,0 mm
+  l'angle dièdre minimal passe de 23° à 5°. Aucun gain sur death ni turkish. Désactivée par défaut.

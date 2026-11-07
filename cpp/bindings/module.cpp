@@ -404,16 +404,21 @@ public:
         view.n_faces = static_cast<std::size_t>(faces_.shape(0));
         index_ = std::make_unique<apex::MeshDistanceIndex>(view);
     }
-    py::tuple query(const DoubleArray& points, int backend, int threads) const {
+    // `return_faces` : ajoute l'indice du triangle le plus proche (premier trouve a distance minimale) ; sert a
+    // placer un point exactement sur une arete vive (etape 5c).
+    py::tuple query(const DoubleArray& points, int backend, int threads, bool return_faces) const {
         if (points.ndim() != 2 || points.shape(1) != 3) throw std::invalid_argument("points : (N,3)");
         const auto n = static_cast<py::ssize_t>(points.shape(0));
         py::array_t<double> dist(n);
         py::array_t<double> closest({n, static_cast<py::ssize_t>(3)});
+        py::array_t<std::int64_t> faces(return_faces ? n : 0);
         {
             py::gil_scoped_release release;
             index_->distances(points.data(), static_cast<std::size_t>(n), dist.mutable_data(),
-                              closest.mutable_data(), static_cast<apex::DistanceBackend>(backend), threads);
+                              closest.mutable_data(), static_cast<apex::DistanceBackend>(backend), threads,
+                              return_faces ? faces.mutable_data() : nullptr);
         }
+        if (return_faces) return py::make_tuple(dist, closest, faces);
         return py::make_tuple(dist, closest);
     }
 private:
@@ -619,7 +624,9 @@ PYBIND11_MODULE(apex_core, m) {
         .def(py::init<const DoubleArray&, const py::array_t<std::int64_t, py::array::c_style | py::array::forcecast>&>(),
              py::arg("vertices"), py::arg("faces"))
         .def("query", &PyMeshDistance::query, py::arg("points"), py::arg("backend") = 1, py::arg("threads") = 0,
-             "Distance exacte au maillage et point le plus proche (backend 0 serie, 1 threads, 2 Vulkan).");
+             py::arg("return_faces") = false,
+             "Distance exacte au maillage et point le plus proche (backend 0 serie, 1 threads, 2 Vulkan) ; "
+             "return_faces : ajoute l'indice du triangle le plus proche.");
     m.def("mesh_distance_backend", [](int requested) {
         std::string reason;
         const auto b = apex::MeshDistanceIndex::resolve_backend(static_cast<apex::DistanceBackend>(requested), &reason);
@@ -1798,7 +1805,8 @@ PYBIND11_MODULE(apex_core, m) {
     m.def(
         "tetranet_mesh",
         [](const DoubleArray& vertices, const IntArray& faces, double cell_size, double snap_alpha,
-           double skin_tolerance, double refuse_ratio, unsigned threads) {
+           double skin_tolerance, double refuse_ratio, unsigned threads, double feature_angle_deg,
+           double feature_snap_alpha) {
             tetranet::SurfaceMesh in;
             in.vertices.assign(vertices.data(), vertices.data() + vertices.size());
             in.faces.resize(static_cast<size_t>(faces.size()));
@@ -1806,6 +1814,7 @@ PYBIND11_MODULE(apex_core, m) {
             tetranet::Params p;
             p.cell_size = cell_size; p.snap_alpha = snap_alpha; p.skin_tolerance = skin_tolerance;
             p.refuse_conflict_ratio = refuse_ratio; p.threads = threads;
+            p.feature_angle_deg = feature_angle_deg; p.feature_snap_alpha = feature_snap_alpha;
             tetranet::TetMesh out; tetranet::SurfaceMesh cleaned; tetranet::Report r;
             {
                 py::gil_scoped_release release;
@@ -1834,6 +1843,7 @@ PYBIND11_MODULE(apex_core, m) {
         },
         py::arg("vertices"), py::arg("faces"), py::arg("cell_size"), py::arg("snap_alpha") = 0.5,
         py::arg("skin_tolerance") = 0.05, py::arg("refuse_ratio") = 0.05, py::arg("threads") = 0u,
+        py::arg("feature_angle_deg") = 0.0, py::arg("feature_snap_alpha") = 0.35,
         "Maillage tetraedrique TetraNet : dict (maillage, surface nettoyee, diagnostic).");
 
     py::class_<apex::SkinCheckIndex>(m, "SkinCheckIndex",

@@ -600,6 +600,17 @@
      ],
      "default": null
     },
+    "platform_thickness": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
     "position_coupled_axes": {
      "default": [],
      "items": {
@@ -629,7 +640,7 @@
      "type": "array"
     },
     "toolhead_id": {
-     "default": "aetheris-4",
+     "default": "",
      "type": "string"
     },
     "z_clearance_min": {
@@ -811,6 +822,7 @@
        0.0
       ],
       "platform_radius": 150.0,
+      "platform_thickness": 1.0,
       "position_coupled_axes": [
        0
       ],
@@ -910,6 +922,18 @@
      "default": 1.5,
      "type": "number"
     },
+    "runtime": {
+     "$ref": "#/$defs/RuntimeOptions",
+     "default": {
+      "gpu": false,
+      "grid_mode": "stamped",
+      "native": false,
+      "speculative_tetgen": true,
+      "step6_threads": null,
+      "tetgen_log": null,
+      "tetgen_worker": true
+     }
+    },
     "scheduling": {
      "$ref": "#/$defs/Step7Params",
      "default": {
@@ -955,6 +979,17 @@
      ],
      "default": null
     },
+    "skin_projection": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/SkinProjectionParams"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
     "support_check": {
      "anyOf": [
       {
@@ -965,6 +1000,10 @@
       }
      ],
      "default": null
+    },
+    "tetranet_feature_angle_deg": {
+     "default": 0.0,
+     "type": "number"
     },
     "tetranet_refuse_ratio": {
      "default": 0.05,
@@ -1052,6 +1091,55 @@
     "axis",
     "angle_range_deg"
    ],
+   "type": "object"
+  },
+  "RuntimeOptions": {
+   "additionalProperties": false,
+   "description": "Ce qui change la facon de calculer, jamais le contrat de sortie.",
+   "properties": {
+    "gpu": {
+     "default": false,
+     "type": "boolean"
+    },
+    "grid_mode": {
+     "default": "stamped",
+     "type": "string"
+    },
+    "native": {
+     "default": false,
+     "type": "boolean"
+    },
+    "speculative_tetgen": {
+     "default": true,
+     "type": "boolean"
+    },
+    "step6_threads": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "tetgen_log": {
+     "anyOf": [
+      {
+       "type": "string"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "tetgen_worker": {
+     "default": true,
+     "type": "boolean"
+    }
+   },
    "type": "object"
   },
   "SegmentationParams": {
@@ -1188,6 +1276,37 @@
       }
      ],
      "default": null
+    }
+   },
+   "type": "object"
+  },
+  "SkinProjectionParams": {
+   "additionalProperties": false,
+   "description": "SkinProjectionParams(chord_tolerance: 'float' = 0.02, max_rounds: 'int' = 3, max_shift: 'float' = 1.5, crease_angle_deg: 'float' = 8.0, crease_tolerance: 'float' = 0.0001, batch: 'int' = 200000)",
+   "properties": {
+    "batch": {
+     "default": 200000,
+     "type": "integer"
+    },
+    "chord_tolerance": {
+     "default": 0.02,
+     "type": "number"
+    },
+    "crease_angle_deg": {
+     "default": 8.0,
+     "type": "number"
+    },
+    "crease_tolerance": {
+     "default": 0.0001,
+     "type": "number"
+    },
+    "max_rounds": {
+     "default": 3,
+     "type": "integer"
+    },
+    "max_shift": {
+     "default": 1.5,
+     "type": "number"
     }
    },
    "type": "object"

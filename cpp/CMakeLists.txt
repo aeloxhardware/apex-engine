@@ -46,6 +46,7 @@ pybind11_add_module(apex_core
   third_party/clipper2/src/clipper.rectclip.cpp
   bindings/module.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/src/tetranet.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/src/features.cpp
 )
 
 target_include_directories(apex_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/include)

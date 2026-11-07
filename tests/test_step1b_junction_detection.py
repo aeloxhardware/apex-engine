@@ -1,7 +1,7 @@
 """
 tests/test_step1b_junction_detection.py
 
-Tests pour pipeline/step1b_junction_detection.py, sur un mesh synthetique
+Tests pour element_ardor/step1b_junction_detection.py, sur un mesh synthetique
 genere a la volee (aucun fichier externe requis) - meme geometrie de
 jonction multi-region que la fixture `tripod_data` de
 tests/test_step5_layers.py (pied + 3 bras non coplanaires), mais n'a besoin
@@ -19,8 +19,8 @@ import pytest
 import trimesh
 
 from core.mesh_types import Region, RegionDependencyGraph
-from pipeline.step1_ingest import run as ingest_run
-from pipeline.step1b_junction_detection import detect_junction_zones
+from element_ardor.step1_ingest import run as ingest_run
+from element_ardor.step1b_junction_detection import detect_junction_zones
 
 
 def _tripod_mesh() -> trimesh.Trimesh:

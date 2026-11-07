@@ -40,7 +40,7 @@ voisins déjà posés sur la même couche, ni le plateau.
 à moins de cette distance de l'origine locale (la buse) sont exclus des
 tests de collision, la zone de contact buse/matière étant attendue par
 construction. Filtrage effectué **une seule fois** (nouvelle fonction
-`_filter_nozzle_contact_zone`, `pipeline/step9_collision_sim.py`), sur
+`_filter_nozzle_contact_zone`, `element_ardor/step9_collision_sim.py`), sur
 `toolhead_base_samples` en repère LOCAL juste après
 `_surface_sample_points` dans `run()` — jamais recalculé par point de
 trajectoire (le mesh de tête et son échantillonnage sont invariants le
@@ -340,7 +340,7 @@ dans `CLAUDE.md`.
     d'isovaleur, et `n_loops` par couche saute de 1 à 4 en 3 couches
     consécutives (fragmentation de contour, pas seulement un artefact
     d'orientation). **Fix retenu** : `_blend_tet_directions`
-    (`pipeline/step4_field_solver.py`) remplace le plus-proche-voisin par
+    (`element_ardor/step4_field_solver.py`) remplace le plus-proche-voisin par
     une moyenne pondérée par distance inverse sur toutes les sources
     d'influence proches d'un tétraèdre (le plateau, direction `up_vector`,
     distance verticale à `platform_level` ; chaque région, sa
@@ -414,7 +414,7 @@ dans `CLAUDE.md`.
 36. **Raffinement LOCAL du maillage tétraédrique près du plateau, via
     `TetGen.add_region` (deux régions, pas un champ continu) — corrige la
     limite #34, en évitant le mécanisme cassé de la limite #35.**
-    `pipeline/step1_ingest.py::_split_for_platform_refinement` découpe le
+    `element_ardor/step1_ingest.py::_split_for_platform_refinement` découpe le
     mesh source en deux coques étanches de part et d'autre de
     `z = platform_z + near_platform_margin` (`trimesh.slice_plane(...,
     cap=True)`), les concatène en un seul PLC (même convention que
@@ -557,7 +557,7 @@ dans `CLAUDE.md`.
       compatibles avec les deux) reste à moins de
       `max_region_merge_angle_deg` de la direction optimale de CHACUNE des
       deux régions séparément (`_angle_between_deg`, `_region_growing` dans
-      `pipeline/step3_segmentation.py`). Un angle entre deux directions ne
+      `element_ardor/step3_segmentation.py`). Un angle entre deux directions ne
       dépend PAS de la densité de candidats, contrairement à un minimum sur
       un grand ensemble — robuste par construction à cette classe de
       problème.
@@ -596,7 +596,7 @@ dans `CLAUDE.md`.
       l'échelle du modèle, réutilise `layer_height_base` déjà présent
       plutôt qu'une nouvelle constante absolue). Regroupement par
       `nx.Graph` + `nx.connected_components` (`_cluster_contours`,
-      `pipeline/step5_layers.py`).
+      `element_ardor/step5_layers.py`).
     - **`region_ids` par cluster** : approximation explicitement documentée
       comme telle — la correspondance triangle→tétraèdre-source est perdue
       par `trimesh.outline()` (vérifié : les entités de `outline.entities`
@@ -756,7 +756,7 @@ dans `CLAUDE.md`.
       correctement... vérifié empiriquement" — cette affirmation était
       fausse, corrigée.
     - **Fix retenu** : nouvelle fonction `_find_guaranteed_interior_point(shell,
-      fallback_point, context_label)` (`pipeline/step1_ingest.py`) — essaie
+      fallback_point, context_label)` (`element_ardor/step1_ingest.py`) — essaie
       d'abord le centroïde (chemin rapide, correct sur la grande majorité
       des coques), retombe sur `trimesh.sample.volume_mesh` (rejection
       sampling, **seed fixe** pour la reproductibilité) avec escalade
@@ -889,7 +889,7 @@ dans `CLAUDE.md`.
     triangles divergents sur 6) avant ce fix, sans jamais avoir échoué —
     un contour un peu plus riche aurait suffi à basculer.
     **Fix retenu** (`_shared_cut_cap`, nouvelle fonction, et réécriture de
-    `_split_for_platform_refinement`, `pipeline/step1_ingest.py`) :
+    `_split_for_platform_refinement`, `element_ardor/step1_ingest.py`) :
     trianguler le contour de coupe UNE SEULE FOIS (reproduit la logique
     interne de `cap=True` — dédup des sommets, extraction des arêtes de
     bord sur le plan via `trimesh.grouping.group_rows(require_count=1)`,
@@ -1101,7 +1101,7 @@ dans `CLAUDE.md`.
 affirmait « Pas encore corrigé » au moment de sa rédaction. Ce n'est plus le
 cas — la limite #49 (toujours dans `CLAUDE.md`) documente le fix retenu
 avec l'utilisateur : un palliatif lift-and-traverse
-(`pipeline/step8b_travel_routing.py::route_long_travels`), orchestré entre
+(`element_ardor/step8b_travel_routing.py::route_long_travels`), orchestré entre
 step8 et step9 dans `main.py` et `scripts/export_slicing_preview.py`,
 validé par les mêmes primitives de collision que step9. Le mécanisme est
 actif dès que `PipelineParams.travel_routing` est renseigné. Un résidu
@@ -1202,7 +1202,7 @@ entrée, pour la même raison — il était devenu stale de façon identique.
     `--assert-max-anomalies N`, non-régression exploitable en script).
 
     ### Livrable 2 — raffinement local aux jonctions (généralisation d'`add_region`)
-    Nouveau module `pipeline/step1b_junction_detection.py::detect_junction_zones` —
+    Nouveau module `element_ardor/step1b_junction_detection.py::detect_junction_zones` —
     fonction pure `(MeshData, RegionDependencyGraph, angle_threshold_deg,
     margin) -> list[JunctionZone]`, identifie les faces frontière entre deux
     régions dont les `target_direction` divergent au-delà d'un seuil (même
@@ -1226,7 +1226,7 @@ entrée, pour la même raison — il était devenu stale de façon identique.
     n'était jamais exercé. Corrigé (le script réplique maintenant la même
     double passe que `main.run_pipeline`).
 
-    `pipeline/step1_ingest.py::_tetrahedralize_once` généralise
+    `element_ardor/step1_ingest.py::_tetrahedralize_once` généralise
     `TetGen.add_region` : jusqu'à 3 régions actives simultanément (slab,
     junction, rest). Contrairement au plateau, une jonction n'a pas de plan
     de coupe unique — pas de `_shared_cut_cap` nécessaire, juste un seed
@@ -1348,12 +1348,12 @@ entrée, pour la même raison — il était devenu stale de façon identique.
     efficacité propre sur ce mesh.
 
     ### Fix retenu : isolation par sous-processus
-    Nouveau module `pipeline/_tetrahedralize_worker.py` — exécute UNE
+    Nouveau module `element_ardor/_tetrahedralize_worker.py` — exécute UNE
     tentative de `_tetrahedralize_once` dans un sous-processus dédié,
-    lancé via `python -m pipeline._tetrahedralize_worker <input.pkl>
+    lancé via `python -m element_ardor._tetrahedralize_worker <input.pkl>
     <output.pkl>` (mesh sérialisé en vertices/faces bruts, pas un objet
     `Trimesh` complet — plus robuste au pickling inter-version). Nouvelle
-    fonction `_tetrahedralize_once_isolated` (`pipeline/step1_ingest.py`) :
+    fonction `_tetrahedralize_once_isolated` (`element_ardor/step1_ingest.py`) :
     lance le worker, détecte un code de sortie non nul (ou fichier de
     sortie absent/illisible) comme un crash natif et lève
     `_TetgenCrashError` (nouvelle exception, sous-classe de `RuntimeError`) ;
@@ -1405,7 +1405,7 @@ entrée, pour la même raison — il était devenu stale de façon identique.
     Après le fix : **step1 aboutit** (plus de crash), le pipeline progresse
     jusqu'à l'étape 6/8 (208 couches produites par step5) avant d'échouer
     sur un bug **préexistant et sans rapport**, découvert par cette
-    progression nouvelle : `pipeline/step6_toolpath2d.py::_classify_contours`
+    progression nouvelle : `element_ardor/step6_toolpath2d.py::_classify_contours`
     lève `KeyError: 1` — un trou topologiquement imbriqué dans un autre
     trou peut voir son "parent immédiat" (plus petit conteneur par aire)
     être lui-même classé comme trou, alors que `groups` n'a des clés que
@@ -1429,7 +1429,7 @@ entrée, pour la même raison — il était devenu stale de façon identique.
       légèrement incohérente topologiquement (mesh dense, motif déjà
       documenté ailleurs dans ce fichier comme source de ce genre
       d'irrégularité).
-    - **Fix** (`pipeline/step6_toolpath2d.py::_classify_contours`) :
+    - **Fix** (`element_ardor/step6_toolpath2d.py::_classify_contours`) :
       `parent = min(matter_parents, key=...)` où `matter_parents =
       [p for p in containers[i] if not is_hole[p]]`, au lieu de
       `min(containers[i], key=...)` sans filtre. Si `matter_parents` est
@@ -1500,7 +1500,7 @@ entrée, pour la même raison — il était devenu stale de façon identique.
     échouait à les gérer proprement et détruisait tout.
 
     **Fix retenu** : nouvelle fonction `_extract_dominant_shell`
-    (`pipeline/step1_ingest.py`) — isole via `mesh.split(only_watertight=False)`
+    (`element_ardor/step1_ingest.py`) — isole via `mesh.split(only_watertight=False)`
     la plus grosse coque INDIVIDUELLEMENT watertight, si elle représente au
     moins `_DOMINANT_SHELL_VOLUME_RATIO=0.95` (95%) du **volume** total
     (mesuré sur turkish.stl : coque dominante à 99.69% du volume). Le seuil
@@ -1702,12 +1702,12 @@ entrée, pour la même raison — il était devenu stale de façon identique.
 affirmait à sa clôture « `turkish.stl` reste NON SLICEABLE à ce jour... 
 Aucune réparation non-destructive trouvée à ce jour ». Ce n'est plus vrai —
 une session ultérieure a résolu ce cas via un mécanisme distinct, déjà en
-place dans `pipeline/step1_ingest.py` et `pipeline/_self_intersection_resolve.py` :
+place dans `element_ardor/step1_ingest.py` et `element_ardor/_self_intersection_resolve.py` :
 `resolve_self_intersections` (résolution GÉOMÉTRIQUE des auto-intersections,
 préservant la topologie, contrairement à pymeshfix) suivi de
 `_finish_geometric_resolution`/`_probe_tetgen_conflicts` (sondage de TetGen
 lui-même en mode détection `switches='d'` dans un sous-processus isolé,
-`pipeline/_tetgen_detect_worker.py`, pour cibler et réparer localement les
+`element_ardor/_tetgen_detect_worker.py`, pour cibler et réparer localement les
 derniers segments nommés en conflit). La garde anti-effondrement décrite
 dans cette entrée (le vrai sujet du fix ci-dessus) reste, elle, toujours
 active et correcte — c'est uniquement l'affirmation finale sur le statut de
@@ -1836,7 +1836,7 @@ générique déjà documenté et corrigé pour l'IK (limite #37) : le surcoût
 de validation/permutation d'axes (`moveaxis`, `normalize_axis_tuple`)
 domine une opération triviale appelée en boucle Python plutôt qu'en lot.
 
-**Fix** : `_march_tetrahedra_batch` (`pipeline/step5_layers.py`) traite
+**Fix** : `_march_tetrahedra_batch` (`element_ardor/step5_layers.py`) traite
 **tous** les tétraèdres candidats d'une isovaleur en une seule passe
 vectorisée — zéro boucle Python sur les tétraèdres ou les triangles.
 Trois tables de correspondance statiques (construites une fois à l'import)
@@ -2169,7 +2169,7 @@ place pour empêcher la régression silencieuse de la fixture.
 
 ## Étape 9b — vérification du support de dépôt sur la trajectoire réelle
 
-Nouveau module `pipeline/step9b_support_check.py`, intercalé entre step8/step8b
+Nouveau module `element_ardor/step9b_support_check.py`, intercalé entre step8/step8b
 et step9. Répond à une question qu'aucune étape existante ne posait : **chaque
 point extrudé a-t-il de la matière DÉJÀ IMPRIMÉE sous lui au moment où il est
 déposé ?**

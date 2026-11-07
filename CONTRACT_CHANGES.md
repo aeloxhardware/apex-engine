@@ -4,6 +4,21 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajout du 2026-11-07 (le numero reste 3) : `params.runtime`, plus de variable d'environnement
+`PipelineParams.runtime` (`RuntimeOptions` : `native`, `gpu`, `grid_mode`, `tetgen_worker`, `tetgen_log`,
+`speculative_tetgen`, `step6_threads`) remplace `APEX_USE_CPP`, `APEX_USE_GPU`, `APEX_CPP_GRID_MODE`,
+`APEX_TETGEN_WORKER` et `APEX_TETGEN_LOG` (R-030 point 3). Ajout COMPATIBLE du schema : valeurs par defaut = ancien
+comportement sans variable (Python, pas de GPU). **Ce que le consommateur doit faire** : un lanceur qui positionnait
+`APEX_USE_CPP=1` dans l'environnement du processus doit envoyer `"params": {"runtime": {"native": true}}` ; la variable
+n'est plus lue. Le G-code n'est pas modifie. Le profil de machine par defaut vient desormais de `res/machines/`
+(memes valeurs qu'avant : aucun changement de G-code mesure par les tests).
+
+## Ajout du 2026-11-07 (le numero reste 3) : `skin_projection` et `tetranet_feature_angle_deg`
+Deux champs OPTIONNELS de `PipelineParams`, desactives par defaut (`skin_projection: null`, `tetranet_feature_angle_deg: 0`) :
+sans eux le G-code est inchange. `skin_projection` (etape 5c) ramene les contours sur la surface d'origine ;
+`tetranet_feature_angle_deg` protege les aretes vives dans TetraNet. Ajout COMPATIBLE du schema ; le jour ou un de ces
+reglages devient actif par defaut, le G-code change et le numero de contrat doit etre incremente dans le meme commit.
+
 ## Contrat 3 (2026-11-04) : INCOMPATIBLE, le numero passe de 2 a 3
 Decision de l'utilisateur (2026-11-04) : les defauts de buse tres bas d'Element Aeolis sont GARDES, pour eliminer des
 defauts (conduits de ventilation serres, collisions). Un defaut qui change le G-code produit incremente le contrat
@@ -25,7 +40,7 @@ defauts (conduits de ventilation serres, collisions). Un defaut qui change le G-
   ces etiquettes (R-028). Le G-code polaire (Element Ardor) n'en porte pas encore.
 
 ## Ajouts du 2026-10-31 (le numero reste 2 ; CONFIRMES le 2026-11-04 par l'utilisateur, le defaut qui change le G-code fait passer le contrat a 3, voir plus haut)
-- Element Aeolis tranche TOUTE geometrie (`element-aeolis/general.py`). `AeolisSliceParams` gagne `mode` (`auto` par defaut,
+- Element Aeolis tranche TOUTE geometrie (`element_aeolis/general.py`). `AeolisSliceParams` gagne `mode` (`auto` par defaut,
   `heightfield`, `general`), `nozzle_angle_deg` (10) et `nozzle_reach` (2 mm), les deux reglages de buse de l'imprimante, et
   `enforce_nozzle_limits` (vrai). Le `report` gagne `mode`, `fallback_reason` et `relief_mm`.
 - **Defaut qui change le G-code (confirme le 2026-11-04 : contrat 3)** : avec les defauts de buse tres bas, les surfaces en hauteur dont les couches
@@ -98,7 +113,7 @@ Rien a faire pour l'interface qui lit deja le contrat 2 ; a connaitre :
   qui affiche la liste de `steps` ; une interface qui testait le slug `ingest` en dur doit le retirer. Le numero de
   contrat reste 2.
 - `params.skin` (objet ou `null`, defaut `null`, 2026-10-28) : lissage non-planaire sur la voie chaleur, opt-in
-  (`pipeline/skin/`). Champs : `thickness` (0,2 mm), `pattern` (`rectilinear` par defaut ; motifs de
+  (`element_ardor/skin/`). Champs : `thickness` (0,2 mm), `pattern` (`rectilinear` par defaut ; motifs de
   `surface_paths.PATTERNS`), `head_tolerance_deg` (45), `trim_radius`, `max_iter`, `loop_sampling`,
   `exclusion_rounds`, `plate_radius`, `face_sample`. Non mesure sur les quatre modeles : ne pas l'activer par defaut.
   Le G-code porte alors des passes `; --- lissage ---` ; `GcodeParams.skin_thickness` s'applique (avant : par erreur

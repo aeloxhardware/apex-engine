@@ -18,6 +18,8 @@ struct Params {
     double alpha_long = 0.25;        // une arête longue (h) dont la coupe est à moins de alpha*L d'un bout y ramène ce sommet
     double alpha_short = 0.41;       // idem pour les arêtes courtes (0,866 h)
     double snap_alpha = 0.4;         // un sommet à moins de alpha*cell_size de la peau y est ramené
+    double feature_angle_deg = 0.0;  // > 0 : arêtes vives (angle entre normales de faces au-delà) protégées ; 0 = désactivé
+    double feature_snap_alpha = 0.35;  // un point de coupe à moins de alpha*cell_size d'une arête vive est ramené dessus
     double min_volume_ratio = 0.01;  // volume minimal d'un tétraèdre / volume nominal (cell^3/12)
     bool has_platform = false;
     double platform_z = 0.0;

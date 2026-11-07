@@ -1,7 +1,7 @@
 """
 tests/test_step7_scheduling.py
 
-Tests pour pipeline/step7_scheduling.py, sur des mesh synthetiques generes a
+Tests pour element_ardor/step7_scheduling.py, sur des mesh synthetiques generes a
 la volee (aucun fichier externe requis).
 
 Execution : pytest tests/test_step7_scheduling.py -v
@@ -17,13 +17,13 @@ import pytest
 import trimesh
 
 from core.mesh_types import ColorMap
-from pipeline.step1_ingest import run as ingest_run
-from pipeline.step2_overhang import OverhangParams, run as overhang_run
-from pipeline.step3_segmentation import SegmentationParams, run as segmentation_run
-from pipeline.step4_field_solver import FieldSolverParams, run as field_run
-from pipeline.step5_layers import LayerParams, run as layers_run
-from pipeline.step6_toolpath2d import Step6Params, run as toolpath_run
-from pipeline.step7_scheduling import (
+from element_ardor.step1_ingest import run as ingest_run
+from element_ardor.step2_overhang import OverhangParams, run as overhang_run
+from element_ardor.step3_segmentation import SegmentationParams, run as segmentation_run
+from element_ardor.step4_field_solver import FieldSolverParams, run as field_run
+from element_ardor.step5_layers import LayerParams, run as layers_run
+from element_ardor.step6_toolpath2d import Step6Params, run as toolpath_run
+from element_ardor.step7_scheduling import (
     HoleCostModel,
     PurgeCostModel,
     SchedulingError,
@@ -195,7 +195,7 @@ def test_painted_colors_match_geometry(flat_box_pipeline):
         Step7Params(surface_color_distance=0.5),
     )
 
-    from pipeline.step6_toolpath2d import _lift_to_3d
+    from element_ardor.step6_toolpath2d import _lift_to_3d
 
     mismatches = 0
     checked = 0
@@ -419,11 +419,12 @@ def test_deadline_is_within_layer_bounds(flat_box_pipeline):
     Une deadline doit toujours rester dans [couche du trou, derniere couche] -
     borne verifiee directement sur la fonction, independamment du planning.
     """
-    from pipeline.step7_scheduling import (
+    from element_ardor.step7_scheduling import (
         _escape_directions,
         _group_position_3d,
         _group_segments_by_color,
         compute_hole_deadline,
+        DeadlineContext,
     )
     import scipy.spatial
 
@@ -445,9 +446,10 @@ def test_deadline_is_within_layer_bounds(flat_box_pipeline):
         for group in groups:
             position = _group_position_3d(colored[layer_index], group)
             deadline = compute_hole_deadline(
-                position, layer_index, mesh_data, field_tree,
-                np.asarray(field.values, dtype=float), sorted_isovalues,
-                len(colored), directions, params,
+                position, layer_index,
+                DeadlineContext(mesh_data, field_tree, np.asarray(field.values, dtype=float),
+                                sorted_isovalues, len(colored)),
+                directions, params,
             )
             assert layer_index <= deadline <= len(colored) - 1
             checked += 1

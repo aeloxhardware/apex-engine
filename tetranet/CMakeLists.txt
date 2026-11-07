@@ -11,7 +11,7 @@ else()
   add_compile_options(-O2 -ffp-contract=off)
 endif()
 
-add_library(tetranet STATIC src/tetranet.cpp)
+add_library(tetranet STATIC src/tetranet.cpp src/features.cpp)
 target_include_directories(tetranet PUBLIC include)
 
 find_package(Threads REQUIRED)

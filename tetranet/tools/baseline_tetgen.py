@@ -4,7 +4,7 @@ Usage : python tetranet/tools/baseline_tetgen.py <resolution> <stl> [<stl> ...]
 """
 import json, os, sys, time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
-from pipeline import step1_ingest
+from element_ardor import step1_ingest
 
 res = float(sys.argv[1])
 for path in sys.argv[2:]:

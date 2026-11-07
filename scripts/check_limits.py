@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent
 BASELINE = Path(__file__).resolve().parent / "limits_baseline.json"
 MAX_FILE, MAX_FN, MAX_PARAMS = 800, 80, 8
 # Code tiers, sorties et environnements : hors du code d'Apex.
-SKIP_PARTS = {".git", ".venv", "venv", "__pycache__", "node_modules", "out", "build", "third_party", "research"}
+SKIP_PARTS = {".git", ".venv", "venv", "__pycache__", "node_modules", "out", "build", "third_party", "research", ".claude"}
 
 
 def _files() -> list[Path]:

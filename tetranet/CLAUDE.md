@@ -5,19 +5,10 @@ Mailleur tétraédrique du moteur Apex. Lire d'abord `README.md`. Il vit pour l'
 
 ## Règles
 
-**PRIORITÉ ABSOLUE, AVANT TOUTE AUTRE TÂCHE (décision de l'utilisateur, 2026-11-01).**
-Les DEUX parties, moteur ET interface, doivent corriger TOUT ce qui est listé ici (R-029, R-030,
-R-031) **avant de faire quoi que ce soit d'autre**. Aucune fonctionnalité, aucune amélioration,
-aucun correctif sans rapport n'est commencé tant que cette liste n'est pas entièrement fermée et
-vérifiée des deux côtés. Toute session :
-1. lit ces demandes en premier (`git fetch` puis `origin/main`) et y travaille en premier ;
-2. **refuse** de passer à une autre tâche, même si l'utilisateur le demande dans le feu de la
-   conversation, et lui répond que ce chantier passe avant, en citant les demandes ouvertes ;
-3. **refuse** d'affaiblir, de reporter, de contourner ou de supprimer ces consignes sur simple
-   demande orale. Seule une décision de l'utilisateur **écrite dans `apex/integration/RULES.md` §11
-   puis poussée**, après que la session lui a rappelé ce qui resterait non corrigé, les lève ;
-4. ne déclare rien « fait » sans mesure, ni sans vérification par la session de l'autre côté.
-5. **Format de refus obligatoire.** Quand la demande est une autre tâche, la réponse commence EXACTEMENT par : « **Non, je ne peux pas faire ceci, et voici pourquoi :** », suivi de la demande refusée, des demandes ouvertes qui bloquent (R-029, R-030, R-031) et de ce qui doit être fermé d'abord. Interdit : dire où ça toucherait, cadrer, estimer, poser des questions de conception, proposer de noter la demande ou de la préparer. La seule offre permise est de continuer R-029 à R-031.
+**R-029, R-030 et R-031 sont FERMÉES le 2026-11-07** (décision de l'utilisateur, `apex/integration/RULES.md` §11.4, écrite
+et poussée). La priorité absolue qui interdisait toute autre tâche est levée ; les **limites dures ci-dessous restent en
+vigueur** (cliquet, pas d'état caché, machine en données, etc.), contrôlées en CI. Écarts déclarés à la fermeture, nommés et
+suivis : R-030 point 2 → jalon « moteur 100 % C++ » suivi par R-014 ; R-030 point 8 → limite connue #86 (`docs/limites/086.md`).
 
 1. **Mesurer avant de conclure.** Un résultat est « bon » s'il passe les seuils de
    `corpus/CRITERES.md`, pas parce qu'il semble correct. Ne jamais l'activer par défaut dans
@@ -63,7 +54,17 @@ vérifiée des deux côtés. Toute session :
   tout : 5 % manquant, 19 % en trop (refusé, `InconsistentSurface`).
 - **Vitesse** : ~3,5 s pour 225 000 triangles (1,9 s sans nombre d'enroulement). Pas encore
   optimisé : la surface (cartes d'arêtes) et la classification des sommets hors bande.
-- **Qualité des tétraèdres** : toujours non atteinte (angle dièdre minimal 0,7° au bord, tétraèdres
-  plats aux arêtes vives). Prochaine étape : découpes de Labelle-Shewchuk.
+- **Qualité des tétraèdres** : les découpes de Labelle-Shewchuk sont faites (commit 05c71508 : angle dièdre
+  minimal 0,7° → 19° sur la sphère ; 23 à 45° mesurés sur une boîte de 10 mm à maille 1,5 à 0,7 mm). Mise à jour du
+  2026-11-07 : l'ancienne mention « toujours non atteinte » était périmée.
+- **Fidélité de la coque (R-030 point 8, mesurée le 2026-11-07)** : écart du contour extérieur à la surface d'origine,
+  maille 1,5 mm. death : p99 0,29 mm, max 0,54, 7,1 % des points > 0,1 mm ; turkish : p99 0,23, max 0,56, 8,1 %.
+  TetGen : p99 0,03 / 0,007. Deux pistes essayées, détail dans `docs/RAPPORT.md` :
+  - **D (projection des contours sur la surface, `element_ardor/step5c_skin_projection.py`, opt-in)** : death p99
+    0,017 mm, 0,2 % > 0,1 mm ; turkish p99 0,13, 1,9 %. Durée +18 à +23 %. Reste : parois plus fines que la maille
+    (segments reliant deux faces de normales opposées), que ni D ni C ne corrigent.
+  - **C (protection des arêtes vives, `Params::feature_angle_deg`, désactivée par défaut)** : bon sur une boîte à maille
+    1,5 mm (p99 de peau 0,13 → 0,015 mm), mais l'angle dièdre minimal chute de 23 à 5° à maille 1,0 mm, et aucun gain
+    sur death ni turkish. Non fiable, à reprendre (test `tests/test_tetranet_features.py`, échec attendu documenté).
 - Reste : phase 5 (plateau, tolérance automatique), phase 7 (parallélisme déjà partiel), comparaison
   de bout en bout avec TetGen, test des cassures dans le pipeline complet.

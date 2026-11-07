@@ -1,11 +1,14 @@
+#define _USE_MATH_DEFINES  // M_PI sous MSVC
 // TetraNet — prototype : réseau BCC, tri dedans/dehors, ramené à la peau (snap).
 #include "tetranet/tetranet.hpp"
+#include "tetranet/features.hpp"
 
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <numeric>
 #include <thread>
 #include <unordered_map>
@@ -351,6 +354,23 @@ double tet_volume(const V3& a, const V3& b, const V3& c, const V3& d) { return d
 
 const char* version() { return "0.0.1"; }
 
+// Arêtes vives de la surface (piste C, R-030 point 8) : nullptr si désactivé ou si la surface n'en a pas.
+std::unique_ptr<FeatureEdges> make_features(const Surface& s, const Params& prm, double radius) {
+    if (!(prm.feature_angle_deg > 0.0) || !(prm.feature_snap_alpha > 0.0)) return nullptr;
+    std::vector<std::array<double, 3>> pts(s.p.size()), nrm(s.fn.size());
+    for (size_t i = 0; i < s.p.size(); ++i) pts[i] = {s.p[i].x, s.p[i].y, s.p[i].z};
+    for (size_t i = 0; i < s.fn.size(); ++i) nrm[i] = {s.fn[i].x, s.fn[i].y, s.fn[i].z};
+    auto features = std::make_unique<FeatureEdges>(pts, s.tri, nrm, prm.feature_angle_deg, radius);
+    if (features->empty()) return nullptr;
+    return features;
+}
+
+V3 snap_to_feature(const FeatureEdges* features, const V3& q, double radius) {
+    if (!features) return q;
+    std::array<double, 3> out;
+    return features->snap({q.x, q.y, q.z}, radius, out) ? V3(out[0], out[1], out[2]) : q;
+}
+
 Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh* cleaned) {
     auto t_all = Clock::now();
     Report rep;
@@ -380,6 +400,8 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
 
     // --- réseau BCC
     const double h = prm.cell_size;
+    const double feature_radius = prm.feature_snap_alpha * h;
+    const std::unique_ptr<FeatureEdges> features = make_features(surf, prm, feature_radius);
     V3 lo(1e300, 1e300, 1e300), hi(-1e300, -1e300, -1e300);
     for (const V3& q : surf.p) { lo = {std::min(lo.x, q.x), std::min(lo.y, q.y), std::min(lo.z, q.z)}; hi = {std::max(hi.x, q.x), std::max(hi.y, q.y), std::max(hi.z, q.z)}; }
     const double pad = 2.0 * h;
@@ -469,7 +491,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     if (!prm.use_cuts) {
         const double snap = prm.snap_alpha * h;
         parallel_for(N, threads, [&](int64_t b, int64_t e, unsigned) {
-            for (int64_t v = b; v < e; ++v) if (isband[v] && dist[v] <= snap) { pos[v] = qpt[v]; sgn[v] = 0; }
+            for (int64_t v = b; v < e; ++v) if (isband[v] && dist[v] <= snap) { pos[v] = snap_to_feature(features.get(), qpt[v], feature_radius); sgn[v] = 0; }
         });
     } else {
         // 1. arêtes du réseau dont les deux bouts sont de signes opposés ("violées")
@@ -501,7 +523,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
                 V3 lin = pos[ed.u] + (pos[ed.v] - pos[ed.u]) * t;
                 refs[k] = lin;
                 Hit hit = nearest(bvh, lin, 2.0 * h);
-                cuts[k] = hit.found ? hit.q : lin;
+                cuts[k] = snap_to_feature(features.get(), hit.found ? hit.q : lin, feature_radius);
             }
         });
         // 3. ramenage : un sommet à moins de alpha*L d'une coupe de ses arêtes violées va sur la coupe la plus proche

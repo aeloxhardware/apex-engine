@@ -5,7 +5,7 @@ Structures de données partagées entre toutes les étapes du pipeline de slicin
 
 Ce fichier ne contient AUCUNE logique de calcul lourd (pas de résolution de champ,
 pas de détection de collision, pas de segmentation). Il définit uniquement les
-"contrats de données" échangés entre les fichiers pipeline/step*.py.
+"contrats de données" échangés entre les fichiers element_ardor/step*.py.
 
 Chaque étape du pipeline prend un ou plusieurs de ces types en entrée et produit
 un ou plusieurs de ces types en sortie, ce qui permet de tester chaque étape
@@ -54,7 +54,7 @@ class AABB:
 @dataclass
 class MeshData:
     """
-    Résultat de l'ingestion du mesh (pipeline/step1_ingest.py).
+    Résultat de l'ingestion du mesh (element_ardor/step1_ingest.py).
 
     bvh et kdtree sont typés `Any` car ils enveloppent des objets de
     bibliothèques externes (trimesh / scipy.spatial) OU leur équivalent natif
@@ -109,7 +109,7 @@ class TetMesh:
 
 @dataclass
 class OverhangMap:
-    """Résultat de pipeline/step2_overhang.py, un score/flag par face du MeshData."""
+    """Résultat de element_ardor/step2_overhang.py, un score/flag par face du MeshData."""
     risk_score: np.ndarray             # shape (M,) float
     is_overhang: np.ndarray            # shape (M,) bool
     is_bridge: np.ndarray              # shape (M,) bool
@@ -165,7 +165,7 @@ class JunctionZone:
     Zone à raffiner localement lors d'une seconde tétraédrisation (CLAUDE.md
     limite #48) : un cluster de faces frontière entre deux régions dont les
     `target_direction` divergent au-delà d'un seuil angulaire (voir
-    `pipeline/step1b_junction_detection.py::detect_junction_zones`).
+    `element_ardor/step1b_junction_detection.py::detect_junction_zones`).
     Généralise le mécanisme `TetGen.add_region` déjà utilisé pour le
     plateau (limite #36) à des jonctions multi-région en plein volume —
     contrairement au plateau, une jonction n'a pas de plan de coupe unique,
@@ -287,7 +287,7 @@ class PrintPass:
 @dataclass
 class PrintSchedule:
     """
-    Séquence globale d'impression, sortie de pipeline/step7_scheduling.py.
+    Séquence globale d'impression, sortie de element_ardor/step7_scheduling.py.
 
     L'ordre d'exécution est EXACTEMENT l'ordre de la liste `passes` :
     l'étape 8 la consomme séquentiellement, sans jamais réordonner ni
@@ -342,7 +342,7 @@ class MachineProfile:
     nozzle_model: Any = None         # maillage 3D tête (buse + porte-buse + carriage proche)
     # Identifiant du modele de tete (dossier de `res/3d/toolheads/<id>/<id>.glb`), lie au profil
     # d'imprimante (R-020). Jamais un chemin : il traverse le contrat, le moteur le resout chez lui.
-    toolhead_id: str = "aetheris-4"
+    toolhead_id: str = ""
     nozzle_diameter: float = 0.4
     max_angular_velocity: float = 0.0     # rad/s
     max_angular_acceleration: float = 0.0
@@ -352,6 +352,9 @@ class MachineProfile:
     # (utilisateur, 2026-09-29). None = inconnu : step9 retombe sur son disque
     # par defaut et aucun refus de taille n'est applique.
     platform_radius: Optional[float] = None
+    # Epaisseur (mm) du disque du plateau pour la collision tete / plateau. None = non decrit : le test plateau
+    # est saute (aucun disque par defaut, R-030 point 4).
+    platform_thickness: Optional[float] = None
     # Axes dont l'angle est IMPOSÉ PAR LA POSITION du point (limite #59) :
     # quand la tête ne se déplace que dans un demi-plan (machine actuelle : R et
     # Z seulement, pas d'axe Y), le plateau doit tourner pour amener le point
@@ -413,7 +416,7 @@ class ToolpathMachine:
     """Trajectoire machine finale, prête pour simulation (étape 9) puis export G-code."""
     points: list[ToolpathPoint] = field(default_factory=list)
     # Couche (`Layer.id`) de chaque point du CORPS, issue de l'étape 8 ; `None` hors étape 8 (tests, trajectoire
-    # relue). Sert à insérer le lissage non-planaire après la couche qui le porte (`pipeline/skin/inject.py`).
+    # relue). Sert à insérer le lissage non-planaire après la couche qui le porte (`element_ardor/skin/inject.py`).
     layer_ids: Optional[np.ndarray] = None
 
 
@@ -423,7 +426,7 @@ class TravelRoutingDiagnostic:
     Signal "trajet à vide routé en lift-and-traverse, mais toujours en
     collision avec la matière déjà imprimée même à la hauteur de lift
     maximale testée" — donnée pure remontée par
-    `pipeline/step8b_travel_routing.py` (CLAUDE.md limite #46).
+    `element_ardor/step8b_travel_routing.py` (CLAUDE.md limite #46).
 
     Le mécanisme de routage n'est PAS un vrai path-planning 3D (voir la
     docstring du module) : c'est un palliatif lever/traverser/redescendre,

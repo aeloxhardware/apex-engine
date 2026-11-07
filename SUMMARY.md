@@ -98,7 +98,7 @@ cohérente au lieu du chaos mesuré avant ce fix.
 
 - Committé : fix du cap dupliqué (`9f72a8a`).
 - Détection automatique de `platform_z`
-  (`main.py`, `pipeline/step1_ingest.py`, `pipeline/step3_segmentation.py`,
+  (`main.py`, `element_ardor/step1_ingest.py`, `element_ardor/step3_segmentation.py`,
   `scripts/export_slicing_preview.py`, tests) — 187/187 tests passants,
   vérification end-to-end sur `death.stl` confirmée (voir ci-dessus). Prêt
   à committer.

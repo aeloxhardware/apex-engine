@@ -23,7 +23,7 @@ Sorties :
     moteur, jamais d'une minuterie. Le journal libre du pipeline est aussi envoye ici ;
   - sortie standard : un seul objet JSON, derniere ligne (le resultat).
 Codes de sortie : 0 reussi ; 2 requete invalide ; 3 modele refuse ; 1 plantage.
-Element Aeolis : etapes de `nonplanar.slicer.AEOLIS_STEPS` ; un maillage qui n'est pas une surface en hauteur est
+Element Aeolis : etapes de `element_aeolis.slicer.AEOLIS_STEPS` ; un maillage qui n'est pas une surface en hauteur est
 refuse avec le statut `not_a_heightfield` (code 3).
 Le G-code est ecrit sous un nom temporaire puis renomme : un G-code present est complet.
 """
@@ -40,7 +40,7 @@ import traceback
 import numpy as np
 
 from config import schema
-from core import progress as _core_progress
+from core import progress as _core_progress, runtime
 
 EXIT_OK, EXIT_ERROR, EXIT_INVALID, EXIT_REFUSED = 0, 1, 2, 3
 
@@ -60,7 +60,7 @@ def _steps(algorithm: str = "element-ardor") -> list[dict]:
     """Etapes de progression d'un algorithme ; Element Ardor par defaut (pipeline principal)."""
     if algorithm == "element-aeolis":
         import importlib
-        aeolis = importlib.import_module("nonplanar.slicer")
+        aeolis = importlib.import_module("element_aeolis.slicer")
         return [{"slug": slug, "label": label} for slug, label in aeolis.AEOLIS_STEPS]
     from main import PIPELINE_STEPS
     return [{"slug": slug, "label": label} for slug, label in PIPELINE_STEPS] + \
@@ -143,7 +143,7 @@ def parse_request(text: str) -> dict:
             raise InvalidRequest("gcode_params : sans objet avec element-aeolis (G-code cartesien, pas de pivot) ; "
                                  "les reglages d'impression sont dans params")
         import importlib
-        aeolis = importlib.import_module("nonplanar.slicer")
+        aeolis = importlib.import_module("element_aeolis.slicer")
         try:
             params = schema.from_jsonable(aeolis.SliceParams, data.get("params", {}), base=aeolis.SliceParams())
         except (ValueError, TypeError, KeyError) as exc:
@@ -206,9 +206,9 @@ def _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, re
     ET que la buse y passe, sinon le tranchage general (`report.mode`, `report.fallback_reason`). Refus type (code 3) :
     `not_a_heightfield` avec `mode: heightfield` seulement, et `not_sliceable` pour un maillage vide ou ouvert."""
     import importlib
-    aeolis = importlib.import_module("nonplanar.slicer")
-    heightfield = importlib.import_module("nonplanar.heightfield")
-    general = importlib.import_module("nonplanar.general")
+    aeolis = importlib.import_module("element_aeolis.slicer")
+    heightfield = importlib.import_module("element_aeolis.heightfield")
+    general = importlib.import_module("element_aeolis.general")
     try:
         with contextlib.redirect_stdout(log):
             gcode, report = aeolis.slice_path(request["mesh"], request["params"], progress=progress)
@@ -243,48 +243,14 @@ def _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, re
     return EXIT_OK
 
 
-def slice_main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="main.py slice", description="Tranche un modele selon une requete JSON.")
-    parser.add_argument("--request", required=True, help="Fichier requete.json.")
-    args = parser.parse_args(argv)
-    real_stdout, log = sys.stdout, sys.stderr
-
-    def refuse(status: str, code: int, message: str, **extra) -> int:
-        _emit(log, {"type": "log", "level": "error", "code": status, "message": message})
-        print(_dumps(_clean(_result(status, message=message, **extra))), file=real_stdout, flush=True)
-        return code
-
-    try:
-        with open(args.request, encoding="utf-8") as handle:
-            request = parse_request(handle.read())
-    except OSError as exc:
-        return refuse("invalid_request", EXIT_INVALID, f"requete illisible : {exc}")
-    except InvalidRequest as exc:
-        return refuse("invalid_request", EXIT_INVALID, str(exc))
-    if not os.path.isfile(request["mesh"]):
-        return refuse("invalid_request", EXIT_INVALID, f"maillage introuvable : {request['mesh']}")
-
-    os.makedirs(request["output_dir"], exist_ok=True)
-    name = request["output_name"] or os.path.splitext(os.path.basename(request["mesh"]))[0] + ".gcode"
-    final_path = os.path.join(request["output_dir"], name)
-    temp_path = final_path + ".part"
-    for stale in (temp_path,):
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(stale)
-
-    def progress(slug: str, fraction: float) -> None:
-        _emit(log, {"type": "step", "slug": slug, "fraction": float(fraction)})
-
-    if request["algorithm"] == "element-aeolis":
-        return _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, refuse)
-
+def _slice_ardor(request: dict, final_path: str, temp_path: str, progress, log, real_stdout, refuse) -> int:
     from main import export_gcode_checked, run_pipeline
-    from pipeline.step1_ingest import MeshIngestError, SurfaceInconsistentError
+    from element_ardor.step1_ingest import MeshIngestError, SurfaceInconsistentError
 
     try:
         # Le journal libre du pipeline (print) va sur la sortie d'erreur : la sortie standard ne
         # porte que le resultat.
-        with contextlib.redirect_stdout(log):
+        with runtime.use(request["params"].runtime), contextlib.redirect_stdout(log):
             result = run_pipeline(request["mesh"], request["params"], progress=progress)
             progress("export", 0.0)
             _core_progress.begin(lambda fraction: progress("export", fraction))   # R-017
@@ -324,3 +290,40 @@ def slice_main(argv: list[str]) -> int:
         platform_z=getattr(ingest, "platform_z_used", None),
         warnings=warnings, **_counts(result)))), file=real_stdout, flush=True)
     return EXIT_OK
+
+
+def slice_main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(prog="main.py slice", description="Tranche un modele selon une requete JSON.")
+    parser.add_argument("--request", required=True, help="Fichier requete.json.")
+    args = parser.parse_args(argv)
+    real_stdout, log = sys.stdout, sys.stderr
+
+    def refuse(status: str, code: int, message: str, **extra) -> int:
+        _emit(log, {"type": "log", "level": "error", "code": status, "message": message})
+        print(_dumps(_clean(_result(status, message=message, **extra))), file=real_stdout, flush=True)
+        return code
+
+    try:
+        with open(args.request, encoding="utf-8") as handle:
+            request = parse_request(handle.read())
+    except OSError as exc:
+        return refuse("invalid_request", EXIT_INVALID, f"requete illisible : {exc}")
+    except InvalidRequest as exc:
+        return refuse("invalid_request", EXIT_INVALID, str(exc))
+    if not os.path.isfile(request["mesh"]):
+        return refuse("invalid_request", EXIT_INVALID, f"maillage introuvable : {request['mesh']}")
+
+    os.makedirs(request["output_dir"], exist_ok=True)
+    name = request["output_name"] or os.path.splitext(os.path.basename(request["mesh"]))[0] + ".gcode"
+    final_path = os.path.join(request["output_dir"], name)
+    temp_path = final_path + ".part"
+    for stale in (temp_path,):
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(stale)
+
+    def progress(slug: str, fraction: float) -> None:
+        _emit(log, {"type": "step", "slug": slug, "fraction": float(fraction)})
+
+    if request["algorithm"] == "element-aeolis":
+        return _slice_aeolis(request, final_path, temp_path, progress, log, real_stdout, refuse)
+    return _slice_ardor(request, final_path, temp_path, progress, log, real_stdout, refuse)

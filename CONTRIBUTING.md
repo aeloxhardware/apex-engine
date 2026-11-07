@@ -33,7 +33,7 @@ On Windows use `.venv\Scripts\python.exe`. `pymeshfix` is optional. The native C
 
 ## Project conventions
 
-- **Each step is a pure function.** `pipeline/stepN_*.py` exposes `run(input, params) -> output` with no hidden state. Shared data types live in `core/mesh_types.py`.
+- **Each step is a pure function.** `element_ardor/stepN_*.py` exposes `run(input, params) -> output` with no hidden state. Shared data types live in `core/mesh_types.py`.
 - **Parameters are dataclasses.** Anything exposed to the interface must serialise through `config/schema.py`. If you add a parameter, regenerate the generated files with `scripts/gen_params.py`, since a test fails when they are out of date.
 - **The Python code is the reference for the native core.** A native port must return what Python returns, bit for bit or within a tolerance that you state and measure. Never compile with `/fp:fast`.
 - **Measure before you conclude.** A mechanism that improves one indicator can leave the reference metric unchanged or worse. Report the numbers on the reference models in `res/test_models/`.

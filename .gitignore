@@ -38,3 +38,6 @@ config/pivot_to_tip.json.tmp
 
 # Sorties generees (journaux, G-code, GIF, mesures) : jamais versionnees (R-030 point 7)
 out/
+
+# Artefacts CMake de la racine (regenerables)
+/build/

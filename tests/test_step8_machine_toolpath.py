@@ -1,7 +1,7 @@
 """
 tests/test_step8_machine_toolpath.py
 
-Tests pour pipeline/step8_machine_toolpath.py. Contrairement a
+Tests pour element_ardor/step8_machine_toolpath.py. Contrairement a
 test_step7_scheduling.py, step8 ne depend que de structures de donnees
 (list[Layer], PrintSchedule, MachineProfile) - les fixtures construisent
 ces objets a la main plutot que de rejouer tout le pipeline step1..step7,
@@ -23,7 +23,7 @@ from core.mesh_types import (
     PrintSchedule,
     RotationAxisSpec,
 )
-from pipeline.step8_machine_toolpath import (
+from element_ardor.step8_machine_toolpath import (
     Step8Params,
     ToolpathResolutionError,
     _clamp_rate,
@@ -91,7 +91,7 @@ def test_round_trip_current_machine_resolves_within_tolerance():
     reference = np.array([0.0, 0.0, -1.0])
 
     known_angles_deg = np.array([40.0, 65.0])
-    from pipeline.step8_machine_toolpath import _resolve_axis_angles
+    from element_ardor.step8_machine_toolpath import _resolve_axis_angles
 
     # cinematique directe : angle connu -> direction cible
     directions, angles_grid = composed_rotation_angles_and_directions(
@@ -180,7 +180,7 @@ def test_detect_singular_axes_flags_axis_on_platform_center():
 # ---------------------------------------------------------------------------
 
 def test_locked_single_axis_always_returns_locked_value():
-    from pipeline.step8_machine_toolpath import _resolve_axis_angles
+    from element_ardor.step8_machine_toolpath import _resolve_axis_angles
 
     axes = [RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(30.0, 30.0))]
     reference = np.array([1.0, 0.0, 0.0])
@@ -486,7 +486,7 @@ def _head_body_height(layer: Layer, machine: MachineProfile) -> float:
     """Hauteur moyenne, au-dessus de la pointe, d'une tete synthetique dont
     le corps s'etend le long de son +Z local (convention du modele de tete,
     CLAUDE.md : origine = pointe de buse, +Z = haut physique de la tete)."""
-    from pipeline.step9_collision_sim import _positioned_toolhead_vertices
+    from element_ardor.step9_collision_sim import _positioned_toolhead_vertices
 
     schedule = PrintSchedule(passes=[PrintPass(segments=[(layer.id, 0)], color_id=None)])
     toolpath, _diagnostics = step8_run([layer], schedule, machine, Step8Params(default_feedrate=1000.0))
@@ -530,7 +530,7 @@ def test_reversed_flat_layer_puts_the_head_below_the_nozzle():
 # Limite #59 : premier axe (C) impose par la position (machine R C Z B)
 # ---------------------------------------------------------------------------
 
-from pipeline.step8_machine_toolpath import (  # noqa: E402
+from element_ardor.step8_machine_toolpath import (  # noqa: E402
     _RawPoint,
     _resolve_all_axis_angles_coupled,
     coupled_axis_angle,
@@ -679,7 +679,7 @@ def test_free_axis_median_filter_removes_b_oscillation_only():
     nouvelle polyligne n'herite rien de la precedente. (Une alternance
     PARFAITE 0/14/0/14 resiste a un median -- limite connue.)"""
     import main
-    from pipeline.step8_machine_toolpath import _median_filter_free_axes, _RawPoint
+    from element_ardor.step8_machine_toolpath import _median_filter_free_axes, _RawPoint
 
     machine = main._default_machine_profile()
     raw, angles = [], []
@@ -752,7 +752,7 @@ def test_nodal_direction_field_is_exact_on_linear_field_and_continuous():
     tetraedre voisin a l'autre (contrairement au plus proche centroide)."""
     from scipy.spatial import Delaunay
     from core.mesh_types import ScalarField, TetMesh
-    from pipeline.step8_machine_toolpath import gradient_direction_field
+    from element_ardor.step8_machine_toolpath import gradient_direction_field
     rng = np.random.default_rng(4)
     pts = rng.uniform(0, 10, (300, 3))
     tets = Delaunay(pts).simplices.astype(np.int64)
@@ -774,7 +774,7 @@ def test_median_filter_residuals_match_pointwise_rodrigues():
     """Le residuel recalcule par lots apres le filtre median (2026-10-06) egale la
     boucle point par point d'origine, a la precision machine pres."""
     from core.geometry_utils import _rodrigues_rotate_single
-    from pipeline.step8_machine_toolpath import _median_filter_free_axes
+    from element_ardor.step8_machine_toolpath import _median_filter_free_axes
     rng = np.random.default_rng(3)
     machine = _coupled_machine(extra_head_axis=True)
     n = 400

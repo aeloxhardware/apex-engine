@@ -1,0 +1,4 @@
+{
+  "default": "aetheris-4",
+  "comment": "Machine choisie quand l'appelant n'en designe aucune. Ajouter une machine = ajouter <id>.json ici, sans toucher au code."
+}

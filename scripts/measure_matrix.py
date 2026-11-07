@@ -6,7 +6,7 @@ Sert a mesurer les mecanismes opt-in sur les QUATRE modeles de
 res/test_models/ avant toute activation par defaut (regle de CLAUDE.md), et a
 refaire la reference step9b devenue obsolete (limites #57, #58).
 
-Usage (venv d'Apex, APEX_USE_CPP=1 conseille) :
+Usage (venv d'Apex, --native conseille) :
   .venv/Scripts/python.exe -u scripts/measure_matrix.py <modele.stl> <variante> [--resolution=0.8]
       [--layer-height=0.2] [--out=out/measure_matrix.jsonl]
 
@@ -24,8 +24,14 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from core import runtime  # noqa: E402
+
+if "--native" in sys.argv:          # option explicite (R-030 point 3) : plus de variable d'environnement
+    sys.argv.remove("--native")
+    runtime.replace_options(native=True)
+
 from main import PipelineParams  # noqa: E402
-from pipeline.step9b_support_check import SupportCheckParams  # noqa: E402
+from element_ardor.step9b_support_check import SupportCheckParams  # noqa: E402
 from scripts.export_slicing_preview import run_slicing_only  # noqa: E402
 
 
@@ -54,10 +60,10 @@ def apply_variant(params: PipelineParams, name: str) -> None:
         params.toolpath2d.native_fill = True
         params.toolpath2d.continuous_rings = True
     elif name == "corder":          # step5b : ordre contraint par la tete
-        from pipeline.step5b_collision_order import CollisionOrderParams
+        from element_ardor.step5b_collision_order import CollisionOrderParams
         params.collision_order = CollisionOrderParams()
     elif name == "corder_support":  # step5b + contraintes d'appui
-        from pipeline.step5b_collision_order import CollisionOrderParams
+        from element_ardor.step5b_collision_order import CollisionOrderParams
         params.collision_order = CollisionOrderParams(support_depth=0.3)
     elif name == "nocorder":        # sans l'ordre contraint par la tete
         params.collision_order = None
@@ -107,7 +113,7 @@ def head_normal_deviation(result, params) -> dict:
     plus proche), sur les points en extrusion. Metrique PHYSIQUE, independante
     de la cible que step8 s'est donnee - un compteur de diagnostics peut
     baisser sans que le depot s'ameliore."""
-    from pipeline.step8_machine_toolpath import gradient_direction_field
+    from element_ardor.step8_machine_toolpath import gradient_direction_field
     pts = [p for p in result.toolpath.points if p.extrusion > 0]
     if not pts:
         return {}
@@ -172,7 +178,7 @@ def main() -> None:
     row = {
         "model": os.path.basename(model), "variant": variant, "resolution": params.resolution,
         "layer_height_base": params.layers.layer_height_base,
-        "apex_use_cpp": os.environ.get("APEX_USE_CPP", "0"),
+        "native": int(runtime.options().native),
         "seconds": round(elapsed, 1), "layers": len(result.layers), "points": len(pts),
         "layer_thickness_measured": round(_layer_thickness(result), 4),
         "tested": rep.tested_extruded_points, "unsupported": len(rep.events),
@@ -188,7 +194,7 @@ def main() -> None:
         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     if "--collisions" in sys.argv and params.machine_profile.nozzle_model is not None:
-        from pipeline import step9_collision_sim as s9
+        from element_ardor import step9_collision_sim as s9
         t1 = time.time()
         rep9 = s9.run(result.toolpath, params.machine_profile, params.collision)
         sampled = len(s9._sample_point_indices(pts, params.collision.path_sampling_step))
