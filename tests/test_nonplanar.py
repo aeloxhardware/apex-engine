@@ -1,11 +1,11 @@
-"""Tranchage non planaire (paquet `nonplanar/`) : maillages synthétiques générés à la volée."""
+"""Tranchage non planaire (paquet `element_aeolis/`) : maillages synthétiques générés à la volée."""
 from pathlib import Path
 
 import numpy as np
 import pytest
 import trimesh
 
-from nonplanar import NotAHeightfieldError, SliceParams, build, from_mesh, slice_mesh
+from element_aeolis import NotAHeightfieldError, SliceParams, build, from_mesh, slice_mesh
 
 MODELS = Path(__file__).resolve().parent.parent / "res" / "test_models" / "non_planar"
 
@@ -124,13 +124,13 @@ def test_user_models_are_heightfields(name):
 
 
 def _head_envelope():
-    from nonplanar.headcheck import load_envelope
+    from element_aeolis.headcheck import load_envelope
     return load_envelope()
 
 
 def test_head_clears_gentle_surface_but_hits_a_steep_wall():
     """Marche de 14 mm au pied de laquelle la tête (large à partir de 10 mm de hauteur) touche ; loin : rien."""
-    from nonplanar.headcheck import check_points
+    from element_aeolis.headcheck import check_points
     env = _head_envelope()
 
     class F:   # champ minimal : xs, ys, top, bottom
@@ -154,7 +154,7 @@ def test_head_clears_gentle_surface_but_hits_a_steep_wall():
 
 def test_head_check_on_a_part_lower_than_the_head_does_not_crash():
     """Pièce plus basse que tout point de l'enveloppe : aucun contact possible, pas de min() sur tableau vide."""
-    from nonplanar.headcheck import check_points
+    from element_aeolis.headcheck import check_points
     env = _head_envelope()
 
     class F:
@@ -175,9 +175,13 @@ def test_head_report_in_slice():
     assert rep.head.colliding_points == 0                    # ondulation douce
     assert rep.head.clearance_slope_deg == pytest.approx(SliceParams().nozzle_angle_deg)   # enveloppe des réglages de buse
     # Une vraie tête (GLB) remplace l'enveloppe des réglages.
-    from nonplanar.headcheck import DEFAULT_HEAD
-    if DEFAULT_HEAD.exists():
-        _, rep = slice_mesh(m, SliceParams(grid_cell=0.5, head_model=str(DEFAULT_HEAD)))
+    from pathlib import Path
+
+    from config.machine_profiles import default_toolhead_id
+    from file_io.mesh_loader import toolhead_path
+    head = Path(toolhead_path(default_toolhead_id()))
+    if head.exists():
+        _, rep = slice_mesh(m, SliceParams(grid_cell=0.5, head_model=str(head)))
         assert 15 < rep.head.clearance_slope_deg < 45
 
 
@@ -201,7 +205,7 @@ def test_every_motion_carries_the_six_axes_and_header_describes_kinematics():
 
 def test_walls_follow_only_the_part_outline_not_internal_region_boundaries():
     from shapely.geometry import box
-    from nonplanar import toolpath as tp
+    from element_aeolis import toolpath as tp
     outline = box(0, 0, 20, 20)
     region = box(0, 0, 12, 20)                  # frontière interne en x = 12 (colonne terminée au-delà)
     path = tp.layer_polylines(region, None, 3, tp.ToolpathParams(), outline)
@@ -248,7 +252,7 @@ def _quiet_throttle(monkeypatch):
 def test_progress_follows_every_stage_with_real_fractions(monkeypatch):
     """Chaque étape s'ouvre à 0, finit à 1 et ne recule jamais ; les étapes qui bouclent sur du travail
     (surface, remplissage, collision, écriture) émettent des fractions INTERMÉDIAIRES, pas un saut."""
-    from nonplanar.slicer import AEOLIS_STEPS
+    from element_aeolis.slicer import AEOLIS_STEPS
     _quiet_throttle(monkeypatch)
     events = []
     slice_mesh(wave_plate(), SliceParams(), progress=lambda slug, f: events.append((slug, f)))
@@ -263,7 +267,7 @@ def test_progress_follows_every_stage_with_real_fractions(monkeypatch):
 
 
 def test_slice_path_opens_import_stage(monkeypatch, tmp_path):
-    from nonplanar.slicer import slice_path
+    from element_aeolis.slicer import slice_path
     _quiet_throttle(monkeypatch)
     wave_plate(n=11).export(tmp_path / "p.stl")
     events = []
@@ -280,7 +284,7 @@ def test_progress_is_silent_without_callback():
 
 
 def test_densify_xy_matches_linspace_construction():
-    from nonplanar.toolpath import densify_xy
+    from element_aeolis.toolpath import densify_xy
     rng = np.random.default_rng(3)
     xy = rng.random((40, 2)) * 25
     ref = [xy[0:1]]
@@ -304,7 +308,7 @@ def test_column_matches_stack_calls():
 
 
 def test_rasterize_matches_triangle_loop():
-    from nonplanar.heightfield import _rasterize
+    from element_aeolis.heightfield import _rasterize
     m = wave_plate(n=15)
     xs = np.linspace(0, 20, 41)
     ys = np.linspace(0, 20, 41)
@@ -328,7 +332,7 @@ def test_rasterize_matches_triangle_loop():
 
 def test_footprint_falls_back_when_top_faces_overlap():
     """L'union « de couverture » exige des triangles qui ne se recouvrent pas ; sinon, union robuste."""
-    from nonplanar.heightfield import _footprint
+    from element_aeolis.heightfield import _footprint
     a = trimesh.creation.box((10, 10, 2))
     b = trimesh.creation.box((10, 10, 2))
     b.apply_translation((5, 0, 0))
@@ -348,7 +352,7 @@ def cavity_box(outer=30.0, inner=20.0, height=12.0, cavity_h=6.0) -> trimesh.Tri
 
 
 def test_cone_minorant_matches_brute_force():
-    from nonplanar.general import cone_minorant
+    from element_aeolis.general import cone_minorant
     rng = np.random.default_rng(3)
     f = np.full((14, 17), np.inf)
     for _ in range(4):
@@ -365,7 +369,7 @@ def test_cone_minorant_matches_brute_force():
 
 
 def test_relief_respects_the_nozzle_limits():
-    from nonplanar.general import build_relief
+    from element_aeolis.general import build_relief
     xs = ys = np.arange(0, 40.001, 0.5)
     X, Y = np.meshgrid(xs, ys)
     top = 10.0 + 3.0 * np.exp(-((X - 20) ** 2 + (Y - 20) ** 2) / 40.0)          # bosse gaussienne
@@ -382,7 +386,7 @@ def test_relief_respects_the_nozzle_limits():
 
 
 def test_relief_vanishes_without_nozzle_slack():
-    from nonplanar.general import build_relief
+    from element_aeolis.general import build_relief
     xs = ys = np.arange(0, 10.001, 0.5)
     top = 5.0 + np.outer(np.linspace(0, 1, len(ys)), np.ones(len(xs)))
     assert np.abs(build_relief(top, xs, ys, 0.0, 2.0, 0.0).d).max() == 0.0     # angle nul : planaire
@@ -390,7 +394,7 @@ def test_relief_vanishes_without_nozzle_slack():
 
 
 def test_section_region_keeps_cavities_as_holes():
-    from nonplanar.general import section_region
+    from element_aeolis.general import section_region
     m = cavity_box()
     z = m.vertices[:, 2]
     r = section_region(m.vertices, m.faces, z - 6.0)         # coupe au milieu de la cavité
@@ -412,7 +416,7 @@ def test_cavity_model_is_sliced_by_default_with_the_general_engine():
 
 
 def test_general_engine_fills_the_part_volume():
-    from nonplanar.toolpath import ToolpathParams
+    from element_aeolis.toolpath import ToolpathParams
     m = cavity_box()
     _, rep = slice_mesh(m, SliceParams(toolpath=ToolpathParams(infill_density=1.0)))
     volume = rep.filament_length * np.pi * (1.75 / 2) ** 2
@@ -453,7 +457,7 @@ def wedge_plate(size=20.0, deg=8.0, base=4.0) -> trimesh.Trimesh:
 
 
 def test_refinement_keeps_the_mesh_watertight_and_the_volume():
-    from nonplanar.general import _refine
+    from element_aeolis.general import _refine
     m = cavity_box()
     v, f = _refine(m.vertices, m.faces, 0.7)
     r = trimesh.Trimesh(v, f, process=False)
@@ -476,7 +480,7 @@ def test_relief_does_not_lose_material():
 def test_general_layers_follow_a_gentle_top_and_stay_inside_the_limits():
     """Plaque à dessus en pente douce (8°) : la pente des couches ne dépasse jamais l'angle de la buse ni leur dénivelé
     sa longueur, et elles épousent le dessus (écart au dessus bien plus petit que sans relief)."""
-    from nonplanar.general import analyze
+    from element_aeolis.general import analyze
     kw = dict(layer_height=None, first_layer=None, min_layer=0.1, max_layer=0.25)
     plan = analyze(wedge_plate(), nozzle_angle_deg=10.0, nozzle_reach=2.0, **kw)
     assert plan.relief.amp > 0.1
@@ -520,7 +524,7 @@ def test_every_extruded_move_carries_a_line_type(engine):
 
 def test_solid_infill_is_marked_apart_from_sparse_infill():
     from shapely.geometry import box
-    from nonplanar import toolpath as tp
+    from element_aeolis import toolpath as tp
     region = box(0, 0, 20, 20)
     path = tp.layer_polylines(region, box(0, 0, 20, 10), 3, tp.ToolpathParams(), region)
     kinds = {pl.kind for pl in path.polylines}

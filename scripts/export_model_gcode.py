@@ -7,7 +7,7 @@ Controles avant d'ecrire : refus d'un fichier dont la pointe passe sous le
 plateau (`strict`) et collisions de la VRAIE tete (step9 rapide) ; les collisions
 sont comptees et affichees, pas corrigees (c'est le role de step10).
 
-Usage : APEX_USE_CPP=1 .venv/Scripts/python.exe -u scripts/export_model_gcode.py <modele.stl>
+Usage : .venv/Scripts/python.exe -u scripts/export_model_gcode.py <modele.stl> [--native]
         [--out=out/<nom>.gcode] [--resolution=0.8] [--b-sign=1] [--pivot-to-tip=<mm>]
 L (pivot -> pointe) : derniere valeur de config/pivot_to_tip.json (file_io/pivot_length.py),
 sinon 46 mm. A regenerer apres tout changement de L.
@@ -21,10 +21,16 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
+from core import runtime  # noqa: E402
+
+if "--native" in sys.argv:          # option explicite (R-030 point 3) : plus de variable d'environnement
+    sys.argv.remove("--native")
+    runtime.replace_options(native=True)
+
 from file_io.gcode_export import GcodeParams, export_gcode, head_zlow_from_table, toolpath_arrays  # noqa: E402
 from file_io.pivot_length import current_pivot_to_tip  # noqa: E402
 from main import PipelineParams  # noqa: E402
-from pipeline import step9_collision_sim as s9  # noqa: E402
+from element_ardor import step9_collision_sim as s9  # noqa: E402
 from scripts.export_slicing_preview import run_slicing_only  # noqa: E402
 
 

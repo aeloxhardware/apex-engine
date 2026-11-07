@@ -222,7 +222,7 @@ Personne ne sera disponible. Tout s'enchaîne sans attendre de validation :
   - `file_io/gcode_export.py` (nouveau) ;
   - `tests/test_gcode_export.py` (nouveau) ;
   - `scripts/preview_gcode_file.py` (nouveau) ;
-  - `pipeline/step9_collision_sim.py` (T7) ;
+  - `element_ardor/step9_collision_sim.py` (T7) ;
   - `main._default_machine_profile`.
 
 ## Vérification d'ensemble

@@ -5,19 +5,19 @@ from test_cpp_equivalence import restore_switch  # noqa: F401  (fixtures)
 
 import numpy as np
 import pytest
-from core import _cpp
+from core import _cpp, runtime
 import trimesh
 import trimesh.ray.ray_triangle
-from pipeline._self_intersection_resolve import _intersection_segments as _py_intersection_segments
-from pipeline._self_intersection_resolve import generalized_winding_number as _py_generalized_winding_number
-from pipeline._self_intersection_resolve import triangle_triangle_segment as _py_triangle_triangle_segment
-from pipeline.step6_toolpath2d import _interpolate_out_of_plane as _py_interpolate_out_of_plane
+from element_ardor._self_intersection_resolve import _intersection_segments as _py_intersection_segments
+from element_ardor._self_intersection_resolve import generalized_winding_number as _py_generalized_winding_number
+from element_ardor._self_intersection_resolve import triangle_triangle_segment as _py_triangle_triangle_segment
+from element_ardor.step6_toolpath2d import _interpolate_out_of_plane as _py_interpolate_out_of_plane
 from test_cpp_equivalence import (  # noqa: F401
     pytestmark,
 )
 
 
-_SEGMENT_TOLERANCE = 1e-9  # voir _NATIVE_SEGMENT_TOLERANCE, pipeline/_self_intersection_resolve.py
+_SEGMENT_TOLERANCE = 1e-9  # voir _NATIVE_SEGMENT_TOLERANCE, element_ardor/_self_intersection_resolve.py
 
 
 def test_triangle_triangle_segment_matches_python_random_pairs(restore_switch):
@@ -145,7 +145,7 @@ def test_resolve_self_intersections_agrees_within_documented_tolerance(restore_s
     ici que l'ecart mesure reste dans l'ordre de grandeur observe (volume
     relatif < 1e-3), pas une exactitude bit-a-bit.
     """
-    from pipeline._self_intersection_resolve import resolve_self_intersections
+    from element_ardor._self_intersection_resolve import resolve_self_intersections
 
     mesh = _self_intersecting_turkish_style_mesh()
 
@@ -272,7 +272,7 @@ def _random_tet_field(seed: int, n: int = 600):
 
 def _python_extract(pts, tets, values, iso, tol):
     from core.mesh_types import TetMesh
-    from pipeline.step5_layers import _extract_isosurface_triangles, _weld_vertices
+    from element_ardor.step5_layers import _extract_isosurface_triangles, _weld_vertices
     tm = TetMesh(tet_vertices=pts, tetrahedra=tets, tet_adjacency=None)
     per = values[tets]
     v, f, src = _extract_isosurface_triangles(tm, values, iso, per.min(axis=1), per.max(axis=1))
@@ -322,7 +322,7 @@ def test_isosurface_extractor_empty_and_validation():
 def _outline_python(vertices, faces):
     previous = _cpp.set_enabled(False)
     try:
-        from pipeline.step5_layers import _extract_closed_contours
+        from element_ardor.step5_layers import _extract_closed_contours
         return _extract_closed_contours(vertices, faces)
     finally:
         _cpp.set_enabled(previous)
@@ -332,7 +332,7 @@ def test_boundary_loops_match_trimesh_outline(restore_switch):
     core = _cpp.module()
     if not hasattr(core, "boundary_loops") or not hasattr(core, "IsosurfaceExtractor"):
         pytest.skip("module natif anterieur au pas 14")
-    import pipeline.step5_layers as s5
+    import element_ardor.step5_layers as s5
     loops_seen = native_used = 0
     for seed in range(6):
         pts, tets, values = _random_tet_field(seed, 800)
@@ -341,9 +341,9 @@ def test_boundary_loops_match_trimesh_outline(restore_switch):
             v, f, _ = ex.extract(float(iso), 1e-6)
             expected = _outline_python(v, f)
             _cpp.set_enabled(True)
-            before = s5._NATIVE_OUTLINE_FALLBACKS
+            before = runtime.state().outline_fallbacks
             got = s5._extract_closed_contours(v, f)
-            native_used += int(s5._NATIVE_OUTLINE_FALLBACKS == before)
+            native_used += int(runtime.state().outline_fallbacks == before)
             assert len(got) == len(expected)
             for a, b in zip(got, expected):
                 assert np.array_equal(a, b)
@@ -365,7 +365,7 @@ def test_boundary_loops_fall_back_on_non_manifold_border():
 
 
 def test_coupled_ik_native_matches_python(restore_switch):
-    import pipeline.step8_machine_toolpath as s8
+    import element_ardor.step8_machine_toolpath as s8
     from core.mesh_types import MachineProfile, RotationAxisSpec
     machine = MachineProfile(
         rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),

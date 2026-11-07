@@ -1,10 +1,10 @@
 """
 Profil cProfile du pipeline step1->step8 sur un modele, trie par temps propre,
 avec un recapitulatif par etape (temps cumule des fonctions `run` de chaque
-pipeline/stepN_*.py). Sert a choisir le prochain pas du portage C++ sur une
+element_ardor/stepN_*.py). Sert a choisir le prochain pas du portage C++ sur une
 MESURE, jamais sur une supposition (limite #56).
 
-Usage : APEX_USE_CPP=1 .venv/Scripts/python.exe -u scripts/profile_pipeline.py <modele.stl>
+Usage : .venv/Scripts/python.exe -u scripts/profile_pipeline.py <modele.stl> [--native]
         [--resolution=0.8] [--top=40] [--out=out/profile.prof]
 """
 import cProfile
@@ -15,6 +15,12 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
+
+from core import runtime  # noqa: E402
+
+if "--native" in sys.argv:          # option explicite (R-030 point 3) : plus de variable d'environnement
+    sys.argv.remove("--native")
+    runtime.replace_options(native=True)
 
 from main import PipelineParams  # noqa: E402
 from scripts.export_slicing_preview import run_slicing_only  # noqa: E402

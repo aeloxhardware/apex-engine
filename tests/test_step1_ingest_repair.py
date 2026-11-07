@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import tempfile
 import numpy as np
 import pytest
 import trimesh
-from pipeline.step1_ingest import _clean_and_repair, run as ingest_run
+from core import runtime
+from element_ardor.step1_ingest import _clean_and_repair, run as ingest_run
 from test_step1_ingest import (  # noqa: F401
     _l_shape_mesh,
     _tet_volumes,
@@ -154,7 +156,7 @@ def test_repair_with_pymeshfix_closes_holes_standard_repair_misses():
     watertight sur un defaut synthetique, independamment de tout appelant.
     """
     pytest.importorskip("pymeshfix")
-    from pipeline.step1_ingest import _repair_with_pymeshfix
+    from element_ardor.step1_ingest import _repair_with_pymeshfix
 
     box = trimesh.creation.box(extents=[10, 10, 10])
     faces = np.delete(box.faces, [0, 1], axis=0)  # trou simple (un quad)
@@ -177,7 +179,7 @@ def test_clean_and_repair_falls_back_to_pymeshfix_when_standard_repair_fails(mon
     ressortir watertight de `_clean_and_repair` grace au repli pymeshfix.
     """
     pytest.importorskip("pymeshfix")
-    import pipeline.step1_ingest as step1
+    import element_ardor.step1_ingest as step1
 
     monkeypatch.setattr(trimesh.repair, "fill_holes", lambda mesh: None)
 
@@ -266,7 +268,7 @@ def test_extract_dominant_shell_keeps_main_body_drops_negligible_fragments():
     doit retourner CETTE coque seule, avec le bon nombre de fragments
     ecartes - jamais une perte de la geometrie principale.
     """
-    from pipeline.step1_ingest import _extract_dominant_shell
+    from element_ardor.step1_ingest import _extract_dominant_shell
 
     mesh = _mesh_with_negligible_attached_fragments()
 
@@ -285,7 +287,7 @@ def test_extract_dominant_shell_returns_none_when_no_clear_dominance():
     (None, 0) plutot que de choisir arbitrairement - jamais de perte
     silencieuse de geometrie legitime multi-corps.
     """
-    from pipeline.step1_ingest import _extract_dominant_shell
+    from element_ardor.step1_ingest import _extract_dominant_shell
 
     box_a = trimesh.creation.box(extents=[10, 10, 10])
     box_b = trimesh.creation.box(extents=[10, 10, 10])
@@ -304,21 +306,21 @@ def test_extract_dominant_shell_returns_none_when_no_clear_dominance():
 
 
 def test_is_recoverable_tetgen_error_matches_self_intersection():
-    from pipeline.step1_ingest import _is_recoverable_tetgen_error
+    from element_ardor.step1_ingest import _is_recoverable_tetgen_error
 
     exc = RuntimeError("The input surface mesh contain self-intersections")
     assert _is_recoverable_tetgen_error(exc)
 
 
 def test_is_recoverable_tetgen_error_matches_recoversubfaces():
-    from pipeline.step1_ingest import _is_recoverable_tetgen_error
+    from element_ardor.step1_ingest import _is_recoverable_tetgen_error
 
     exc = RuntimeError("Internal TetGen error within `recoversubfaces`.")
     assert _is_recoverable_tetgen_error(exc)
 
 
 def test_is_recoverable_tetgen_error_rejects_unrelated_error():
-    from pipeline.step1_ingest import _is_recoverable_tetgen_error
+    from element_ardor.step1_ingest import _is_recoverable_tetgen_error
 
     exc = RuntimeError("some unrelated structural error, not TetGen's fault")
     assert not _is_recoverable_tetgen_error(exc)
@@ -368,7 +370,7 @@ def test_tetrahedralize_cascade_rejects_collapsed_pymeshfix_repair(monkeypatch):
     verifie que le TetMesh produit couvre la VRAIE etendue de la boite,
     jamais celle du faux resultat pymeshfix tronque.
     """
-    import pipeline.step1_ingest as step1
+    import element_ardor.step1_ingest as step1
 
     # icosphere plutot qu'une boite simple : une boite a toujours 12 faces
     # quelle que soit sa taille, insuffisant pour simuler un EFFONDREMENT
@@ -403,7 +405,7 @@ def test_tetrahedralize_cascade_rejects_collapsed_pymeshfix_repair(monkeypatch):
 
 def test_min_enclosing_circle_exact_on_known_shapes():
     import numpy as np
-    from pipeline.step1_ingest import _min_enclosing_circle
+    from element_ardor.step1_ingest import _min_enclosing_circle
     square = np.array([[0, 0], [2, 0], [2, 2], [0, 2], [1, 1]], dtype=float)
     c, r = _min_enclosing_circle(square)
     assert np.allclose(c, [1, 1]) and abs(r - np.sqrt(2)) < 1e-12
@@ -419,7 +421,7 @@ def test_min_enclosing_circle_exact_on_known_shapes():
 def test_check_fits_platform_is_placement_independent():
     import numpy as np
     import pytest
-    from pipeline.step1_ingest import ModelTooLargeError, check_fits_platform
+    from element_ardor.step1_ingest import ModelTooLargeError, check_fits_platform
     # rectangle 200 x 200 : diagonale 282,8 -> rayon 141,4 < 150, tient
     box = np.array([[x, y, z] for x in (0, 200) for y in (0, 200) for z in (0, 50)], dtype=float) + 500.0
     assert abs(check_fits_platform(box, 150.0) - np.hypot(100, 100)) < 1e-9
@@ -438,7 +440,7 @@ def test_speculative_tetgen_uses_parallel_attempt_only_when_probe_left_mesh_inta
     retenue que si la sonde a laisse le maillage INTACT ; sinon elle est
     ignoree et la tentative reelle porte sur le maillage repare."""
     import trimesh
-    import pipeline.step1_ingest as s1
+    import element_ardor.step1_ingest as s1
     mesh = trimesh.creation.box(extents=[4, 4, 4])
     resolved = trimesh.creation.box(extents=[4, 4, 4.0001])
     repaired = trimesh.creation.box(extents=[4, 4, 4.0002])
@@ -470,7 +472,7 @@ def test_speculative_tetgen_uses_parallel_attempt_only_when_probe_left_mesh_inta
     assert out == ("tets", id(repaired), 0.5)
 
     # 3) interrupteur coupe : comportement serie historique, meme resultat
-    monkeypatch.setattr(s1, "_SPECULATIVE_TETGEN", False)
+    monkeypatch.setattr(runtime.state(), "options", dataclasses.replace(runtime.options(), speculative_tetgen=False))
     monkeypatch.setattr(s1, "_finish_geometric_resolution", lambda r, res: (r, None))
     calls.clear()
     assert s1._tetrahedralize(mesh, 1.0, near_platform_resolution=0.5) == ("tets", id(resolved), 0.5)
@@ -481,7 +483,7 @@ def test_probe_tet_mesh_reused_for_no_refinement_attempt(monkeypatch):
     tentative « sans raffinement plateau » sur le meme maillage le reutilise
     au lieu de refaire le meme calcul (turkish.stl : 7,26 s)."""
     import trimesh
-    import pipeline.step1_ingest as s1
+    import element_ardor.step1_ingest as s1
     mesh = trimesh.creation.box(extents=[4, 4, 4])
     repaired = trimesh.creation.box(extents=[4, 4, 4.0002])
     calls = []
@@ -506,7 +508,7 @@ def test_translation_retry_recovers_and_moves_nodes_back(monkeypatch):
     rejouee sur le maillage recentre en memoire, et les noeuds sont ramenes a leur place."""
     import trimesh as _tm
     from core.mesh_types import TetMesh as _TetMesh
-    from pipeline import step1_ingest as s1
+    from element_ardor import step1_ingest as s1
 
     mesh = _tm.creation.box(extents=(10.0, 10.0, 10.0))
     mesh.apply_translation([120.0, 80.0, 5.0])
@@ -534,7 +536,7 @@ def test_translation_retry_recovers_and_moves_nodes_back(monkeypatch):
 
 def test_multi_mesh_scene_keeps_node_transforms(tmp_path):
     """Les transformations de nœud d'une scene (placement d'un 3MF/GLB) ne sont pas perdues."""
-    from pipeline.step1_ingest import _load_raw_mesh
+    from element_ardor.step1_ingest import _load_raw_mesh
     scene = trimesh.Scene()
     scene.add_geometry(trimesh.creation.box((10, 10, 10)), node_name="a")
     scene.add_geometry(trimesh.creation.box((5, 5, 5)), node_name="b",
@@ -547,7 +549,7 @@ def test_multi_mesh_scene_keeps_node_transforms(tmp_path):
 
 def test_small_real_piece_next_to_large_one_is_not_dropped():
     """Une petite piece a volume positif n'est jamais prise pour un fragment (`_extract_dominant_shell`)."""
-    from pipeline.step1_ingest import _extract_dominant_shell
+    from element_ardor.step1_ingest import _extract_dominant_shell
     big = trimesh.creation.box((40, 40, 40))
     small = trimesh.creation.box((6, 6, 6))
     small.apply_translation([60, 0, 0])
@@ -557,7 +559,7 @@ def test_small_real_piece_next_to_large_one_is_not_dropped():
 
 def test_inverted_fragment_next_to_large_body_is_still_dropped():
     """Le cas de turkish.stl est conserve : fragment a volume signe negatif (normales inversees)."""
-    from pipeline.step1_ingest import _extract_dominant_shell
+    from element_ardor.step1_ingest import _extract_dominant_shell
     big = trimesh.creation.box((40, 40, 40))
     frag = trimesh.creation.box((1, 1, 1))
     frag.invert()
@@ -568,7 +570,7 @@ def test_inverted_fragment_next_to_large_body_is_still_dropped():
 
 def test_surface_inconsistent_diagnostic_carries_numbers_for_translation(monkeypatch):
     """R-016 : le diagnostic porte aussi `self_intersections` et `volume_pct` (texte reconstructible)."""
-    from pipeline import step1_ingest as s1
+    from element_ardor import step1_ingest as s1
     box = trimesh.creation.box((10, 10, 10))
     fake = {"status": s1.TETRANET_STATUS_INCONSISTENT_SURFACE, "tets": 0, "volume_ratio": 0.42, "sign_conflicts": 1234,
             "surface_holes": 3, "surface_flipped_edges": 9, "surface_nonmanifold_edges": 0,

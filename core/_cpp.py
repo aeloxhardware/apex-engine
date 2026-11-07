@@ -9,7 +9,7 @@ dans le meme processus et comparer leurs sorties.
 
 Deux principes non negociables :
 
-1. **Le Python reste la valeur par defaut.** `APEX_USE_CPP` doit etre positionne
+1. **Le Python reste la valeur par defaut.** `RuntimeOptions.native` (core/runtime.py) doit etre positionne
    explicitement pour activer le natif. Un portage ne s'active jamais tout seul
    avant d'avoir ete mesure — meme discipline que tous les mecanismes opt-in du
    projet (`support_driven_order`, `anchor_growth_weight`, ...).
@@ -28,6 +28,8 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Optional
+
+from core import runtime
 
 _LIB_DIR = Path(__file__).resolve().parent.parent / "cpp" / "lib"
 # Surcharge (ex. cpp/build_dev/lib, voir scripts/build_cpp.py --dev) : permet de
@@ -51,14 +53,6 @@ except ImportError as exc:  # pragma: no cover - depend de la presence du build
     _load_error = str(exc)
 
 
-# Surcharge explicite, prioritaire sur la variable d'environnement.
-# `None` = suivre l'environnement. Utilise par les tests d'equivalence, qui
-# doivent exercer les DEUX chemins dans un meme processus.
-_forced: Optional[bool] = None
-
-_TRUE_VALUES = {"1", "true", "yes", "on"}
-
-
 def available() -> bool:
     """Le module natif est-il compile et importable ?"""
     return _module is not None
@@ -70,32 +64,22 @@ def load_error() -> Optional[str]:
 
 
 def enabled() -> bool:
-    """Faut-il emprunter le chemin C++ ? Faux tant que rien n'est compile."""
-    if _module is None:
-        return False
-    if _forced is not None:
-        return _forced
-    return os.environ.get("APEX_USE_CPP", "").strip().lower() in _TRUE_VALUES
+    """Faut-il emprunter le chemin C++ ? Faux tant que rien n'est compile ou que `RuntimeOptions.native`
+    n'est pas demande (core/runtime.py)."""
+    return _module is not None and runtime.options().native
 
 
 def set_enabled(value: Optional[bool]) -> Optional[bool]:
     """
-    Force (`True`/`False`) ou libere (`None`) le choix d'implementation.
-
-    Retourne l'ancienne valeur, pour que l'appelant puisse la restaurer —
-    indispensable dans un test, qui ne doit pas laisser fuiter son reglage.
+    Force le choix d'implementation du run courant (`None` = Python) ; rend l'ancienne valeur, pour que
+    l'appelant puisse la restaurer — indispensable dans un test, qui ne doit pas laisser fuiter son reglage.
     """
-    global _forced
-    previous = _forced
-    _forced = value
-    return previous
+    return runtime.replace_options(native=bool(value)).native
 
 
 # --- Backend GPU (Vulkan), phase 1 du plan « portage C++, puis Vulkan » ---
-# Meme discipline que le natif : DESACTIVE par defaut (`APEX_USE_GPU`), jamais
-# une erreur s'il manque (module construit sans Vulkan, pas de pilote, pas de
-# GPU) : `gpu_status()` dit pourquoi, et chaque site d'appel retombe sur le CPU.
-_gpu_forced: Optional[bool] = None
+# DESACTIVE par defaut (`RuntimeOptions.gpu`), jamais une erreur s'il manque (module construit sans Vulkan,
+# pas de pilote, pas de GPU) : `gpu_status()` dit pourquoi, et chaque site d'appel retombe sur le CPU.
 
 
 def gpu_status() -> dict:
@@ -112,17 +96,12 @@ def gpu_enabled() -> bool:
     """Faut-il emprunter le chemin GPU ? Exige le natif actif ET un GPU utilisable."""
     if not enabled():
         return False
-    wanted = _gpu_forced if _gpu_forced is not None else (
-        os.environ.get("APEX_USE_GPU", "").strip().lower() in _TRUE_VALUES)
-    return bool(wanted) and bool(gpu_status().get("ok"))
+    return runtime.options().gpu and bool(gpu_status().get("ok"))
 
 
 def set_gpu_enabled(value: Optional[bool]) -> Optional[bool]:
-    """Force ou libere le choix GPU (tests) ; rend l'ancienne valeur."""
-    global _gpu_forced
-    previous = _gpu_forced
-    _gpu_forced = value
-    return previous
+    """Force le choix GPU du run courant (tests) ; rend l'ancienne valeur."""
+    return runtime.replace_options(gpu=bool(value)).gpu
 
 
 #: Modes de requete de `apex_core.PrintedGrid` — voir cpp/include/apex/printed_index.hpp.
@@ -132,7 +111,7 @@ GRID_MODE_STAMPED = 1
 
 def grid_mode() -> int:
     """
-    Mode de requete de l'index spatial natif, via `APEX_CPP_GRID_MODE`.
+    Mode de requete de l'index spatial natif (`RuntimeOptions.grid_mode`).
 
     `faithful` transcrit exactement la structure Python (un ensemble de
     hachage par requete) ; `stamped` (defaut) dedoublonne par estampilles.
@@ -140,9 +119,7 @@ def grid_mode() -> int:
     et celui de la correction algorithmique — un seul chiffre global ne
     permettrait pas de savoir lequel des deux a porte le resultat.
     """
-    if os.environ.get("APEX_CPP_GRID_MODE", "").strip().lower() == "faithful":
-        return GRID_MODE_FAITHFUL
-    return GRID_MODE_STAMPED
+    return GRID_MODE_FAITHFUL if runtime.options().grid_mode == "faithful" else GRID_MODE_STAMPED
 
 
 def module() -> Any:

@@ -6,7 +6,7 @@ from test_cpp_equivalence import restore_switch  # noqa: F401  (fixtures)
 import dataclasses
 import numpy as np
 import pytest
-from core import _cpp
+from core import _cpp, runtime
 import trimesh
 import trimesh.ray.ray_triangle
 from test_cpp_equivalence import (  # noqa: F401
@@ -38,7 +38,7 @@ def test_fill_region_native_matches_shapely(restore_switch):
     if not hasattr(core, "fill_region"):
         pytest.skip("module natif anterieur au pas 15")
     from shapely.geometry import Polygon
-    from pipeline import step6_toolpath2d as s6
+    from element_ardor import step6_toolpath2d as s6
 
     def length(polys):
         return sum(float(np.linalg.norm(np.diff(p, axis=0), axis=1).sum()) for p in polys)
@@ -91,8 +91,8 @@ def test_overhang_map_native_matches_python(restore_switch, shape):
     import os
     import tempfile
     import trimesh
-    from pipeline import step2_overhang as s2
-    from pipeline.step1_ingest import run as ingest_run
+    from element_ardor import step2_overhang as s2
+    from element_ardor.step1_ingest import run as ingest_run
 
     if shape == "hollow":
         mesh = trimesh.creation.box(extents=[10, 10, 10]).difference(
@@ -145,8 +145,8 @@ def test_segmentation_native_matches_python(restore_switch, merge):
     import tempfile
     from dataclasses import replace
     import trimesh
-    from pipeline import step2_overhang as s2, step3_segmentation as s3
-    from pipeline.step1_ingest import run as ingest_run
+    from element_ardor import step2_overhang as s2, step3_segmentation as s3
+    from element_ardor.step1_ingest import run as ingest_run
 
     # T couche + bras pendant : plusieurs regions et dependances
     v = trimesh.creation.box(extents=[4, 4, 20]); v.apply_translation([0, 0, 10])
@@ -190,11 +190,11 @@ def test_schedule_native_matches_python(restore_switch, case):
     if not hasattr(core, "schedule_layers"):
         pytest.skip("module natif anterieur au pas 21c")
     import trimesh
-    from pipeline import step7_scheduling as s7
+    from element_ardor import step7_scheduling as s7
     from tests.test_step7_scheduling import (
         _lateral_color_map, _pipeline_through_step6, _two_tone_color_map,
     )
-    from pipeline import step6_toolpath2d as s6
+    from element_ardor import step6_toolpath2d as s6
     _cpp.set_enabled(True)       # fixtures (kd-tree natif, etc.) construites noyau actif, quel que soit l'environnement
     mesh = trimesh.creation.box(extents=[10, 10, 10]).subdivide().subdivide()
     # Couches de reference par shapely : avec le remplissage natif (Clipper2, arrondi a 1e-6),
@@ -257,7 +257,7 @@ def test_past_material_batch_matches_single_calls():
 @pytest.mark.parametrize("project", [False, True])
 def test_heat_method_matches_python(solver, project, restore_switch):
     import dataclasses
-    from pipeline.step4_field_solver import (
+    from element_ardor.step4_field_solver import (
         FieldSolverParams, _compute_shape_gradients, _heat_method_distance,
     )
 
@@ -300,8 +300,8 @@ def test_gcode_header_footer_match_python_text(pivot, retract, speed, temp):
 def test_reorient_coupled_tiers_native_matches_python(restore_switch):
     import trimesh
     from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
-    from pipeline.step9_collision_sim import CollisionSimParams
-    from pipeline.step10_adjustment import reorient_coupled_tiers
+    from element_ardor.step9_collision_sim import CollisionSimParams
+    from element_ardor.step10_adjustment import reorient_coupled_tiers
 
     rod = trimesh.creation.box(extents=[1.0, 1.0, 20.0])
     rod.apply_translation([0.0, 0.0, 10.0])
@@ -337,8 +337,8 @@ def test_reorient_coupled_tiers_native_matches_python(restore_switch):
 def test_clamp_head_height_native_matches_python(restore_switch):
     from tests.test_step10_adjustment import _clamp_machine
     from core.mesh_types import ToolpathMachine, ToolpathPoint
-    from pipeline.step9_collision_sim import CollisionSimParams
-    from pipeline.step10_adjustment import clamp_head_height
+    from element_ardor.step9_collision_sim import CollisionSimParams
+    from element_ardor.step10_adjustment import clamp_head_height
 
     machine = _clamp_machine()
     sim = CollisionSimParams(path_sampling_step=1.0, safety_margin=1.0, nozzle_contact_clearance=0.0)
@@ -359,8 +359,8 @@ def test_clamp_head_height_native_matches_python(restore_switch):
 def test_step10_run_native_matches_python_on_coupled_machine(restore_switch):
     import trimesh
     from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
-    from pipeline import step9_collision_sim as s9
-    from pipeline.step10_adjustment import Step10Params, run as step10_run
+    from element_ardor import step9_collision_sim as s9
+    from element_ardor.step10_adjustment import Step10Params, run as step10_run
 
     head = trimesh.creation.box(extents=[6, 6, 20])
     head.apply_translation([0, 0, 13])
@@ -394,7 +394,7 @@ def test_step10_run_native_matches_python_on_coupled_machine(restore_switch):
 
 
 def test_stable_topological_order_matches_python_with_cycles(restore_switch):
-    from pipeline.step5b_collision_order import _stable_topological_order
+    from element_ardor.step5b_collision_order import _stable_topological_order
 
     rng = np.random.default_rng(3)
     for n, m in [(30, 40), (60, 400), (200, 3000)]:       # le dernier est dense : cycles garantis
@@ -409,8 +409,8 @@ def test_stable_topological_order_matches_python_with_cycles(restore_switch):
 
 def test_step5_default_layers_native_match_python(restore_switch):
     from core.mesh_types import ScalarField
-    from pipeline.step4_field_solver import _compute_shape_gradients, _compute_per_tet_gradient
-    from pipeline.step5_layers import LayerParams, run as layers_run
+    from element_ardor.step4_field_solver import _compute_shape_gradients, _compute_per_tet_gradient
+    from element_ardor.step5_layers import LayerParams, run as layers_run
 
     mesh_data, tet_mesh, _overhang, regions = _step4_inputs(resolution=2.0)
     shape_gradients, _volumes = _compute_shape_gradients(tet_mesh)
@@ -436,7 +436,7 @@ def test_step5_default_layers_native_match_python(restore_switch):
 def test_step8_median_filter_and_per_point_normals_match_python(restore_switch):
     from types import SimpleNamespace
     from core.mesh_types import MachineProfile, RotationAxisSpec
-    from pipeline import step8_machine_toolpath as s8
+    from element_ardor import step8_machine_toolpath as s8
 
     rng = np.random.default_rng(11)
     n = 400
@@ -480,7 +480,7 @@ def test_step8_median_filter_and_per_point_normals_match_python(restore_switch):
 @pytest.mark.parametrize("columns", [2, 3])
 def test_step8_raw_points_native_identical_to_python(columns, restore_switch):
     from core.mesh_types import Layer, PrintPass, PrintSchedule
-    from pipeline import step8_machine_toolpath as s8
+    from element_ardor import step8_machine_toolpath as s8
 
     rng = np.random.default_rng(5)
     layers = []
@@ -519,9 +519,9 @@ def test_step6_native_layers_match_per_layer_path(restore_switch):
     (a l'ULP de la projection BLAS pres). Avec ponts : le chemin couche par couche passe par shapely
     pour eux, le natif par Clipper2 -> meme longueur par couche, decoupage different."""
     from dataclasses import replace
-    from pipeline import step6_toolpath2d as s6
-    from pipeline.step4_field_solver import FieldSolverParams, run as field_run
-    from pipeline.step5_layers import LayerParams, run as layers_run
+    from element_ardor import step6_toolpath2d as s6
+    from element_ardor.step4_field_solver import FieldSolverParams, run as field_run
+    from element_ardor.step5_layers import LayerParams, run as layers_run
 
     _cpp.set_enabled(True)       # le kd-tree de mesh_data doit etre natif pour le chemin par couches entieres
     mesh_data, tet_mesh, overhang, regions = _step4_inputs(resolution=2.0)
@@ -558,14 +558,15 @@ def test_step6_native_layers_match_per_layer_path(restore_switch):
 def test_fast_batch_events_match_python_checker(restore_switch):
     import trimesh
     from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
-    from pipeline import step9_collision_sim as s9
+    from element_ardor import step9_collision_sim as s9
 
     head = trimesh.creation.box(extents=[6, 6, 20])
     head.apply_translation([0, 0, 13])
     machine = MachineProfile(
         rotation_axes=[RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
                        RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))],
-        platform_origin=np.array([0.0, 0.0, -0.3]), nozzle_model=head, nozzle_diameter=0.4)
+        platform_origin=np.array([0.0, 0.0, -0.3]), nozzle_model=head, nozzle_diameter=0.4,
+        platform_radius=150.0, platform_thickness=1.0)
     rng = np.random.default_rng(2)
     pts = []
     for k in range(60):
@@ -597,7 +598,7 @@ def test_native_tetgen_worker_matches_binding():
     import numpy as np
     import trimesh
 
-    from pipeline import step1_ingest as s1
+    from element_ardor import step1_ingest as s1
 
     if s1._native_tetgen_worker_path() is None:
         pytest.skip("apex_tetgen_worker non construit")
@@ -622,7 +623,7 @@ def test_native_grid_fallback_matches_python_grid_search(restore_switch, monkeyp
     43 repli sur 43 pour +Z, 0 sur 43 pour -Z. Les points -Z servent donc de controle : ils ne doivent
     PAS se replier. `Step8Params.native_grid_fallback=False` rend le repli Python, point par point.
     """
-    import pipeline.step8_machine_toolpath as step8
+    import element_ardor.step8_machine_toolpath as step8
 
     raw_points, axes, reference, origin, params = _ik_fixture(_current_machine_axes(), seed=303, count=300)
     plus_z = 0
@@ -633,9 +634,9 @@ def test_native_grid_fallback_matches_python_grid_search(restore_switch, monkeyp
     _cpp.set_enabled(True)
     python_grid = step8._resolve_all_axis_angles(
         raw_points, axes, reference, origin, dataclasses.replace(params, native_grid_fallback=False))
-    python_count = step8._LAST_NATIVE_FALLBACK_COUNT
+    python_count = runtime.state().native_fallbacks
     native_grid = step8._resolve_all_axis_angles(raw_points, axes, reference, origin, params)
-    native_count = step8._LAST_NATIVE_FALLBACK_COUNT
+    native_count = runtime.state().native_fallbacks
 
     # garde anti-faux-vert : exactement les points +Z se replient (et le repli est bien exerce)
     assert plus_z >= 20 and python_count == plus_z and native_count == python_count, (plus_z, python_count, native_count)
@@ -645,7 +646,7 @@ def test_native_grid_fallback_matches_python_grid_search(restore_switch, monkeyp
 def test_native_grid_fallback_with_three_axes(restore_switch, monkeypatch):
     """Meme controle sur une cinematique a TROIS axes (le repli doit rester generique en N)."""
     from core.mesh_types import RotationAxisSpec
-    import pipeline.step8_machine_toolpath as step8
+    import element_ardor.step8_machine_toolpath as step8
 
     axes = _current_machine_axes() + [RotationAxisSpec(axis=np.array([0.0, 1.0, 0.0]), angle_range_deg=(-30.0, 30.0))]
     raw_points, _axes, reference, origin, params = _ik_fixture(axes, seed=404, count=200)

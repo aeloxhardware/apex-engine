@@ -1,5 +1,5 @@
 warning: in the working copy of 'core/constraints.py', LF will be replaced by CRLF the next time Git touches it
-warning: in the working copy of 'pipeline/step7_scheduling.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'element_ardor/step7_scheduling.py', LF will be replaced by CRLF the next time Git touches it
 warning: in the working copy of 'tests/test_step4_field_solver.py', LF will be replaced by CRLF the next time Git touches it
 warning: in the working copy of 'core/spatial.py', LF will be replaced by CRLF the next time Git touches it
 warning: in the working copy of 'cpp/include/apex/bvh.hpp', LF will be replaced by CRLF the next time Git touches it
@@ -699,11 +699,11 @@ A  cpp/third_party/eigen/Eigen/src/plugins/IndexedViewMethods.h
 A  cpp/third_party/eigen/Eigen/src/plugins/MatrixCwiseBinaryOps.h
 A  cpp/third_party/eigen/Eigen/src/plugins/MatrixCwiseUnaryOps.h
 A  cpp/third_party/eigen/Eigen/src/plugins/ReshapedMethods.h
-M  pipeline/step1_ingest.py
-M  pipeline/step3_segmentation.py
-M  pipeline/step4_field_solver.py
-M  pipeline/step5_layers.py
-M  pipeline/step7_scheduling.py
+M  element_ardor/step1_ingest.py
+M  element_ardor/step3_segmentation.py
+M  element_ardor/step4_field_solver.py
+M  element_ardor/step5_layers.py
+M  element_ardor/step7_scheduling.py
 M  tests/test_cpp_equivalence.py
 M  tests/test_step4_field_solver.py
 ?? out/

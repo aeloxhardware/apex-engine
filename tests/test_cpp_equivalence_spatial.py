@@ -9,8 +9,8 @@ from core import _cpp
 import trimesh
 import trimesh.ray.ray_triangle
 from core.spatial import RayIntersector as _WrappedRayIntersector
-from pipeline.step1_ingest import _find_self_intersecting_faces as _py_find_self_intersecting_faces
-from pipeline.step1_ingest import _triangles_cross as _py_triangles_cross
+from element_ardor.step1_ingest import _find_self_intersecting_faces as _py_find_self_intersecting_faces
+from element_ardor.step1_ingest import _triangles_cross as _py_triangles_cross
 from test_cpp_equivalence import (  # noqa: F401
     pytestmark,
 )
@@ -260,9 +260,9 @@ def _step4_inputs(resolution: float = 3.0):
 
     import trimesh
 
-    from pipeline.step1_ingest import run as ingest_run
-    from pipeline.step2_overhang import OverhangParams, run as overhang_run
-    from pipeline.step3_segmentation import SegmentationParams, run as segmentation_run
+    from element_ardor.step1_ingest import run as ingest_run
+    from element_ardor.step2_overhang import OverhangParams, run as overhang_run
+    from element_ardor.step3_segmentation import SegmentationParams, run as segmentation_run
 
     vertical = trimesh.creation.box(extents=[6, 6, 24])
     vertical.apply_translation([0, 0, 12])
@@ -290,7 +290,7 @@ def test_shape_gradients_match_numpy_to_machine_precision(restore_switch):
     gradients atteignent des magnitudes de plusieurs milliers sur un maillage
     fin, et un seuil absolu y serait ininterpretable.
     """
-    from pipeline.step4_field_solver import _compute_shape_gradients
+    from element_ardor.step4_field_solver import _compute_shape_gradients
 
     _mesh_data, tet_mesh, _overhang, _regions = _step4_inputs()
 
@@ -319,7 +319,7 @@ def test_fem_assembly_matches_scipy_coo_path(restore_switch):
         inapercu sur les valeurs (les entrees surnumeraires valant zero) tout
         en changeant le cout de toute factorisation en aval.
     """
-    from pipeline.step4_field_solver import (
+    from element_ardor.step4_field_solver import (
         _assemble_stiffness_matrix,
         _compute_shape_gradients,
     )
@@ -463,7 +463,7 @@ def test_step1_dispatches_to_native_when_enabled(restore_switch):
     Python pur, que l'interrupteur soit actif ou non - non-regression du
     branchement dans le fichier du pipeline lui-meme.
     """
-    from pipeline import step1_ingest
+    from element_ardor import step1_ingest
 
     mesh = _self_intersecting_test_mesh()
 

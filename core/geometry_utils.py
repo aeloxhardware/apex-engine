@@ -373,9 +373,9 @@ def point_has_support_along_direction(
     direction_up) et reprojette position + segments dedans avant d'appliquer
     exactement la meme geometrie (projection scalaire clampee sur le
     segment, plus proche point, test horizontal/vertical separe). Utilisee a
-    la fois par pipeline/step9b_support_check.py (support d'un point de
+    la fois par element_ardor/step9b_support_check.py (support d'un point de
     trajectoire contre des capsules imprimees, testee sur PLUSIEURS
-    directions atteignables par la machine) et par pipeline/step5_layers.py
+    directions atteignables par la machine) et par element_ardor/step5_layers.py
     (support d'un point de contour contre des clusters deja places, testee
     UNIQUEMENT selon up_vector - step5 n'a pas encore resolu axis_angles).
 

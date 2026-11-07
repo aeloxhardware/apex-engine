@@ -1,7 +1,7 @@
 """
 tests/test_step1_ingest.py
 
-Tests de pipeline/step1_ingest.py, en particulier le raffinement local du
+Tests de element_ardor/step1_ingest.py, en particulier le raffinement local du
 maillage tetraedrique pres du plateau (`near_platform_resolution`,
 CLAUDE.md) : verifie que le decoupage slab/rest produit deux coques
 etanches avec des seeds du bon cote de la frontiere de coupe, et que la
@@ -24,7 +24,7 @@ import pytest
 import trimesh
 
 from core.mesh_types import JunctionZone
-from pipeline.step1_ingest import (
+from element_ardor.step1_ingest import (
     MeshIngestError,
     _clean_and_repair,
     _find_guaranteed_interior_point,

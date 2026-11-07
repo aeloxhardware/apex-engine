@@ -63,7 +63,17 @@ vérifiée des deux côtés. Toute session :
   tout : 5 % manquant, 19 % en trop (refusé, `InconsistentSurface`).
 - **Vitesse** : ~3,5 s pour 225 000 triangles (1,9 s sans nombre d'enroulement). Pas encore
   optimisé : la surface (cartes d'arêtes) et la classification des sommets hors bande.
-- **Qualité des tétraèdres** : toujours non atteinte (angle dièdre minimal 0,7° au bord, tétraèdres
-  plats aux arêtes vives). Prochaine étape : découpes de Labelle-Shewchuk.
+- **Qualité des tétraèdres** : les découpes de Labelle-Shewchuk sont faites (commit 05c71508 : angle dièdre
+  minimal 0,7° → 19° sur la sphère ; 23 à 45° mesurés sur une boîte de 10 mm à maille 1,5 à 0,7 mm). Mise à jour du
+  2026-11-07 : l'ancienne mention « toujours non atteinte » était périmée.
+- **Fidélité de la coque (R-030 point 8, mesurée le 2026-11-07)** : écart du contour extérieur à la surface d'origine,
+  maille 1,5 mm. death : p99 0,29 mm, max 0,54, 7,1 % des points > 0,1 mm ; turkish : p99 0,23, max 0,56, 8,1 %.
+  TetGen : p99 0,03 / 0,007. Deux pistes essayées, détail dans `docs/RAPPORT.md` :
+  - **D (projection des contours sur la surface, `element_ardor/step5c_skin_projection.py`, opt-in)** : death p99
+    0,017 mm, 0,2 % > 0,1 mm ; turkish p99 0,13, 1,9 %. Durée +18 à +23 %. Reste : parois plus fines que la maille
+    (segments reliant deux faces de normales opposées), que ni D ni C ne corrigent.
+  - **C (protection des arêtes vives, `Params::feature_angle_deg`, désactivée par défaut)** : bon sur une boîte à maille
+    1,5 mm (p99 de peau 0,13 → 0,015 mm), mais l'angle dièdre minimal chute de 23 à 5° à maille 1,0 mm, et aucun gain
+    sur death ni turkish. Non fiable, à reprendre (test `tests/test_tetranet_features.py`, échec attendu documenté).
 - Reste : phase 5 (plateau, tolérance automatique), phase 7 (parallélisme déjà partiel), comparaison
   de bout en bout avec TetGen, test des cassures dans le pipeline complet.

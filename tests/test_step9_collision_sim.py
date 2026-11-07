@@ -1,7 +1,7 @@
 """
 tests/test_step9_collision_sim.py
 
-Tests pour pipeline/step9_collision_sim.py. Fixtures principalement
+Tests pour element_ardor/step9_collision_sim.py. Fixtures principalement
 synthetiques (trimesh.creation.*, convention du projet), sauf un test dedie
 qui charge le vrai fichier res/3d/toolheads/aetheris-4/aetheris-4.glb via
 io/mesh_loader.py - seule exception justifiee : le loader n'a de sens
@@ -20,7 +20,7 @@ import trimesh
 
 from core.mesh_types import AABB, MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
 from file_io.mesh_loader import load_toolhead_mesh
-from pipeline.step9_collision_sim import (
+from element_ardor.step9_collision_sim import (
     CollisionSimParams,
     _filter_nozzle_contact_zone,
     _grow_printed_index_to,
@@ -524,21 +524,22 @@ def test_platform_surface_is_at_origin_z():
     """La surface du plateau est a z = platform_origin.z (et non +0,5 mm : disque centre
     sur l'origine avant le 2026-10-06, limite #70). Marge 1 mm : un point a z = 0,9 est en
     contact (penetration 0,1), un point a z = 1,1 ne l'est pas, un point sous le plateau l'est."""
-    from pipeline.step9_collision_sim import _check_platform_disc
+    from element_ardor.step9_collision_sim import _check_platform_disc
     origin = np.array([0.0, 0.0, 0.0])
-    pen = _check_platform_disc(np.array([[10.0, 0.0, 0.9]]), origin, 1.0)
+    disc = (150.0, 0.5, -0.5)     # rayon, demi-epaisseur, decalage (profil machine : donnees)
+    pen = _check_platform_disc(np.array([[10.0, 0.0, 0.9]]), origin, 1.0, disc)
     assert pen == pytest.approx(0.1, abs=1e-9)
-    assert _check_platform_disc(np.array([[10.0, 0.0, 1.1]]), origin, 1.0) is None
-    assert _check_platform_disc(np.array([[10.0, 0.0, -0.4]]), origin, 1.0) == pytest.approx(1.0)   # dans le plateau : penetration = marge
+    assert _check_platform_disc(np.array([[10.0, 0.0, 1.1]]), origin, 1.0, disc) is None
+    assert _check_platform_disc(np.array([[10.0, 0.0, -0.4]]), origin, 1.0, disc) == pytest.approx(1.0)   # dans le plateau : penetration = marge
     # une origine decalee en z decale la surface d'autant
-    assert _check_platform_disc(np.array([[10.0, 0.0, 5.9]]), np.array([0.0, 0.0, 5.0]), 1.0) == pytest.approx(0.1, abs=1e-9)
+    assert _check_platform_disc(np.array([[10.0, 0.0, 5.9]]), np.array([0.0, 0.0, 5.0]), 1.0, disc) == pytest.approx(0.1, abs=1e-9)
 
 
 def test_fast_checker_is_reused_while_material_is_unchanged():
     """Le controleur rapide est partage tant que positions et extrusions sont les memes
     (changer un angle ne change pas la matiere) ; une position modifiee le reconstruit."""
     from core.mesh_types import MachineProfile, ToolpathMachine, ToolpathPoint
-    from pipeline.step9_collision_sim import CollisionSimParams, fast_checker_for
+    from element_ardor.step9_collision_sim import CollisionSimParams, fast_checker_for
     machine = MachineProfile(rotation_axes=[], platform_origin=None, nozzle_diameter=0.4)
     sim = CollisionSimParams(path_sampling_step=1.0, safety_margin=1.0)
     samples = np.array([[0.0, 0.0, 1.0], [0.0, 0.0, 2.0]])
@@ -555,7 +556,7 @@ def test_fast_checker_is_reused_while_material_is_unchanged():
 def test_printed_part_margin_defaults_to_safety_margin_and_can_be_negative():
     """Marge propre a la matiere deposee : None = safety_margin ; negative =
     recouvrement tolere (la tete est exacte, effleurer une couche n'est pas un choc)."""
-    from pipeline.step9_collision_sim import CollisionSimParams, printed_margin_of
+    from element_ardor.step9_collision_sim import CollisionSimParams, printed_margin_of
     base = CollisionSimParams(path_sampling_step=2.0, safety_margin=1.0)
     assert printed_margin_of(base) == 1.0
     tolerant = CollisionSimParams(path_sampling_step=2.0, safety_margin=1.0, printed_part_margin=-0.15)

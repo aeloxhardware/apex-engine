@@ -24,9 +24,9 @@ import numpy as np
 import pytest
 import trimesh
 
-from pipeline.step1_ingest import run as ingest_run
-from pipeline.step2_overhang import OverhangParams, run as overhang_run
-from pipeline.step3_segmentation import SegmentationParams, run as segmentation_run
+from element_ardor.step1_ingest import run as ingest_run
+from element_ardor.step2_overhang import OverhangParams, run as overhang_run
+from element_ardor.step3_segmentation import SegmentationParams, run as segmentation_run
 
 _PLATFORM_Z_OFFSET = 1.245  # meme offset que res/test_models/death.stl
 
@@ -207,7 +207,7 @@ def test_junction_refinement_enabled_runs_light_pass_before_real_pass():
     tetraedrisation qui les consomme - reproduit le fragment complet de
     main.py::run_pipeline.
     """
-    from pipeline.step1b_junction_detection import detect_junction_zones
+    from element_ardor.step1b_junction_detection import detect_junction_zones
 
     mesh = _tripod_mesh()
     with tempfile.NamedTemporaryFile(suffix=".stl", delete=False) as f:
@@ -292,7 +292,7 @@ def test_travel_routing_enabled_routes_long_travel_before_collision_sim():
     """
     import main as main_module
     from core.mesh_types import MachineProfile, ToolpathMachine, ToolpathPoint
-    from pipeline.step8b_travel_routing import TravelRoutingParams
+    from element_ardor.step8b_travel_routing import TravelRoutingParams
 
     points = [
         ToolpathPoint(position=np.array([0.0, 0.0, 0.0]), axis_angles=[], extrusion=1.0, feedrate=1000.0),

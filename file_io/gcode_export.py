@@ -374,7 +374,7 @@ def material_travel_check(toolpath: dict, machine, params: "GcodeParams", densif
     `.native` : l'export natif fait le meme controle sans rappel Python. `.hits`
     garde les contacts vus par le chemin Python."""
     from scipy.spatial import cKDTree
-    from pipeline import step9_collision_sim as s9
+    from element_ardor import step9_collision_sim as s9
 
     pos = np.asarray(toolpath["position"], dtype=float)
     ext = np.asarray(toolpath["extrusion"], dtype=float)

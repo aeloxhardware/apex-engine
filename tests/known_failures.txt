@@ -2,7 +2,7 @@
 # Une ligne = un test exclu de la CI bloquante (le job « echecs-connus » les exécute quand même, sans bloquer).
 # Revue : à chaque release (RULES §11.3). Une ligne retirée = test réparé.
 #
-# Symptôme : sur l_shape_overhang.stl, la chaîne de lissage non planaire (element-ardor/skin/chain.py) classe 1 557 des
+# Symptôme : sur l_shape_overhang.stl, la chaîne de lissage non planaire (element_ardor/skin/chain.py) classe 1 557 des
 # 1 776 faces de surface « inatteignables » et aucune « retenue » (0 zone, donc 0 trajectoire de peau), alors que
 # zones.compute appelé seul avec face_sample=200 en retient 6. Même résultat avec trimesh 5.0.0 et potpourri3d 1.3 :
 # ce ne sont pas ces versions. Hypothèse non vérifiée : sensibilité numérique (numpy/scipy) ou plateforme (Linux).
@@ -10,3 +10,4 @@ tests/test_skin_chain.py::test_skin_paths_lie_half_a_thickness_under_the_surface
 tests/test_skin_chain.py::test_chain_ends_without_collision_and_orders_skin_after_its_supporting_body # PRE-001
 tests/test_skin_chain.py::test_carved_body_keeps_the_skin_thickness_clear # PRE-001
 tests/test_skin_chain.py::test_inject_places_each_zone_after_its_supporting_layer_and_remaps_indices # PRE-001
+tests/test_skin_chain.py::test_zone_statuses_partition_the_surface # PRE-001 (même symptôme, relevé le 2026-11-07 : échoue aussi sur le main d'origine)

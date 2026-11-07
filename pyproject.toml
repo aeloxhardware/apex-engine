@@ -27,7 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# libigl : importé paresseusement par element-ardor/skin/surface_paths.py (chemin facultatif).
+# libigl : importé paresseusement par element_ardor/skin/surface_paths.py (chemin facultatif).
 igl = ["libigl"]
 # Outils de mesure et de visualisation du dossier scripts/, jamais utilisés par le moteur.
 scripts = ["matplotlib", "pillow", "plotly", "pymeshlab"]

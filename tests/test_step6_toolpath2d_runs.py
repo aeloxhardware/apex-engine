@@ -6,7 +6,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 from core.mesh_types import Layer
-from pipeline.step6_toolpath2d import InfillPattern, Step6Params, _generate_infill, _generate_spiral_infill, _offset_walls, _lift_to_3d, _oscillating_spiral_polyline, _SpiralShape, _plate_axis_in_local_2d, _merge_short_runs, _monotonic_runs, _project_to_local_2d, _split_ring_into_runs, _split_rings_in_toolpath, run as toolpath_run
+from element_ardor.step6_toolpath2d import InfillPattern, Step6Params, _generate_infill, _generate_spiral_infill, _offset_walls, _lift_to_3d, _oscillating_spiral_polyline, _SpiralShape, _plate_axis_in_local_2d, _merge_short_runs, _monotonic_runs, _project_to_local_2d, _split_ring_into_runs, _split_rings_in_toolpath, run as toolpath_run
 from test_step6_toolpath2d import (  # noqa: F401
     _wavy_square_layer,
     flat_box_layers,
@@ -617,7 +617,7 @@ def test_oscillating_spiral_layers_share_the_same_median_line():
 
 
 def test_oscillating_spiral_connectors_never_make_the_plate_go_backward():
-    from pipeline.step6_toolpath2d import _angle_nondecreasing
+    from element_ardor.step6_toolpath2d import _angle_nondecreasing
     for rank in (0, 1):
         for chain in _generate_spiral_infill(_disk(), _spiral_params(spiral_randomization_threshold=1.0),
                                              rank, np.zeros(2)):

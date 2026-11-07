@@ -1,7 +1,7 @@
 """step5b : ordre des couches contraint par la tete (opt-in, 2026-10-01)."""
 import numpy as np
 
-from pipeline.step5b_collision_order import _densify, _stable_topological_order
+from element_ardor.step5b_collision_order import _densify, _stable_topological_order
 
 
 def test_no_constraint_keeps_order():

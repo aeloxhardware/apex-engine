@@ -127,9 +127,9 @@ g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solv
 pipeline\step4_field_solver.py:2406:        node_kdtree=scipy.spatial.cKDTree(tet_mesh.tet_vertices),
 g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step4_field_solver.py-2407-        shape_gradients=shape_gradients,
 --
-pipeline\step4_field_solver.py-2478-        mesh_data: sortie de pipeline/step1_ingest.py (pour le mapping
+pipeline\step4_field_solver.py-2478-        mesh_data: sortie de element_ardor/step1_ingest.py (pour le mapping
 pipeline\step4_field_solver.py:2479:            surface -> volume via son kdtree).
-pipeline\step4_field_solver.py-2480-        overhang_map: sortie de pipeline/step2_overhang.py.
+pipeline\step4_field_solver.py-2480-        overhang_map: sortie de element_ardor/step2_overhang.py.
 --
 g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step3_segmentation.py-338-    version bouclait en Python sur CHAQUE micro-composante et reconstruisait
 pipeline\step3_segmentation.py:339:    un `cKDTree` par candidat voisin a l'interieur de cette boucle - avec
@@ -167,8 +167,8 @@ g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d
 pipeline\step6_toolpath2d.py:503:    _, nearest_faces = mesh_data.kdtree.query(contour_3d_loop)
 g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-504-    nearest_faces = np.asarray(nearest_faces, dtype=np.int64)
 --
-pipeline\step6_toolpath2d.py-819-        layers: sortie de pipeline/step5_layers.py.
-pipeline\step6_toolpath2d.py:820:        mesh_data: sortie de pipeline/step1_ingest.py (kdtree, pont
+pipeline\step6_toolpath2d.py-819-        layers: sortie de element_ardor/step5_layers.py.
+pipeline\step6_toolpath2d.py:820:        mesh_data: sortie de element_ardor/step1_ingest.py (kdtree, pont
 g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step6_toolpath2d.py-821-            surface/volume pour la detection de pont).
 --
 g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-7-
@@ -206,7 +206,7 @@ g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling
 pipeline\step7_scheduling.py:536:        proche (kdtree), plutot que par localisation tetraedrique +
 pipeline\step7_scheduling.py-537-        interpolation barycentrique : machinerie neuve pour un gain nul, une
 --
-pipeline\step7_scheduling.py-751-        layers: sortie de pipeline/step6_toolpath2d.py (toolpath_2d rempli).
+pipeline\step7_scheduling.py-751-        layers: sortie de element_ardor/step6_toolpath2d.py (toolpath_2d rempli).
 pipeline\step7_scheduling.py:752:        mesh_data: sortie de step1 (kdtree pour la projection de couleur,
 g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step7_scheduling.py-753-            bvh pour les rayons d'accessibilite).
 --
@@ -233,8 +233,8 @@ g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-
 pipeline\step5_layers.py:1649:        _, nearest = node_tree.query(np.vstack(points))
 g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-1650-        values = geodesic[np.asarray(nearest, dtype=np.int64)]
 --
-pipeline\step5_layers.py-1668-        tet_mesh: sortie de pipeline/step1_ingest.py.
-pipeline\step5_layers.py:1669:        mesh_data: sortie de pipeline/step1_ingest.py (kdtree pour le pont
+pipeline\step5_layers.py-1668-        tet_mesh: sortie de element_ardor/step1_ingest.py.
+pipeline\step5_layers.py:1669:        mesh_data: sortie de element_ardor/step1_ingest.py (kdtree pour le pont
 g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\pipeline\step5_layers.py-1670-            surface/volume).
 --
 g:\prazl\documents\APEX\APEX_NEW_VERSION\slicer_engine\scripts\prototype_local_retriangulation11.py-15-from collections import Counter

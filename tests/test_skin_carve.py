@@ -1,4 +1,4 @@
-"""P3 sur la voie chaleur (pipeline/skin/carve.py) : creusement du corps sous les zones de lissage."""
+"""P3 sur la voie chaleur (element_ardor/skin/carve.py) : creusement du corps sous les zones de lissage."""
 import dataclasses
 
 import numpy as np
@@ -6,9 +6,9 @@ import pytest
 import trimesh
 
 import main as M
-from pipeline import step1_ingest as s1, step2_overhang as s2, step3_segmentation as s3
-from pipeline import step4_field_solver as s4, step5_layers as s5
-from pipeline.skin import carve, zones as sz
+from element_ardor import step1_ingest as s1, step2_overhang as s2, step3_segmentation as s3
+from element_ardor import step4_field_solver as s4, step5_layers as s5
+from element_ardor.skin import carve, zones as sz
 
 
 def test_clip_patch_keeps_exactly_the_positive_part_and_stays_watertight():

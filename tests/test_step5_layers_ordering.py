@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 import trimesh
 from core.mesh_types import RegionDependencyGraph
-from pipeline.step4_field_solver import FieldSolverParams, run as field_run
-from pipeline.step5_layers import LayerParams, _march_tetrahedra_batch, _march_tetrahedron, _spatial_dfs_order, run as layers_run
+from element_ardor.step4_field_solver import FieldSolverParams, run as field_run
+from element_ardor.step5_layers import LayerParams, _march_tetrahedra_batch, _march_tetrahedron, _spatial_dfs_order, run as layers_run
 from test_step5_layers import (  # noqa: F401
     _pipeline_data_from_trimesh_default,
     hollow_box_data,

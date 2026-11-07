@@ -1,5 +1,5 @@
 """Lissage non-planaire sur la voie chaleur : zones (P2), trajectoires de surface (P4), ordre et collisions (P5),
-enchainement complet (pipeline/skin/chain.py), sur l_shape_overhang.stl."""
+enchainement complet (element_ardor/skin/chain.py), sur l_shape_overhang.stl."""
 import dataclasses
 import os
 
@@ -8,9 +8,9 @@ import pytest
 import trimesh
 
 import main as M
-from pipeline import step1_ingest as s1, step2_overhang as s2, step3_segmentation as s3
-from pipeline import step4_field_solver as s4, step5_layers as s5
-from pipeline.skin import chain, zones as sz
+from element_ardor import step1_ingest as s1, step2_overhang as s2, step3_segmentation as s3
+from element_ardor import step4_field_solver as s4, step5_layers as s5
+from element_ardor.skin import chain, zones as sz
 
 STL = os.path.join(os.path.dirname(__file__), "..", "res", "test_models", "l_shape_overhang.stl")
 
@@ -87,7 +87,7 @@ def test_carved_body_keeps_the_skin_thickness_clear(result):
 
 def test_inject_places_each_zone_after_its_supporting_layer_and_remaps_indices(result):
     from core.mesh_types import ToolpathMachine, ToolpathPoint
-    from pipeline.skin.inject import inject
+    from element_ardor.skin.inject import inject
     layers = result.layers
     pts, ids = [], []
     for layer in layers:

@@ -1,7 +1,7 @@
 """
 tests/test_step9b_support_check.py
 
-Tests pour pipeline/step9b_support_check.py, sur des `ToolpathMachine`
+Tests pour element_ardor/step9b_support_check.py, sur des `ToolpathMachine`
 synthetiques construites a la main - meme approche que tests/test_step9_*.py
 et tests/test_step10_*.py, qui ne rejouent pas non plus tout le pipeline pour
 tester une etape qui ne consomme qu'une trajectoire.
@@ -15,9 +15,9 @@ import numpy as np
 import pytest
 
 from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
-from pipeline.step3_segmentation import SegmentationParams
-from pipeline.step9_collision_sim import _PrintedGeometryIndex, _point_to_segment_distance
-from pipeline.step9b_support_check import (
+from element_ardor.step3_segmentation import SegmentationParams
+from element_ardor.step9_collision_sim import _PrintedGeometryIndex, _point_to_segment_distance
+from element_ardor.step9b_support_check import (
     SupportCheckParams,
     _has_support_below,
     run as support_check_run,

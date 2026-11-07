@@ -4,8 +4,8 @@ import pytest
 import main
 from file_io.gcode_export import (GcodeParams, clearance_move, export_gcode, feed_plan, firmware_to_machine,
                                   head_axis_vectors, machine_to_firmware, parse_gcode)
-from pipeline.step8_machine_toolpath import coupled_axis_angle
-from pipeline.step9_collision_sim import _positioned_toolhead_vertices
+from element_ardor.step8_machine_toolpath import coupled_axis_angle
+from element_ardor.step9_collision_sim import _positioned_toolhead_vertices
 
 
 @pytest.fixture(scope="module")

@@ -1,7 +1,7 @@
 """
 tests/test_step8b_travel_routing.py
 
-Tests pour pipeline/step8b_travel_routing.py (CLAUDE.md limite #46).
+Tests pour element_ardor/step8b_travel_routing.py (CLAUDE.md limite #46).
 """
 
 from __future__ import annotations
@@ -10,13 +10,13 @@ import numpy as np
 import trimesh
 
 from core.mesh_types import MachineProfile, ToolpathMachine, ToolpathPoint, TravelRoutingDiagnostic
-from pipeline.step8_machine_toolpath import Step8Params
-from pipeline.step8b_travel_routing import (
+from element_ardor.step8_machine_toolpath import Step8Params
+from element_ardor.step8b_travel_routing import (
     TravelRoutingParams,
     _travel_boundaries,
     route_long_travels,
 )
-from pipeline.step9_collision_sim import CollisionSimParams
+from element_ardor.step9_collision_sim import CollisionSimParams
 
 
 def _small_toolhead() -> trimesh.Trimesh:

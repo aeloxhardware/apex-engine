@@ -2,7 +2,7 @@
 import numpy as np
 import pytest
 
-from core import progress
+from core import progress, runtime
 
 
 @pytest.fixture
@@ -71,7 +71,7 @@ def test_native_step6_chunks_match_a_single_call(monkeypatch):
     """Le remplissage natif par tranches rend les memes polylignes qu'un appel unique."""
     from dataclasses import replace
     from core.mesh_types import Layer
-    from pipeline import step6_toolpath2d as s6
+    from element_ardor import step6_toolpath2d as s6
 
     layers = []
     for k in range(70):
@@ -110,4 +110,4 @@ def test_failed_slice_leaves_no_stage_open(tmp_path, capsys):
     request = tmp_path / "req.json"
     request.write_text(json.dumps({"contract": schema.APEX_CONTRACT_VERSION, "mesh": str(bad), "output_dir": str(tmp_path)}))
     assert slice_cli.slice_main(["--request", str(request)]) == 3
-    assert progress._sink is None
+    assert runtime.state().progress_sink is None

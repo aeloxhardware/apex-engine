@@ -38,19 +38,19 @@ from core.mesh_types import (  # noqa: E402
 )
 from file_io.visualization_export import export_visualization_glb  # noqa: E402
 from main import PipelineParams, PipelineResult  # noqa: E402
-from pipeline.step1_ingest import run as ingest_run  # noqa: E402
-from pipeline.step1b_junction_detection import detect_junction_zones  # noqa: E402
-from pipeline.step2_overhang import run as overhang_run  # noqa: E402
-from pipeline.step3_segmentation import run as segmentation_run  # noqa: E402
-from pipeline.step4_field_solver import run as field_solver_run  # noqa: E402
-from pipeline.step5_layers import run as layers_run  # noqa: E402
-from pipeline.step5b_collision_order import run as collision_order_run  # noqa: E402
-from pipeline.step6_toolpath2d import run as toolpath2d_run  # noqa: E402
-from pipeline.step7_scheduling import run as scheduling_run  # noqa: E402
-from pipeline.step8_machine_toolpath import gradient_direction_field
-from pipeline.step8_machine_toolpath import run as machine_toolpath_run  # noqa: E402
-from pipeline.step8b_travel_routing import route_long_travels  # noqa: E402
-from pipeline.step9b_support_check import run as support_check_run  # noqa: E402
+from element_ardor.step1_ingest import run as ingest_run  # noqa: E402
+from element_ardor.step1b_junction_detection import detect_junction_zones  # noqa: E402
+from element_ardor.step2_overhang import run as overhang_run  # noqa: E402
+from element_ardor.step3_segmentation import run as segmentation_run  # noqa: E402
+from element_ardor.step4_field_solver import run as field_solver_run  # noqa: E402
+from element_ardor.step5_layers import run as layers_run  # noqa: E402
+from element_ardor.step5b_collision_order import run as collision_order_run  # noqa: E402
+from element_ardor.step6_toolpath2d import run as toolpath2d_run  # noqa: E402
+from element_ardor.step7_scheduling import run as scheduling_run  # noqa: E402
+from element_ardor.step8_machine_toolpath import gradient_direction_field
+from element_ardor.step8_machine_toolpath import run as machine_toolpath_run  # noqa: E402
+from element_ardor.step8b_travel_routing import route_long_travels  # noqa: E402
+from element_ardor.step9b_support_check import run as support_check_run  # noqa: E402
 
 
 def _detect_junction_zones(mesh_path: str, params: PipelineParams):
@@ -113,14 +113,10 @@ def _post_routing_stages(toolpath, params: PipelineParams, ingest_report):
 
 
 def _layers_stage(params: PipelineParams, tet_mesh, mesh_data, scalar_field, region_graph):
-    print("[preview] Etape 5/8 - extraction des couches courbes")
-    layers = layers_run(tet_mesh, mesh_data, scalar_field, region_graph, params.layers)
-    if params.collision_order is not None:
-        layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)
-        print(f"[preview]   ordre contraint par la tete : {order_report.constraints} contrainte(s), "
-              f"{order_report.moved_layers} couche(s) deplacee(s), {order_report.cycle_breaks} violee(s)")
-    print(f"[preview]   {len(layers)} couche(s)")
-    return layers
+    """Etape 5 : celle de main.run_pipeline (une seule implementation, pour que l'apercu ne se desynchronise plus :
+    la copie locale ignorait step5c, trouve le 2026-11-07)."""
+    from main import _layers_stage as main_layers_stage
+    return main_layers_stage(params, tet_mesh, mesh_data, scalar_field, region_graph)
 
 
 def _analysis_stages(params: PipelineParams, mesh_data, tet_mesh, ingest_report):
@@ -144,6 +140,23 @@ def _analysis_stages(params: PipelineParams, mesh_data, tet_mesh, ingest_report)
     return overhang_map, region_graph, scalar_field
 
 
+def _ingest(mesh_path: str, params: PipelineParams, junction_zones):
+    """Etape 1 avec les MEMES options que main.run_pipeline (mailleur compris : l'oubli de `mesher` faisait
+    comparer TetGen a lui-meme, trouve le 2026-11-07)."""
+    return ingest_run(
+        mesh_path,
+        params.resolution,
+        near_platform_resolution=params.near_platform_resolution,
+        near_platform_margin=params.near_platform_margin,
+        junction_zones=junction_zones,
+        junction_refinement_resolution=params.junction_refinement_resolution,
+        place_on_platform=params.place_on_platform,
+        mesher=params.mesher,
+        tetranet_refuse_ratio=params.tetranet_refuse_ratio,
+        tetranet_feature_angle_deg=params.tetranet_feature_angle_deg,
+    )
+
+
 def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
     """
     step1 -> step8, puis un CollisionReport/AdjustmentReport vides explicites.
@@ -163,15 +176,7 @@ def run_slicing_only(mesh_path: str, params: PipelineParams) -> PipelineResult:
         junction_zones = _detect_junction_zones(mesh_path, params)
 
     print(f"[preview] Etape 1/8 - ingestion : {mesh_path}")
-    mesh_data, tet_mesh, ingest_report = ingest_run(
-        mesh_path,
-        params.resolution,
-        near_platform_resolution=params.near_platform_resolution,
-        near_platform_margin=params.near_platform_margin,
-        junction_zones=junction_zones,
-        junction_refinement_resolution=params.junction_refinement_resolution,
-        place_on_platform=params.place_on_platform,
-    )
+    mesh_data, tet_mesh, ingest_report = _ingest(mesh_path, params, junction_zones)
 
     overhang_map, region_graph, scalar_field = _analysis_stages(params, mesh_data, tet_mesh, ingest_report)
 

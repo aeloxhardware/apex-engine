@@ -12,6 +12,10 @@ jobs:
           python-version: "3.13"
       - name: Limites de taille (cliquet)
         run: python -I scripts/check_limits.py
+      - name: État caché (global, environnement, machine en dur)
+        run: python -I scripts/check_hidden_state.py
+      - name: Palliatifs (test et date de revue)
+        run: python -I scripts/check_palliatives.py
 
   tests:
     runs-on: ubuntu-latest
@@ -40,11 +44,9 @@ jobs:
       - name: Contrat à jour (schéma et en-tête générés)
         run: python scripts/gen_params.py && git diff --exit-code config/params.schema.json cpp/include/apex/params.hpp
       - name: Tests
-        env:
-          APEX_USE_CPP: ${{ matrix.native }}
         # Échecs connus PRE-001 (tests/known_failures.txt) : exclus d'ici, exécutés à part dans le job suivant.
         run: |
-          python -m pytest -q -p no:cacheprovider tests $(sed -n 's/^\(tests[^ #]*\).*/--deselect \1/p' tests/known_failures.txt)
+          python -m pytest -q -p no:cacheprovider $([ "${{ matrix.native }}" = 1 ] && echo --native) tests $(sed -n 's/^\(tests[^ #]*\).*/--deselect \1/p' tests/known_failures.txt)
 
   echecs-connus:
     # Visibilité des échecs connus : ce job échoue tant que PRE-001 n'est pas résolu, sans bloquer les autres.

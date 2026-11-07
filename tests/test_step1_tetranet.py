@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 import trimesh
 
-from pipeline import step1_ingest
+from element_ardor import step1_ingest
 
 pytestmark = pytest.mark.skipif(not step1_ingest.tetranet_available(), reason="noyau natif sans TetraNet")
 

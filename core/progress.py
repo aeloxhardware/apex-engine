@@ -14,63 +14,60 @@ un no-op (tests unitaires, appels hors du pipeline).
 from __future__ import annotations
 
 import contextlib
-import threading
 import time
 from typing import Callable, Optional
+
+from core import runtime
 
 MIN_STEP = 0.01
 MIN_INTERVAL = 0.1
 MAX_FRACTION = 0.999
 
-_lock = threading.Lock()
-_sink: Optional[Callable[[float], None]] = None
-_switcher: Optional[Callable[[str], None]] = None
-_last_fraction = 0.0
-_last_time = 0.0
-_scale = (0.0, 1.0)
-_clock = time.monotonic
+_clock = time.monotonic   # remplacable par un test (horloge simulee) ; ne porte aucun etat de run
 
 
 def begin(sink: Optional[Callable[[float], None]]) -> None:
     """Ouvre une etape : `sink(fraction)` recevra des fractions croissantes dans ]0, 1[."""
-    global _sink, _last_fraction, _last_time, _scale
-    with _lock:
-        _sink, _last_fraction, _last_time, _scale = sink, 0.0, -1e9, (0.0, 1.0)
+    st = runtime.state()
+    with st.lock:
+        st.progress_sink, st.progress_last_fraction, st.progress_last_time, st.progress_scale = (
+            sink, 0.0, -1e9, (0.0, 1.0))
 
 
 def set_stage_switcher(switcher: Optional[Callable[[str], None]]) -> None:
     """Rappel `switcher(slug)` par lequel une etape peut en ouvrir une autre en cours de route (l'etape 1 se
     partage en « import » et « tetrahedralization », R-022). `None` : `switch_stage` ne fait rien."""
-    global _switcher
-    with _lock:
-        _switcher = switcher
+    st = runtime.state()
+    with st.lock:
+        st.stage_switcher = switcher
 
 
 def switch_stage(slug: str) -> None:
     """Passe a l'etape `slug` (ferme l'etape courante a 1.0, ouvre `slug` a 0.0) si un orchestrateur l'a demande."""
-    with _lock:
-        switcher = _switcher
+    st = runtime.state()
+    with st.lock:
+        switcher = st.stage_switcher
     if switcher is not None:
         switcher(slug)
 
 
 def end() -> None:
-    global _sink
-    with _lock:
-        _sink = None
+    st = runtime.state()
+    with st.lock:
+        st.progress_sink = None
 
 
 @contextlib.contextmanager
 def phase(lo: float, hi: float):
     """Les appels de `report`/`milestone` du bloc occupent [lo, hi] de la barre de l'etape."""
-    global _scale
-    with _lock:
-        previous, _scale = _scale, (lo, hi)
+    st = runtime.state()
+    with st.lock:
+        previous, st.progress_scale = st.progress_scale, (lo, hi)
     try:
         yield
     finally:
-        with _lock:
-            _scale = previous
+        with st.lock:
+            st.progress_scale = previous
 
 
 def milestone(fraction: float) -> None:
@@ -88,17 +85,17 @@ def report(done: float, total: float, span: Optional[tuple] = None) -> None:
 
 
 def _emit(fraction: float, throttle: bool) -> None:
-    global _last_fraction, _last_time
-    with _lock:
-        if _sink is None:
+    st = runtime.state()
+    with st.lock:
+        if st.progress_sink is None:
             return
-        lo, hi = _scale
+        lo, hi = st.progress_scale
         value = min(MAX_FRACTION, lo + (hi - lo) * min(max(fraction, 0.0), 1.0))
-        if value <= _last_fraction:
+        if value <= st.progress_last_fraction:
             return
         now = _clock()
-        if throttle and (value - _last_fraction < MIN_STEP or now - _last_time < MIN_INTERVAL):
+        if throttle and (value - st.progress_last_fraction < MIN_STEP or now - st.progress_last_time < MIN_INTERVAL):
             return
-        _last_fraction, _last_time = value, now
-        sink = _sink
+        st.progress_last_fraction, st.progress_last_time = value, now
+        sink = st.progress_sink
     sink(value)

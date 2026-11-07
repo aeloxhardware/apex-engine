@@ -1,7 +1,7 @@
 """
 tests/test_step10_adjustment.py
 
-Tests pour pipeline/step10_adjustment.py, sur des trajectoires et des
+Tests pour element_ardor/step10_adjustment.py, sur des trajectoires et des
 modeles de tete synthetiques (aucun fichier externe). Les CollisionReport
 d'entree sont produits par la VRAIE etape 9 plutot que fabriques a la main,
 pour que l'etape 10 soit testee sur les structures qu'elle recevra en
@@ -24,8 +24,8 @@ from core.mesh_types import (
     ToolpathMachine,
     ToolpathPoint,
 )
-from pipeline.step9_collision_sim import CollisionSimParams, run as collision_run
-from pipeline.step10_adjustment import (
+from element_ardor.step9_collision_sim import CollisionSimParams, run as collision_run
+from element_ardor.step10_adjustment import (
     Step10Params,
     _build_reorientation_context,
     _collisions_at_points,
@@ -486,7 +486,7 @@ def _clamp_machine():
 
 def test_clamp_head_height_moves_only_points_whose_head_would_dip():
     from core.mesh_types import ToolpathMachine, ToolpathPoint
-    from pipeline.step10_adjustment import clamp_head_height
+    from element_ardor.step10_adjustment import clamp_head_height
     machine = _clamp_machine()
     sim = CollisionSimParams(path_sampling_step=1.0, safety_margin=1.0, nozzle_contact_clearance=0.0)
     pts = [ToolpathPoint(position=np.array([10.0, 0.0, 2.0]), axis_angles=[90.0, 170.0], extrusion=1.0,
@@ -508,7 +508,7 @@ def test_clamp_head_height_moves_only_points_whose_head_would_dip():
 
 def test_clamp_head_height_refuses_non_vertical_other_axes():
     from core.mesh_types import RotationAxisSpec, ToolpathMachine
-    from pipeline.step10_adjustment import clamp_head_height
+    from element_ardor.step10_adjustment import clamp_head_height
     machine = _clamp_machine()
     machine.rotation_axes[0] = RotationAxisSpec(axis=np.array([0.0, 1.0, 0.0]), angle_range_deg=(0.0, 360.0))
     with pytest.raises(ValueError):
@@ -518,8 +518,8 @@ def test_clamp_head_height_refuses_non_vertical_other_axes():
 
 def test_reorient_coupled_tiers_clears_contact_and_tapers_neighbours():
     from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
-    from pipeline.step9_collision_sim import FastCollisionChecker, _filter_nozzle_contact_zone, _surface_sample_points
-    from pipeline.step10_adjustment import reorient_coupled_tiers
+    from element_ardor.step9_collision_sim import FastCollisionChecker, _filter_nozzle_contact_zone, _surface_sample_points
+    from element_ardor.step10_adjustment import reorient_coupled_tiers
     rod = trimesh.creation.box(extents=[1.0, 1.0, 20.0])
     rod.apply_translation([0.0, 0.0, 10.0])
     machine = MachineProfile(
@@ -558,7 +558,7 @@ def test_reorient_coupled_tiers_clears_contact_and_tapers_neighbours():
 def test_coupled_candidates_never_change_the_position_imposed_axis():
     import numpy as np
     from core.mesh_types import RotationAxisSpec
-    from pipeline.step10_adjustment import _coupled_candidates
+    from element_ardor.step10_adjustment import _coupled_candidates
     axes = [RotationAxisSpec(axis=np.array([0.0, 0.0, 1.0]), angle_range_deg=(0.0, 360.0)),
             RotationAxisSpec(axis=np.array([1.0, 0.0, 0.0]), angle_range_deg=(0.0, 185.0))]
     dirs, angles = _coupled_candidates(axes, [123.4, 20.0], np.array([0.0, 0.0, 1.0]), 48)
@@ -573,8 +573,8 @@ def test_fast_recheck_matches_step9_fast_events():
     import numpy as np
     import trimesh
     from core.mesh_types import MachineProfile, RotationAxisSpec, ToolpathMachine, ToolpathPoint
-    from pipeline import step9_collision_sim as s9
-    from pipeline.step10_adjustment import _collisions_at_points
+    from element_ardor import step9_collision_sim as s9
+    from element_ardor.step10_adjustment import _collisions_at_points
     head = trimesh.creation.box(extents=[6, 6, 20])
     head.apply_translation([0, 0, 13])           # corps au-dessus de la pointe
     machine = MachineProfile(
@@ -603,7 +603,7 @@ def test_exact_recheck_matches_step9_exact_events():
     oubliait `_filter_nozzle_contact_zone`, si bien que la pointe touchait
     toujours le cordon qu'elle depose et que tout point re-teste etait declare
     en collision - aucune reorientation ne pouvait reussir en mode exact."""
-    from pipeline import step9_collision_sim as s9
+    from element_ardor import step9_collision_sim as s9
     head = trimesh.creation.box(extents=[6, 6, 20])
     head.apply_translation([0, 0, 10.05])        # corps au-dessus de la pointe, pointe a l'origine
     machine = MachineProfile(

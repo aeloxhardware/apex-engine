@@ -1,0 +1,18 @@
+{
+  "id": "aetheris-4",
+  "name": "Aetheris-4 (R C Z B)",
+  "toolhead_id": "aetheris-4",
+  "rotation_axes": [
+    {"axis": [0.0, 0.0, 1.0], "angle_range_deg": [0.0, 360.0]},
+    {"axis": [1.0, 0.0, 0.0], "angle_range_deg": [0.0, 185.0]}
+  ],
+  "platform_origin": [0.0, 0.0, 0.0],
+  "platform_radius": 150.0,
+  "platform_thickness": 1.0,
+  "nozzle_diameter": 0.4,
+  "max_angular_velocity_deg_s": 1666.7,
+  "max_angular_acceleration_deg_s2": 1300.0,
+  "position_coupled_axes": [0],
+  "radial_direction": [0.0, -1.0, 0.0],
+  "notes": "Machine actuelle : C impose par la position (limite #59), B dans [0, 185] deg. Limites de B : config.g actif (M203 B100000, M201 B1300), confirme par l'utilisateur le 2026-10-06. Plateau de 300 mm de diametre (2026-09-29)."
+}

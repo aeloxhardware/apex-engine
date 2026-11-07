@@ -1,7 +1,7 @@
 """
 tests/test_step4_field_solver.py
 
-Tests pour pipeline/step4_field_solver.py (champ = distance au plateau, methode de la chaleur), sur des mesh synthetiques generes
+Tests pour element_ardor/step4_field_solver.py (champ = distance au plateau, methode de la chaleur), sur des mesh synthetiques generes
 a la volee (aucun fichier externe requis).
 
 Execution : pytest tests/test_step4_field_solver.py -v
@@ -17,10 +17,10 @@ import pytest
 import trimesh
 
 from core.mesh_types import TetMesh
-from pipeline.step1_ingest import run as ingest_run
-from pipeline.step2_overhang import OverhangParams, run as overhang_run
-from pipeline.step3_segmentation import SegmentationParams, run as segmentation_run
-from pipeline.step4_field_solver import (
+from element_ardor.step1_ingest import run as ingest_run
+from element_ardor.step2_overhang import OverhangParams, run as overhang_run
+from element_ardor.step3_segmentation import SegmentationParams, run as segmentation_run
+from element_ardor.step4_field_solver import (
     FieldSolverParams,
     _compute_shape_gradients,
     _identify_platform_nodes,

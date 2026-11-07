@@ -1,7 +1,7 @@
 """
 tests/test_step6_toolpath2d.py
 
-Tests pour pipeline/step6_toolpath2d.py, sur des mesh synthetiques generes a
+Tests pour element_ardor/step6_toolpath2d.py, sur des mesh synthetiques generes a
 la volee (aucun fichier externe requis).
 
 Execution : pytest tests/test_step6_toolpath2d.py -v
@@ -20,12 +20,12 @@ import pytest
 import trimesh
 
 from core.mesh_types import Layer
-from pipeline.step1_ingest import run as ingest_run
-from pipeline.step2_overhang import OverhangParams, run as overhang_run
-from pipeline.step3_segmentation import SegmentationParams, run as segmentation_run
-from pipeline.step4_field_solver import FieldSolverParams, run as field_run
-from pipeline.step5_layers import LayerParams, run as layers_run
-from pipeline.step6_toolpath2d import (
+from element_ardor.step1_ingest import run as ingest_run
+from element_ardor.step2_overhang import OverhangParams, run as overhang_run
+from element_ardor.step3_segmentation import SegmentationParams, run as segmentation_run
+from element_ardor.step4_field_solver import FieldSolverParams, run as field_run
+from element_ardor.step5_layers import LayerParams, run as layers_run
+from element_ardor.step6_toolpath2d import (
     InfillPattern,
     Step6Params,
     _classify_contours,

@@ -16,7 +16,7 @@ Usage CLI :
 
 Le `resegmentation_hook` de l'etape 10 est laisse a None ici : l'implementer
 reellement demanderait de re-jouer step3->step8 avec exclusion d'angles
-(voir CLAUDE.md, "Detail de pipeline/step10_adjustment.py", limite #23) -
+(voir CLAUDE.md, "Detail de element_ardor/step10_adjustment.py", limite #23) -
 hors perimetre d'un premier passage dont l'objectif est de VOIR le
 resultat. Sans hook, toute collision non resolue par reorientation locale
 bascule directement en `fallback_support`, un comportement deja explicite
@@ -32,9 +32,10 @@ from typing import Callable, Optional
 
 import numpy as np
 
-from core import progress as _core_progress
-from pipeline.skin import chain as skin_chain
-from pipeline.skin.inject import inject as skin_inject
+from core import progress as _core_progress, runtime
+from core.runtime import RuntimeOptions
+from element_ardor.skin import chain as skin_chain
+from element_ardor.skin.inject import inject as skin_inject
 from core.mesh_types import (
     CollisionReport,
     ColorMap,
@@ -52,22 +53,22 @@ from core.mesh_types import (
     ToolpathMachine,
     TravelRoutingDiagnostic,
 )
-from pipeline.step1_ingest import check_fits_platform
-from pipeline.step1_ingest import run as ingest_run
-from pipeline.step1b_junction_detection import detect_junction_zones
-from pipeline.step2_overhang import OverhangParams, run as overhang_run
-from pipeline.step3_segmentation import SegmentationParams, run as segmentation_run
-from pipeline.step4_field_solver import FieldSolverParams, run as field_solver_run
-from pipeline.step5_layers import LayerParams, run as layers_run
-from pipeline.step5b_collision_order import CollisionOrderParams, run as collision_order_run
-from pipeline.step6_toolpath2d import Step6Params, run as toolpath2d_run
-from pipeline.step7_scheduling import Step7Params, run as scheduling_run
-from pipeline.step8_machine_toolpath import gradient_direction_field
-from pipeline.step8_machine_toolpath import Step8Params, run as machine_toolpath_run
-from pipeline.step8b_travel_routing import TravelRoutingParams, route_long_travels
-from pipeline.step9b_support_check import SupportCheckParams, run as support_check_run
-from pipeline.step9_collision_sim import CollisionSimParams, run as collision_run
-from pipeline.step10_adjustment import (AdjustmentReport, Step10Params, clamp_head_height, reorient_coupled_tiers,
+from element_ardor.step1_ingest import check_fits_platform
+from element_ardor.step1_ingest import run as ingest_run
+from element_ardor.step1b_junction_detection import detect_junction_zones
+from element_ardor.step2_overhang import OverhangParams, run as overhang_run
+from element_ardor.step3_segmentation import SegmentationParams, run as segmentation_run
+from element_ardor.step4_field_solver import FieldSolverParams, run as field_solver_run
+from element_ardor.step5_layers import LayerParams, run as layers_run
+from element_ardor.step5b_collision_order import CollisionOrderParams, run as collision_order_run
+from element_ardor.step5c_skin_projection import SkinProjectionParams, run as skin_projection_run
+from element_ardor.step6_toolpath2d import Step6Params, run as toolpath2d_run
+from element_ardor.step7_scheduling import Step7Params, run as scheduling_run
+from element_ardor.step8_machine_toolpath import Step8Params, gradient_direction_field, run as machine_toolpath_run
+from element_ardor.step8b_travel_routing import TravelRoutingParams, route_long_travels
+from element_ardor.step9b_support_check import SupportCheckParams, run as support_check_run
+from element_ardor.step9_collision_sim import CollisionSimParams, run as collision_run
+from element_ardor.step10_adjustment import (AdjustmentReport, Step10Params, clamp_head_height, reorient_coupled_tiers,
                                         run as adjustment_run)
 
 
@@ -126,59 +127,12 @@ def ensure_toolhead(machine_profile: MachineProfile) -> None:
 
 
 def _default_machine_profile() -> MachineProfile:
-    """
-    Cinematique par defaut = la machine actuelle documentee dans CLAUDE.md
-    (plateau C tour complet + tete B in [0,180], perpendiculaires) - UN
-    exemple d'usage concret parmi d'autres cinematiques possibles (limite
-    de conception #18 de CLAUDE.md), pas la reference figee du type
-    MachineProfile lui-meme.
+    """Machine par defaut : `res/machines/index.json` designe son profil (donnees, R-030 point 4) ; tete,
+    cinematique, limites d'axes et plateau viennent de ce fichier, jamais du code. Tete absente : journal et
+    `nozzle_model=None`, step9 degrade en `nozzle_model_checked=False`."""
+    from config.machine_profiles import load_machine_profile
 
-    Charge aetheris-4.glb comme nozzle_model si present ; repli sur None
-    (log, pas de crash) sinon - step9 degrade gracieusement dans ce cas
-    (`nozzle_model_checked=False`), voir CLAUDE.md.
-    """
-    import os
-
-    platform_axis = np.array([0.0, 0.0, 1.0])
-    head_axis = np.array([1.0, 0.0, 0.0])
-
-    nozzle_model = None
-    try:
-        from file_io.mesh_loader import load_toolhead_by_id
-
-        nozzle_model = load_toolhead_by_id("aetheris-4")
-    except Exception as exc:  # pragma: no cover - chemin de repli, pas une logique testee
-        print(f"[main] Avertissement : echec du chargement de la tete aetheris-4 ({exc}) - "
-              f"simulation de collision desactivee (nozzle_model=None).", file=sys.stderr)
-
-    return MachineProfile(
-        rotation_axes=[
-            RotationAxisSpec(axis=platform_axis, angle_range_deg=(0.0, 360.0)),
-            RotationAxisSpec(axis=head_axis, angle_range_deg=(0.0, 185.0)),
-        ],
-        platform_origin=np.array([0.0, 0.0, 0.0]),
-        nozzle_model=nozzle_model,
-        nozzle_diameter=0.4,
-        # Limites de la tete (axe B). Fichier RRF ACTIF : config.g (confirme par
-        # l'utilisateur, 2026-10-06), M203 B100000 (/min) = 1667 deg/s et M201 B1300
-        # = 1300 deg/s2 (unites supposees en degres). 4axisinput.g (360 deg/s,
-        # 2000 deg/s2) et les valeurs de 2026-09-28 (750, 300) ne sont pas actifs.
-        # Le profil n'a qu'une valeur pour tous les axes de rotation ; C, couple a la
-        # position, n'est jamais lisse (limite #59) : elles ne s'appliquent qu'a B.
-        # Non modelises : Y (600 deg/s, 4000 deg/s2) et Z (6,7 mm/s, 70 mm/s2).
-        max_angular_velocity=float(np.radians(1666.7)),
-        max_angular_acceleration=float(np.radians(1300.0)),
-        # Machine ACTUELLE : R C Z B, pas d'axe Y -- C est impose par la
-        # position du point (limite #59). +R = -Y a angles nuls : B > 0 (axe
-        # X) penche la normale de couche vers -Y, c'est-a-dire vers +R (le
-        # surplomb s'etend vers l'exterieur, convention verifiee avec
-        # l'utilisateur, cf. scripts/gen_elbow_tube_gcode.py). Apres l'upgrade
-        # (axe lineaire de plus) : position_coupled_axes=[].
-        position_coupled_axes=[0],
-        radial_direction=np.array([0.0, -1.0, 0.0]),
-        # Plateau de 300 mm de diametre (utilisateur, 2026-09-29).
-        platform_radius=150.0,
-    )
+    return load_machine_profile()
 
 
 @dataclass
@@ -233,6 +187,7 @@ class PipelineParams:
     # Sans noyau natif, ou avec des zones de jonction, le moteur retombe sur TetGen.
     mesher: str = "tetgen"
     tetranet_refuse_ratio: float = 0.05   # points ambigus / sommets de la bande : au-dela, modele refuse
+    tetranet_feature_angle_deg: float = 0.0   # > 0 : aretes vives protegees (angle entre normales ; ex. 30), piste C
     overhang: OverhangParams = field(default_factory=OverhangParams)
     segmentation: SegmentationParams = field(default_factory=SegmentationParams)
     # Voie unique : champ = distance au plateau par la methode de la chaleur, flux
@@ -256,7 +211,7 @@ class PipelineParams:
     # reordonnancement de COUCHES ENTIERES) : 70% des defauts d'ordre
     # restants sur death.stl etaient INTRA-anneau (deux sommets consecutifs
     # d'une meme paroi sur une couche courbe), hors de portee de step5 - voir
-    # pipeline/step6_toolpath2d.py Decision 5. L'ORDRE des troncons entre eux
+    # element_ardor/step6_toolpath2d.py Decision 5. L'ORDRE des troncons entre eux
     # n'est PAS decide (aucun mecanisme actif actuellement) : une tentative de
     # tri par altitude locale a ete mesuree et s'est averee une regression
     # (voir historique de session) - retiree, pas reintroduite sans nouvelle
@@ -298,13 +253,8 @@ class PipelineParams:
     coupled_reorientation_tiers: Optional[tuple[float, ...]] = None      # ex. (45.0, 90.0, 181.0)
     coupled_reorientation_rounds: int = 3
     machine_profile: MachineProfile = field(default_factory=_default_machine_profile)
-    # Routage des trajets a vide longs (CLAUDE.md limite #46) : palliatif
-    # lift-and-traverse valide par collision, PAS un vrai path-planning 3D
-    # (voir pipeline/step8b_travel_routing.py). Opt-in, None = DESACTIVE
-    # par defaut - meme discipline que junction_refinement_resolution :
-    # ce mecanisme ajoute un cout de calcul non nul (re-teste chaque trajet
-    # a vide long contre l'index de matiere imprimee), jamais impose sans
-    # activation explicite de l'appelant.
+    # Routage des trajets a vide longs (limite #46) : palliatif lift-and-traverse valide par collision, PAS un
+    # vrai path-planning 3D (step8b_travel_routing.py). Opt-in (None = desactive).
     travel_routing: Optional[TravelRoutingParams] = None
     # step5b (2026-10-01) : ordre des couches contraint par la tete - la
     # couche sur laquelle la tete toucherait une autre passe avant elle.
@@ -314,26 +264,22 @@ class PipelineParams:
     # l_shape et l-triple inchanges. None = ordre de step5 seul.
     collision_order: Optional[CollisionOrderParams] = None  # step5b inadapte au champ de la chaleur (limite #79)
     # Verification du support de depot sur la trajectoire machine reelle
-    # (voir pipeline/step9b_support_check.py) : quelle matiere est extrudee
+    # (voir element_ardor/step9b_support_check.py) : quelle matiere est extrudee
     # sans rien de deja imprime en dessous, et s'agit-il d'un defaut d'ORDRE
     # (le support existe, depose trop tard) ou d'un surplomb REEL.
-    # Opt-in, None = DESACTIVE par defaut - meme discipline que
-    # travel_routing : le mecanisme ajoute un cout non nul (une passe sur
-    # tous les points en extrusion), jamais impose sans activation explicite.
+    # Opt-in (None = desactive) : cout non nul, jamais impose sans activation explicite.
     support_check: Optional[SupportCheckParams] = None
-    # Directions cibles de step4 projetees sur les inclinaisons ATTEIGNABLES
-    # quand le premier axe est couple a la position (machine actuelle, limite
-    # #59) : voir FieldSolverParams.radial_tilt_origin et limite #64. ACTIVE
-    # par defaut apres mesure sur les QUATRE modeles de res/test_models/
-    # (matiere sans appui : l_shape -9 %, l-triple -45 %, death -23 %,
-    # turkish -30 % ; ecart tete/normale median 16-49 deg -> 3-6 deg).
-    # Sans effet sur une machine a C libre (position_coupled_axes vide) ou si
-    # radial_tilt_origin est deja renseigne.
+    # Directions cibles de step4 projetees sur les inclinaisons ATTEIGNABLES quand le premier axe est couple a
+    # la position (limites #59, #64 ; mesure sur les 4 modeles). Sans effet si C est libre.
     reachable_tilt_from_machine: bool = True
     # Lissage non-planaire (voie chaleur) : `None` = desactive (defaut). Zones accessibles, creusement du corps sous
-    # la peau, trajectoires de surface et ordre (pipeline/skin/, chantier du 2026-10-28). Non mesure sur les quatre
+    # la peau, trajectoires de surface et ordre (element_ardor/skin/, chantier du 2026-10-28). Non mesure sur les quatre
     # modeles : ne jamais l'activer par defaut sans mesure.
     skin: Optional[skin_chain.SkinParams] = None
+    # Coque ramenee sur la surface d'origine (step5c, R-030 point 8) : opt-in, None = desactive.
+    skin_projection: Optional[SkinProjectionParams] = None
+    # Options d'execution (natif, GPU, TetGen, fils) : plus aucune variable d'environnement (R-030 point 3).
+    runtime: RuntimeOptions = field(default_factory=runtime.options)
 
 
 @dataclass
@@ -373,7 +319,7 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
     from file_io.gcode_export import (GcodeParams, export_gcode, head_zlow_from_table, material_travel_check,
                                       toolpath_arrays)
     from file_io.pivot_length import current_pivot_to_tip
-    from pipeline import step9_collision_sim as s9
+    from element_ardor import step9_collision_sim as s9
     machine, sim = params.machine_profile, params.collision
     if pivot_to_tip is None:
         pivot_to_tip, _origin = current_pivot_to_tip()
@@ -439,6 +385,7 @@ def _detect_junction_zones(mesh_path: str, params: PipelineParams):
         place_on_platform=params.place_on_platform,
         mesher=params.mesher,
         tetranet_refuse_ratio=params.tetranet_refuse_ratio,
+        tetranet_feature_angle_deg=params.tetranet_feature_angle_deg,
     )
     light_overhang_map = overhang_run(light_mesh_data, params.overhang)
     light_segmentation_params = (
@@ -474,6 +421,7 @@ def _ingest_stage(mesh_path: str, params: PipelineParams, junction_zones, progre
         place_on_platform=params.place_on_platform,
         mesher=params.mesher,
         tetranet_refuse_ratio=params.tetranet_refuse_ratio,
+        tetranet_feature_angle_deg=params.tetranet_feature_angle_deg,
     )
     _core_progress.set_stage_switcher(None)
     if current[0] == "import":      # jamais bascule (chemin sans jalon) : l'etape existe quand meme, de 0 a 1
@@ -491,6 +439,8 @@ def _layers_stage(params: PipelineParams, tet_mesh, mesh_data, scalar_field, reg
     print("[main] Etape 5/10 - extraction des couches courbes")
     with _core_progress.phase(0.0, 0.7 if params.collision_order is not None else 1.0):
         layers = layers_run(tet_mesh, mesh_data, scalar_field, region_dependency_graph, params.layers)
+    if params.skin_projection is not None:
+        layers, _ = skin_projection_run(layers, mesh_data, params.skin_projection)
     if params.collision_order is not None:
         with _core_progress.phase(0.7, 1.0):
             layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)
@@ -654,6 +604,13 @@ def _adjustment_stage(params: PipelineParams, toolpath, collision_report, step8_
 
 def run_pipeline(mesh_path: str, params: PipelineParams,
                  progress: Optional[Callable[[str, float], None]] = None) -> PipelineResult:
+    """Un run = ses options (`params.runtime`) et son etat ; voir `_run_pipeline` pour le detail."""
+    with runtime.use(params.runtime):
+        return _run_pipeline(mesh_path, params, progress)
+
+
+def _run_pipeline(mesh_path: str, params: PipelineParams,
+                  progress: Optional[Callable[[str, float], None]] = None) -> PipelineResult:
     """Enchaine step1 a step10. step4/5/7 recoivent `mesh_data`/`tet_mesh` de step1 directement ; step8
     consomme `colored_layers` de step7 ; step9 et step10 partagent `machine_profile` et `params.collision`.
 
@@ -764,7 +721,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     params = PipelineParams(resolution=args.resolution, mesher=args.mesher)
     params.layers = LayerParams(layer_height_base=args.layer_height)
 
-    from pipeline.step1_ingest import MeshIngestError, SurfaceInconsistentError
+    from element_ardor.step1_ingest import MeshIngestError, SurfaceInconsistentError
 
     try:
         result = run_pipeline(args.mesh_path, params)

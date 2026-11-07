@@ -1,7 +1,7 @@
 """
 tests/test_step5_layers.py
 
-Tests pour pipeline/step5_layers.py, sur des mesh synthetiques generes a la
+Tests pour element_ardor/step5_layers.py, sur des mesh synthetiques generes a la
 volee (aucun fichier externe requis).
 
 Execution : pytest tests/test_step5_layers.py -v
@@ -19,11 +19,11 @@ import trimesh
 
 from core.geometry_utils import point_in_polygon_2d
 from core.mesh_types import Region, RegionDependencyGraph, ScalarField, TetMesh
-from pipeline.step1_ingest import run as ingest_run
-from pipeline.step2_overhang import OverhangParams, run as overhang_run
-from pipeline.step3_segmentation import SegmentationParams, run as segmentation_run
-from pipeline.step4_field_solver import FieldSolverParams, run as field_run
-from pipeline.step5_layers import (
+from element_ardor.step1_ingest import run as ingest_run
+from element_ardor.step2_overhang import OverhangParams, run as overhang_run
+from element_ardor.step3_segmentation import SegmentationParams, run as segmentation_run
+from element_ardor.step4_field_solver import FieldSolverParams, run as field_run
+from element_ardor.step5_layers import (
     LayerExtractionError,
     LayerParams,
     _extract_closed_contours,
@@ -425,7 +425,7 @@ def test_l_shape_layers_have_valid_ordering(l_shape_data):
     mesh_data, tet_mesh, overhang_map, regions, field = l_shape_data
     params = LayerParams(layer_height_base=1.0)
 
-    from pipeline.step5_layers import _compute_region_ranks
+    from element_ardor.step5_layers import _compute_region_ranks
 
     ranks = _compute_region_ranks(regions)
     layers = layers_run(tet_mesh, mesh_data, field, regions, params)

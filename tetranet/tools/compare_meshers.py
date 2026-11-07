@@ -7,7 +7,7 @@ import numpy as np
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, ROOT)
 import main
-from pipeline.step9b_support_check import SupportCheckParams
+from element_ardor.step9b_support_check import SupportCheckParams
 
 stl, mesher = sys.argv[1], sys.argv[2]
 resolution = float(sys.argv[3]) if len(sys.argv) > 3 else 1.5

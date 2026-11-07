@@ -11,7 +11,7 @@ import numpy as np
 import trimesh
 
 from core.tet_coverage import surface_outside_volume
-from pipeline import step1_ingest
+from element_ardor import step1_ingest
 
 
 def _box_with_tets(extents=(10.0, 10.0, 10.0), resolution=1.5):

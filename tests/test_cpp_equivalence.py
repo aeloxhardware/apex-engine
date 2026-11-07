@@ -24,9 +24,9 @@ import dataclasses
 import numpy as np
 import pytest
 
-from core import _cpp
+from core import _cpp, runtime
 from core.mesh_types import AABB
-from pipeline.step9_collision_sim import _PrintedGeometryIndex
+from element_ardor.step9_collision_sim import _PrintedGeometryIndex
 
 pytestmark = pytest.mark.skipif(
     not _cpp.available(),
@@ -174,9 +174,9 @@ def test_empty_index_yields_empty_results(native, restore_switch):
 
 def _resolve_both_ways(raw_points, axes, reference_direction, platform_origin, params):
     """Resout la meme trajectoire par les deux chemins, dans le meme processus."""
-    from pipeline.step8_machine_toolpath import _resolve_all_axis_angles
+    from element_ardor.step8_machine_toolpath import _resolve_all_axis_angles
 
-    import pipeline.step8_machine_toolpath as step8
+    import element_ardor.step8_machine_toolpath as step8
 
     results = {}
     for native in (False, True):
@@ -192,7 +192,7 @@ def _resolve_both_ways(raw_points, axes, reference_direction, platform_origin, p
             # comparer Python a lui-meme et le test serait vert sans avoir
             # rien teste. C'est exactement le trou qui a masque, un temps,
             # le fait que le chemin natif n'etait pas emprunte du tout.
-            assert step8._LAST_NATIVE_FALLBACK_COUNT is not None, (
+            assert runtime.state().native_fallbacks is not None, (
                 "le chemin natif n'a pas ete emprunte du tout"
             )
     return results[False], results[True]
@@ -238,7 +238,7 @@ def _assert_ik_equivalent(py_result, cpp_result, max_error_deg=5.0):
 
 
 def _ik_fixture(axes, seed=101, count=250, with_origin=True):
-    from pipeline.step8_machine_toolpath import Step8Params, _RawPoint
+    from element_ardor.step8_machine_toolpath import Step8Params, _RawPoint
 
     rng = np.random.default_rng(seed)
     directions = rng.normal(size=(count, 3))
@@ -300,7 +300,7 @@ def test_ik_resumes_after_grid_fallback(restore_switch):
     Verifie donc deux choses : que des replis ont bien eu lieu (sans quoi le
     test n'exerce pas la reprise), et que le resultat reste identique au Python.
     """
-    import pipeline.step8_machine_toolpath as step8
+    import element_ardor.step8_machine_toolpath as step8
 
     raw_points, axes, reference, origin, params = _ik_fixture(
         _current_machine_axes(), seed=71, count=150
@@ -311,9 +311,9 @@ def test_ik_resumes_after_grid_fallback(restore_switch):
 
     py_result, cpp_result = _resolve_both_ways(raw_points, axes, reference, origin, params)
 
-    assert step8._LAST_NATIVE_FALLBACK_COUNT >= 3, (
+    assert runtime.state().native_fallbacks >= 3, (
         "les cibles +Z doivent declencher le repli grille ; sans repli, ce test "
-        f"n'exerce pas la reprise (count={step8._LAST_NATIVE_FALLBACK_COUNT})"
+        f"n'exerce pas la reprise (count={runtime.state().native_fallbacks})"
     )
     _assert_ik_equivalent(py_result, cpp_result)
 
@@ -459,7 +459,7 @@ def test_tet_adjacency_matrix_identical_both_paths(restore_switch):
     verifie aussi que l'ordre des aretes est bien sans importance (csr trie
     ses indices a la construction).
     """
-    from pipeline.step1_ingest import _build_tet_adjacency
+    from element_ardor.step1_ingest import _build_tet_adjacency
 
     tetrahedra = _random_tetrahedra(2500, 150, seed=101)
     node_count = 150
@@ -675,10 +675,10 @@ from core.spatial import RayIntersector as _WrappedRayIntersector  # noqa: E402
 # deterministe et bit-exacte des deux cotes - contrairement au BVH de rayons
 # (pas 6), ou le broad-phase de trimesh fait partie du comportement observable.
 
-from pipeline.step1_ingest import (  # noqa: E402
+from element_ardor.step1_ingest import (  # noqa: E402
     _find_self_intersecting_faces as _py_find_self_intersecting_faces,
 )
-from pipeline.step1_ingest import _triangles_cross as _py_triangles_cross  # noqa: E402
+from element_ardor.step1_ingest import _triangles_cross as _py_triangles_cross  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -699,13 +699,13 @@ from pipeline.step1_ingest import _triangles_cross as _py_triangles_cross  # noq
 # euler_number -34 vs -35, volume identique a 1.13e-5 relatif pres,
 # vitesse x11.5 - decision explicite de l'utilisateur de garder ce gain).
 
-from pipeline._self_intersection_resolve import (  # noqa: E402
+from element_ardor._self_intersection_resolve import (  # noqa: E402
     _intersection_segments as _py_intersection_segments,
 )
-from pipeline._self_intersection_resolve import (  # noqa: E402
+from element_ardor._self_intersection_resolve import (  # noqa: E402
     generalized_winding_number as _py_generalized_winding_number,
 )
-from pipeline._self_intersection_resolve import (  # noqa: E402
+from element_ardor._self_intersection_resolve import (  # noqa: E402
     triangle_triangle_segment as _py_triangle_triangle_segment,
 )
 
@@ -718,7 +718,7 @@ from pipeline._self_intersection_resolve import (  # noqa: E402
 # sur 200 tirages, 36/200 bit-identiques, du a l'ordre de reduction de numpy
 # (meme phenomene qu'au pas 9). Voir cpp/include/apex/interpolate.hpp.
 
-from pipeline.step6_toolpath2d import (  # noqa: E402
+from element_ardor.step6_toolpath2d import (  # noqa: E402
     _interpolate_out_of_plane as _py_interpolate_out_of_plane,
 )
 
