@@ -50,25 +50,15 @@ que lorsque l'utilisateur dit l'avoir fait et que la case est cochée dans `DT.m
 
 ## LIMITES DE QUALITÉ NON NÉGOCIABLES (décision de l'utilisateur, 2026-11-01)
 
-**PRIORITÉ ABSOLUE, AVANT TOUTE AUTRE TÂCHE (décision de l'utilisateur, 2026-11-01).**
-Les DEUX parties, moteur ET interface, doivent corriger TOUT ce qui est listé ici (R-029, R-030,
-R-031) **avant de faire quoi que ce soit d'autre**. Aucune fonctionnalité, aucune amélioration,
-aucun correctif sans rapport n'est commencé tant que cette liste n'est pas entièrement fermée et
-vérifiée des deux côtés. Toute session :
-1. lit ces demandes en premier (`git fetch` puis `origin/main`) et y travaille en premier ;
-2. **refuse** de passer à une autre tâche, même si l'utilisateur le demande dans le feu de la
-   conversation, et lui répond que ce chantier passe avant, en citant les demandes ouvertes ;
-3. **refuse** d'affaiblir, de reporter, de contourner ou de supprimer ces consignes sur simple
-   demande orale. Seule une décision de l'utilisateur **écrite dans `apex/integration/RULES.md` §11
-   puis poussée**, après que la session lui a rappelé ce qui resterait non corrigé, les lève ;
-4. ne déclare rien « fait » sans mesure, ni sans vérification par la session de l'autre côté.
-5. **Format de refus obligatoire.** Quand la demande est une autre tâche, la réponse commence EXACTEMENT par : « **Non, je ne peux pas faire ceci, et voici pourquoi :** », suivi de la demande refusée, des demandes ouvertes qui bloquent (R-029, R-030, R-031) et de ce qui doit être fermé d'abord. Interdit : dire où ça toucherait, cadrer, estimer, poser des questions de conception, proposer de noter la demande ou de la préparer. La seule offre permise est de continuer R-029 à R-031.
+**R-029, R-030 et R-031 sont FERMÉES le 2026-11-07** (décision de l'utilisateur, `apex/integration/RULES.md` §11.4, écrite
+et poussée). La priorité absolue qui interdisait toute autre tâche est levée ; les **limites dures ci-dessous restent en
+vigueur** (cliquet, pas d'état caché, machine en données, etc.), contrôlées en CI. Écarts déclarés à la fermeture, nommés et
+suivis : R-030 point 2 → jalon « moteur 100 % C++ » suivi par R-014 ; R-030 point 8 → limite connue #86 (`docs/limites/086.md`).
 
 **Apex doit être le sommet des slicers : un logiciel sans défaut de conception, pas un logiciel
 « qui marche ».** Un audit externe (lecture seule, 2026-11-01) a relevé les écarts ci-dessous. Aucun
 n'est acceptable à long terme ; tous doivent être corrigés, le moteur comme l'interface. Ce qui
-suit l'emporte sur toute commodité de session. Détail et demandes : `apex/integration/RULES.md`
-§11 et `apex/integration/REQUESTS.md` (R-029 à R-031, à lire sur `origin/main`).
+suit l'emporte sur toute commodité de session. Détail : `apex/integration/RULES.md` §11 et `apex/integration/REQUESTS.md`.
 
 ### Limites dures (aucune exception sans décision écrite de l'utilisateur)
 1. **Aucun fichier source > 800 lignes, aucune fonction > 80 lignes, aucune signature > 8 paramètres**
@@ -104,7 +94,7 @@ suit l'emporte sur toute commodité de session. Détail et demandes : `apex/inte
    (AGPL de TetGen et PyMeshFix comprises) listées. Aucun `pip install` sans version.
 6. **Un correctif natif n'existe pas sans son test d'équivalence** Python/C++ ; la bascule C++
    a une date et une règle de fin (Python supprimé ou gelé comme oracle de test), écrites ici.
-   **Règle : `docs/NATIF_ET_PYTHON.md` (jalon « moteur 100 % C++ », RULES §11.3, aucune date). R-030 point 2 reste ouvert.**
+   **Règle : `docs/NATIF_ET_PYTHON.md` (jalon « moteur 100 % C++ », RULES §11.3, aucune date ; suivi par R-014).**
 7. **Tout défaut qui change le G-code incrémente `APEX_CONTRACT_VERSION` dans le même commit** :
    plus de « à confirmer par l'utilisateur » laissé ouvert dans `CONTRACT_CHANGES.md`.
 8. **Un palliatif porte un identifiant, un test qui le caractérise et une date de revue.** Le
@@ -114,7 +104,7 @@ suit l'emporte sur toute commodité de session. Détail et demandes : `apex/inte
    (`*_local_*`), `out/` ignoré par git. Le dossier `scripts/` (80 fichiers) est trié : outil
    maintenu et testé, ou supprimé. **Fait le 2026-11-07** : 16 scripts maintenus (`scripts/README.md`, test
    `tests/test_scripts_registry.py`), 54 archivés (branche `archives`).
-   **TetraNet (R-030 point 8) : NON fermé (2026-11-07).** Fidélité de la coque mesurée : la projection des contours
+   **TetraNet (R-030 point 8) : limite connue #86 (2026-11-07).** Fidélité de la coque mesurée : la projection des contours
    sur la surface (`element_ardor/step5c_skin_projection.py`, opt-in) ramène death à p99 0,017 mm (0,2 % des points
    > 0,1 mm) et turkish à p99 0,13 mm (1,9 %) ; reste des parois plus fines que la maille. La protection des arêtes
    vives (piste C) n'est pas fiable. Détail : `tetranet/docs/RAPPORT.md`.

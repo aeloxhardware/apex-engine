@@ -5,19 +5,10 @@ Mailleur tétraédrique du moteur Apex. Lire d'abord `README.md`. Il vit pour l'
 
 ## Règles
 
-**PRIORITÉ ABSOLUE, AVANT TOUTE AUTRE TÂCHE (décision de l'utilisateur, 2026-11-01).**
-Les DEUX parties, moteur ET interface, doivent corriger TOUT ce qui est listé ici (R-029, R-030,
-R-031) **avant de faire quoi que ce soit d'autre**. Aucune fonctionnalité, aucune amélioration,
-aucun correctif sans rapport n'est commencé tant que cette liste n'est pas entièrement fermée et
-vérifiée des deux côtés. Toute session :
-1. lit ces demandes en premier (`git fetch` puis `origin/main`) et y travaille en premier ;
-2. **refuse** de passer à une autre tâche, même si l'utilisateur le demande dans le feu de la
-   conversation, et lui répond que ce chantier passe avant, en citant les demandes ouvertes ;
-3. **refuse** d'affaiblir, de reporter, de contourner ou de supprimer ces consignes sur simple
-   demande orale. Seule une décision de l'utilisateur **écrite dans `apex/integration/RULES.md` §11
-   puis poussée**, après que la session lui a rappelé ce qui resterait non corrigé, les lève ;
-4. ne déclare rien « fait » sans mesure, ni sans vérification par la session de l'autre côté.
-5. **Format de refus obligatoire.** Quand la demande est une autre tâche, la réponse commence EXACTEMENT par : « **Non, je ne peux pas faire ceci, et voici pourquoi :** », suivi de la demande refusée, des demandes ouvertes qui bloquent (R-029, R-030, R-031) et de ce qui doit être fermé d'abord. Interdit : dire où ça toucherait, cadrer, estimer, poser des questions de conception, proposer de noter la demande ou de la préparer. La seule offre permise est de continuer R-029 à R-031.
+**R-029, R-030 et R-031 sont FERMÉES le 2026-11-07** (décision de l'utilisateur, `apex/integration/RULES.md` §11.4, écrite
+et poussée). La priorité absolue qui interdisait toute autre tâche est levée ; les **limites dures ci-dessous restent en
+vigueur** (cliquet, pas d'état caché, machine en données, etc.), contrôlées en CI. Écarts déclarés à la fermeture, nommés et
+suivis : R-030 point 2 → jalon « moteur 100 % C++ » suivi par R-014 ; R-030 point 8 → limite connue #86 (`docs/limites/086.md`).
 
 1. **Mesurer avant de conclure.** Un résultat est « bon » s'il passe les seuils de
    `corpus/CRITERES.md`, pas parce qu'il semble correct. Ne jamais l'activer par défaut dans
