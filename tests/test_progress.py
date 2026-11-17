@@ -111,3 +111,20 @@ def test_failed_slice_leaves_no_stage_open(tmp_path, capsys):
     request.write_text(json.dumps({"contract": schema.APEX_CONTRACT_VERSION, "mesh": str(bad), "output_dir": str(tmp_path)}))
     assert slice_cli.slice_main(["--request", str(request)]) == 3
     assert runtime.state().progress_sink is None
+
+
+def test_substep_sans_abonne_est_sans_effet():
+    progress.set_substep_sink(None)
+    progress.substep("prepare", 0.5)          # ne leve rien
+    assert progress.substep_sink() is None
+
+
+def test_substep_transmet_la_fraction_bornee():
+    seen = []
+    progress.set_substep_sink(lambda name, f: seen.append((name, f)))
+    try:
+        progress.substep("verify", 0.25)
+        progress.substep("verify", 7)         # borne a 1.0
+    finally:
+        progress.set_substep_sink(None)
+    assert seen == [("verify", 0.25), ("verify", 1.0)]

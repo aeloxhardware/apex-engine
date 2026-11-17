@@ -47,38 +47,26 @@ déplacements à vide ne portent pas d'étiquette propre : ils suivent celle de 
 
 ## Moteur général : sections planaires déformées
 
-Couche k = section du maillage par la surface z = F_k(x,y) = c_k + λ(c_k)·D(x,y) (c_k : plans de pas h ; D ≤ 0 :
-relief doux ; λ : rampe 0 → 1 sur les `min(hauteur, 8 × reach)` derniers millimètres). Sans relief, c'est un tranchage
-planaire classique ; le relief fait épouser le dessus aux couches du haut là où il est doux. La section est faite sur le
-maillage dont les sommets sont déformés (chaque triangle est coupé selon la fonction z − F_k, parité paire-impaire pour les
-cavités), raffiné à 1 mm en projection XY (raffinement conforme, sans jonction en T).
+Couche k = section du maillage par la surface z = F_k(x,y) = c_k + δ_k(x,y) (c_k : plans de pas h ; δ_k : relief
+LOCAL de la couche, `relief.py`). Sans relief, c'est un tranchage planaire classique ; avec lui, CHAQUE surface tournée
+vers le haut (pente ≤ min(angle de buse, 45°)), à n'importe quelle hauteur, est épousée d'un seul tenant par une peau de
+3 couches au lieu de former des marches. La section est faite sur le maillage raffiné à 1 mm en projection XY
+(raffinement conforme, sans jonction en T), à mi-épaisseur entre deux couches, parité paire-impaire pour les cavités.
 
-**Relief et garantie.** D est le plus grand relief dont les différences vérifient D(q) − D(p) ≤ min(|p−q|·tan α, reach) :
-un minorant « cône tronqué » du dessus de la pièce (colonnes les plus hautes à `amp` près), par transformée en chanfrein
-sur une grille de 0,5 mm, amplitude ≤ `min(reach, ¼ de la rampe)`. La matière déjà posée en q est sous F_{k−1}(q), la
-pointe est en F_k(p) : elle ne dépasse jamais la pointe de plus que cette enveloppe, donc la buse ne touche rien PAR
-CONSTRUCTION ; `head_check` ne fait que le vérifier (chaque couche contre la hauteur déjà imprimée). Épaisseur : h ±25 %
-au plus, dans [plancher, plafond] du profil.
+**Peau et écrasement (2026-11-15).** La couche de tête d'une surface est le plan le plus proche de son sommet ; ses 3
+couches de peau lui sont parallèles ; SOUS la peau, les couches s'écrasent (épaisseur nulle, non imprimées, leur tranche
+revient à la couche suivante) au lieu de se tordre : les parois restent planes, sauf leur dernier demi-millimètre. δ est
+l'extension lipschitzienne 3D des cibles : pente ≤ tan(min(α, 70°)) dans chaque couche (raccords courts), épaisseur dans
+[0, 1,25·h], première couche plate, étendue par couche ≤ longueur de buse. La matière déjà posée ne dépasse donc jamais
+la pointe de plus que min(r·tan α, longueur) : la buse ne touche rien PAR CONSTRUCTION ; `head_check` ne fait que le
+vérifier. Non suivis : surfaces plus étroites que 0,6 mm, bord d'une surface au pied d'une paroi qui la domine (sur la
+distance dont la buse a besoin).
 
-**Mesures (2026-10-31, après correction du raffinement, défauts de buse puis 45° / 10 mm).** Aucune collision de la tête
-(0 sur 2 400 à 230 000 points testés), épaisseur entre 0,15 et 0,20 mm. Pente des couches mesurée : ≤ 10,1° au défaut
-(10°) mais **48,2° pour un réglage de 45°** sur death : la transformée en chanfrein et le gradient mesuré sur la grille
-de 0,5 mm dépassent la pente visée de quelques pour cent à forte pente ; sans conséquence sur la collision mesurée,
-à resserrer si la garantie doit être stricte.
-
-| modèle | couches | temps (défaut / 45°-10 mm) | relief (défaut / 45°-10 mm) |
-|---|---:|---|---|
-| l_shape_overhang | 110 | 1,1 / 1,0 s | 2,00 / 5,50 mm |
-| real_overhang | 185 | 1,9 / 1,7 s | 2,00 / 9,25 mm |
-| l-triple-axis-overhanged-shape | 120-138 | 1,7 / 1,9 s | 2,00 / 5,50 mm |
-| death (Benchy à l'envers, 2 418 faces) | 256-263 | 22 / 33 s | 2,00 / 10,00 mm |
-| turkish (10 180 faces) | 309-312 | 88 / 90 s | 2,00 / 10,00 mm |
-
-Limites honnêtes : un seul relief pour toute la pièce, ancré sur les colonnes les plus hautes (les plateaux plus bas ne
-sont pas lissés, ils restent en marches planaires) ; les couches du haut dépassent le dessus de h/2 au plus (plan de
-coupe à mi-épaisseur) ; le dessous est toujours planaire (le moteur « surface en hauteur » suit en plus un dessous en
-relief) ; pas de support (un surplomb se dépose comme avec un tranchage planaire) ; le plus gros poste est le contrôle
-de collision et le calcul des sections (turkish : ~90 s).
+**Mesures et limites** : `docs/limites/087.md` (Benchy et les quatre modèles de référence). Historique : relief unique
+calé sur le sommet (jusqu'au 2026-11-14, marches sur toute surface plus basse) ; relief à épaisseur h ± 25 % (2026-11-14
+et 15, lignes tordues sur les parois sur 4 fois chaque décalage). Limites restantes : peau pleine un peu plus mince
+sous les surfaces épousées ; quelques irrégularités au pied d'un petit détail incliné (porte-canne d'un Benchy, dont le
+dessus est une boucle unique) ; pas de support ; dessous toujours planaire.
 
 ## Méthode (v0)
 

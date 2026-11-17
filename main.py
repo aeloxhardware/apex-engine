@@ -603,14 +603,18 @@ def _adjustment_stage(params: PipelineParams, toolpath, collision_report, step8_
 
 
 def run_pipeline(mesh_path: str, params: PipelineParams,
-                 progress: Optional[Callable[[str, float], None]] = None) -> PipelineResult:
-    """Un run = ses options (`params.runtime`) et son etat ; voir `_run_pipeline` pour le detail."""
+                 progress: Optional[Callable[[str, float], None]] = None,
+                 substep: Optional[Callable[[str, str, float], None]] = None) -> PipelineResult:
+    """Un run = ses options (`params.runtime`) et son etat ; voir `_run_pipeline` pour le detail.
+    `substep(slug, sous_etape, fraction)` : avancement reel des sous-etapes d'une etape (TetraNet : « prepare »,
+    « tetrahedralize », « verify » dans « tetrahedralization ») ; independant de `progress`."""
     with runtime.use(params.runtime):
-        return _run_pipeline(mesh_path, params, progress)
+        return _run_pipeline(mesh_path, params, progress, substep)
 
 
 def _run_pipeline(mesh_path: str, params: PipelineParams,
-                  progress: Optional[Callable[[str, float], None]] = None) -> PipelineResult:
+                  progress: Optional[Callable[[str, float], None]] = None,
+                  substep: Optional[Callable[[str, str, float], None]] = None) -> PipelineResult:
     """Enchaine step1 a step10. step4/5/7 recoivent `mesh_data`/`tet_mesh` de step1 directement ; step8
     consomme `colored_layers` de step7 ; step9 et step10 partagent `machine_profile` et `params.collision`.
 
@@ -623,6 +627,8 @@ def _run_pipeline(mesh_path: str, params: PipelineParams,
     check_model_fits_machine(mesh_path, params.machine_profile)
     _core_progress.set_stage_switcher(None)   # jamais un rappel laisse par une execution interrompue
     _stage, _current = _make_stage(progress)
+    _core_progress.set_substep_sink(
+        (lambda sub, fraction: substep(_current[0], sub, fraction)) if substep is not None else None)
 
     junction_zones = None
     if params.junction_refinement_resolution is not None:

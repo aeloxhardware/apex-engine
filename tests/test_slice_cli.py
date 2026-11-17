@@ -246,3 +246,13 @@ def test_slice_aeolis_heightfield_mode_still_refuses_it(tmp_path, capsys):
     result = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert result["status"] == "not_a_heightfield" and "surface en hauteur" in result["message"]
     assert not os.path.exists(tmp_path / "s" / "tore.gcode")
+
+
+def test_le_cli_active_le_noyau_natif_quand_il_est_charge(monkeypatch):
+    """Sans cela TetraNet retombe en silence sur TetGen : une requete ne peut pas fixer `runtime`."""
+    import slice_cli
+    from core.runtime import RuntimeOptions
+    monkeypatch.setattr(slice_cli._cpp, "available", lambda: True)
+    assert slice_cli._with_native_kernel(RuntimeOptions()).native is True
+    monkeypatch.setattr(slice_cli._cpp, "available", lambda: False)
+    assert slice_cli._with_native_kernel(RuntimeOptions()).native is False

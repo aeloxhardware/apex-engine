@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Optional
 import numpy as np
 import trimesh
-from core import _cpp
+from core import _cpp, progress as _progress, runtime
 from core.mesh_types import MeshData, TetMesh
 from core.spatial import KDTree, RayIntersector
 from element_ardor.step1_repair import (  # noqa: F401
@@ -58,6 +58,25 @@ TETRANET_CELL_PER_RESOLUTION = 2.0 / 3.0
 
 TETRANET_STATUS_INCONSISTENT_SURFACE = 4
 
+# Phases du noyau (enum Phase de tetranet.hpp, dans l'ordre) = sous-etapes de « tetrahedralization » (R-022).
+TETRANET_SUBSTEPS = ("prepare", "tetrahedralize", "verify")
+
+
+def _tetranet_progress_kwargs() -> dict:
+    """`progress=` du noyau, branche sur les sous-etapes ; rien sans abonne (le noyau ne rapporte alors rien)."""
+    sink = _progress.substep_sink()
+    if sink is None:
+        return {}
+
+    # Le noyau appelle depuis ses fils natifs, hors du run courant : `bind` rattache la barre de l'etape a ce run.
+    step_milestone = runtime.bind(_progress.milestone)
+
+    def on_phase(phase: int, fraction: float) -> None:
+        sink(TETRANET_SUBSTEPS[phase], fraction)
+        # la barre de l'etape elle-meme suit le travail reel des trois phases (jamais un tiers estime)
+        step_milestone((phase + fraction) / len(TETRANET_SUBSTEPS))
+    return {"progress": on_phase}
+
 
 def tetranet_available() -> bool:
     """Le noyau natif est charge ET contient TetraNet (jamais une erreur s'il manque)."""
@@ -84,7 +103,8 @@ def _ingest_with_tetranet(
         if placement_offset != 0.0:
             vertices = vertices + np.array([0.0, 0.0, placement_offset])
     out = _cpp.module().tetranet_mesh(vertices, faces, float(resolution) * TETRANET_CELL_PER_RESOLUTION,
-                                      0.5, 0.05, float(refuse_ratio), 0, float(feature_angle_deg))
+                                      0.5, 0.05, float(refuse_ratio), 0, float(feature_angle_deg),
+                                      **_tetranet_progress_kwargs())
     mesher_report = {k: v for k, v in out.items()
                      if k not in ("tet_vertices", "tetrahedra", "surface_vertices", "surface_faces")}
     if out["tets"] == 0 or out["status"] == TETRANET_STATUS_INCONSISTENT_SURFACE:

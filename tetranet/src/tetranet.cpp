@@ -5,10 +5,12 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <numeric>
 #include <thread>
 #include <unordered_map>
@@ -45,6 +47,48 @@ void parallel_for(int64_t n, unsigned threads, F fn) {  // fn(begin, end, thread
     for (auto& th : pool) th.join();
 }
 
+// ---------------------------------------------------------------- progression réelle
+// Sérialise les rappels, garde la fraction croissante dans une phase et limite le débit (0,5 %).
+class Progress {
+public:
+    explicit Progress(const std::function<void(int, double)>& fn) : fn_(fn) {}
+    void report(int phase, double f) {
+        if (!fn_) return;
+        std::lock_guard<std::mutex> g(m_);
+        f = std::min(1.0, std::max(0.0, f));
+        if (phase == phase_) { if (f <= last_ || (f < 1.0 && f - last_ < 0.005)) return; }
+        else phase_ = phase;
+        last_ = f;
+        fn_(phase, f);
+    }
+private:
+    const std::function<void(int, double)>& fn_;
+    std::mutex m_;
+    int phase_ = -1;
+    double last_ = -1.0;
+};
+
+// Tranche [lo, hi] d'une phase pour une boucle de `total` tours : les fils appellent `add` par paquets.
+class Span {
+public:
+    Span(Progress& p, int phase, double lo, double hi, int64_t total) : p_(p), phase_(phase), lo_(lo), hi_(hi), total_(std::max<int64_t>(1, total)) {}
+    void add(int64_t n) {
+        const int64_t d = done_.fetch_add(n) + n;
+        p_.report(phase_, lo_ + (hi_ - lo_) * std::min(1.0, double(d) / double(total_)));
+    }
+    // À appeler en tête de chaque tour : un paquet de BATCH tours terminés est signalé d'un coup.
+    struct Tick {
+        Span& s; int64_t n = 0;
+        void operator()() { if (++n == BATCH) { s.add(n); n = 0; } }
+        ~Tick() { if (n) s.add(n); }
+    };
+    Tick tick() { return Tick{*this}; }
+private:
+    static constexpr int64_t BATCH = 2048;
+    Progress& p_; int phase_; double lo_, hi_; int64_t total_;
+    std::atomic<int64_t> done_{0};
+};
+
 // ---------------------------------------------------------------- surface + BVH
 
 struct Surface {
@@ -57,14 +101,22 @@ struct Surface {
     int64_t reoriented = 0, holes = 0, open_edges = 0, nonmanifold_edges = 0, flipped_edges = 0, edges = 0, degenerate = 0, duplicates = 0;
 };
 
+inline uint64_t mix64(uint64_t x) {   // finaliseur splitmix64
+    x += 0x9E3779B97F4A7C15ull; x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull; x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+    return x ^ (x >> 31);
+}
+
 uint64_t ekey(int a, int b) { if (a > b) std::swap(a, b); return (uint64_t(a) << 32) | uint32_t(b); }
 
 bool build_surface(const SurfaceMesh& in, Surface& s, bool fix_orientation) {
     size_t n = in.vertices.size() / 3, m = in.faces.size() / 3;
     if (n == 0 || m == 0) return false;
     struct Key { uint64_t a, b, c; bool operator==(const Key& o) const { return a == o.a && b == o.b && c == o.c; } };
-    struct H { size_t operator()(const Key& k) const { uint64_t h = k.a * 0x9E3779B97F4A7C15ull; h ^= (k.b + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2)); h ^= (k.c + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2)); return size_t(h); } };
+    // Les doubles issus d'un STL (float32) ont leurs 29 bits de poids faible nuls : sans mélange final, les masques de
+    // buckets ne voient presque que des collisions (soudure de 678 000 sommets : 149 s). splitmix64 sur chaque mot.
+    struct H { size_t operator()(const Key& k) const { return size_t(mix64(mix64(mix64(k.a) ^ k.b) ^ k.c)); } };
     std::unordered_map<Key, int, H> weld;
+    weld.reserve(n);
     std::vector<int> map(n);
     for (size_t i = 0; i < n; ++i) {
         double c[3] = {in.vertices[3 * i] + 0.0, in.vertices[3 * i + 1] + 0.0, in.vertices[3 * i + 2] + 0.0};  // +0.0 : -0 == +0
@@ -377,6 +429,8 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     out.vertices.clear();
     out.tetrahedra.clear();
     unsigned threads = prm.threads ? prm.threads : std::max(1u, std::thread::hardware_concurrency());
+    Progress prog(prm.progress);
+    prog.report(Prepare, 0.0);
 
     Surface surf;
     if (!(prm.cell_size > 0) || !build_surface(in, surf, prm.fix_orientation)) {
@@ -384,6 +438,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
         rep.reason = "surface vide ou taille de maille invalide";
         return rep;
     }
+    prog.report(Prepare, 0.05);               // surface soudée, orientée
     if (cleaned) {
         cleaned->vertices.clear(); cleaned->faces.clear();
         cleaned->vertices.reserve(surf.p.size() * 3); cleaned->faces.reserve(surf.tri.size() * 3);
@@ -394,6 +449,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     Bvh bvh;
     bvh.build(surf);
     rep.t_bvh = since(t0);
+    prog.report(Prepare, 0.10);               // arbre de recherche construit
     rep.surface_faces = int64_t(surf.tri.size()); rep.surface_edges = surf.edges; rep.surface_open_edges = surf.open_edges; rep.surface_holes = surf.holes;
     rep.surface_nonmanifold_edges = surf.nonmanifold_edges; rep.surface_flipped_edges = surf.flipped_edges;
     rep.surface_degenerate_faces = surf.degenerate; rep.surface_reoriented_faces = surf.reoriented; rep.surface_duplicate_faces = surf.duplicates;
@@ -419,6 +475,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     parallel_for(NA, threads, [&](int64_t b, int64_t e, unsigned) {
         for (int64_t q = b; q < e; ++q) { int i = q % (nx + 1), j = (q / (nx + 1)) % (ny + 1), k = q / (int64_t(nx + 1) * (ny + 1)); pos[q] = lo + V3(i * h, j * h, k * h); }
     });
+    prog.report(Prepare, 0.12);               // réseau posé
 
     // --- sommets de la bande : point le plus proche ; signe par nombre d'enroulement (tous les sommets)
     t0 = Clock::now();
@@ -431,8 +488,11 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     std::vector<int8_t> ps_sign(N, 0);            // signe par pseudonormale, pour mesurer les désaccords
     std::vector<uint8_t> ambiguous(N, 0);
     std::vector<float> wval(N, 0.f);               // nombre d'enroulement à la position d'origine du sommet
+    Span classify_span(prog, Prepare, 0.12, 0.70, N);   // sommets classés dedans/dehors
     parallel_for(N, threads, [&](int64_t b, int64_t e, unsigned) {
+        auto tick = classify_span.tick();
         for (int64_t v = b; v < e; ++v) {
+            tick();
             Hit hit = nearest(bvh, pos[v], band);
             if (hit.found) {
                 isband[v] = 1; qpt[v] = hit.q; dist[v] = float(std::sqrt(hit.d2));
@@ -484,14 +544,17 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
         for (int64_t v = 0; v < N; ++v) { if (isband[v]) continue; int8_t s = csign[find(v)]; sgn[v] = s ? s : 1; }
     }
     for (int64_t v = 0; v < N; ++v) if (isband[v]) ++rep.band_vertices;
+    prog.report(Prepare, 0.75);               // dedans/dehors tranché, bande comptée
     // --- ramener à la peau les sommets proches
     std::vector<V3> pos0 = pos;                         // positions de référence (réseau régulier)
     std::vector<V3> cut_pos, cut_ref;                   // sommets de coupe : position réelle (sur la peau) et position linéaire
     std::unordered_map<uint64_t, int64_t> cut_id;       // arête (u,v) -> indice du sommet de coupe
     if (!prm.use_cuts) {
         const double snap = prm.snap_alpha * h;
+        Span snap_span(prog, Prepare, 0.75, 0.98, N);
         parallel_for(N, threads, [&](int64_t b, int64_t e, unsigned) {
-            for (int64_t v = b; v < e; ++v) if (isband[v] && dist[v] <= snap) { pos[v] = snap_to_feature(features.get(), qpt[v], feature_radius); sgn[v] = 0; }
+            auto tick = snap_span.tick();
+            for (int64_t v = b; v < e; ++v) if (tick(), isband[v] && dist[v] <= snap) { pos[v] = snap_to_feature(features.get(), qpt[v], feature_radius); sgn[v] = 0; }
         });
     } else {
         // 1. arêtes du réseau dont les deux bouts sont de signes opposés ("violées")
@@ -513,10 +576,14 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
             if (j + 1 < ny) consider(bq, idB(i, j + 1, k), false);
             if (k + 1 < nz) consider(bq, idB(i, j, k + 1), false);
         }
+        prog.report(Prepare, 0.80);           // arêtes à couper recensées
         // 2. point de coupe de chaque arête : interpolation des distances, ramenée sur la peau
         std::vector<V3> cuts(viol.size()), refs(viol.size());
+        Span cut_span(prog, Prepare, 0.80, 0.97, int64_t(viol.size()));   // points de coupe calculés
         parallel_for(int64_t(viol.size()), threads, [&](int64_t b, int64_t e, unsigned) {
+            auto tick = cut_span.tick();
             for (int64_t k = b; k < e; ++k) {
+                tick();
                 const auto& ed = viol[k];
                 double du = dist[ed.u], dv = dist[ed.v];
                 double t = (du + dv) > 0 ? du / (du + dv) : 0.5;
@@ -548,8 +615,10 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     }
     for (int64_t v = 0; v < N; ++v) if (isband[v] && sgn[v] == 0) ++rep.snapped_vertices;
     rep.t_classify = since(t0);
+    prog.report(Prepare, 1.0);                // préparation terminée
 
     // --- tétraèdres : paires de centres voisins + arête de la face partagée
+    prog.report(Tetrahedralize, 0.0);
     t0 = Clock::now();
     const double vmin = prm.min_volume_ratio * h * h * h / 12.0;
     struct Local { std::vector<int32_t> tets; int64_t dropped = 0; };
@@ -635,9 +704,12 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
         } else { ++L.dropped; }
     };
     auto emit_any = [&](Local& L, int64_t a, int64_t b, int64_t c, int64_t d) { if (prm.use_cuts) emit_cut(L, a, b, c, d); else emit(L, a, b, c, d); };
+    Span tet_span(prog, Tetrahedralize, 0.0, 0.90, int64_t(nz) * ny * nx);   // cellules du réseau découpées
     parallel_for(int64_t(nz) * ny * nx, threads, [&](int64_t b, int64_t e, unsigned th) {
         Local& L = locals[th];
+        auto tick = tet_span.tick();
         for (int64_t q = b; q < e; ++q) {
+            tick();
             int i = q % nx, j = (q / nx) % ny, k = q / (int64_t(nx) * ny);
             int64_t B1 = idB(i, j, k);
             if (i + 1 < nx) {  // face x = i+1, coins en (j,k)
@@ -670,15 +742,21 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     out.tetrahedra = std::move(tets);
     rep.tets = int64_t(out.tetrahedra.size() / 4);
     rep.t_tets = since(t0);
+    prog.report(Tetrahedralize, 1.0);         // tétraèdres assemblés, sommets compactés
 
     // --- contrôles
+    prog.report(Verify, 0.0);
+    Span verify_tets(prog, Verify, 0.0, 0.70, std::max<int64_t>(1, rep.tets));   // tétraèdres contrôlés
     t0 = Clock::now();
     auto OP = [&](int32_t i) { return V3(out.vertices[3 * size_t(i)], out.vertices[3 * size_t(i) + 1], out.vertices[3 * size_t(i) + 2]); };
     double vol = 0, minvol = 1e300, mind = 180.0;
     struct FK { int32_t a, b, c; bool operator==(const FK& o) const { return a == o.a && b == o.b && c == o.c; } };
     struct FH { size_t operator()(const FK& k) const { return size_t((uint64_t(uint32_t(k.a)) * 0x9E3779B97F4A7C15ull) ^ (uint64_t(uint32_t(k.b)) << 21) ^ (uint64_t(uint32_t(k.c)) * 0xC2B2AE3D27D4EB4Full)); } };
     std::unordered_map<FK, int32_t, FH> faces;  // face triée -> nombre de tétraèdres
+    {
+    auto verify_tick = verify_tets.tick();
     for (int64_t t = 0; t < rep.tets; ++t) {
+        verify_tick();
         const int32_t* q = &out.tetrahedra[4 * size_t(t)];
         V3 p[4] = {OP(q[0]), OP(q[1]), OP(q[2]), OP(q[3])};
         double v = tet_volume(p[0], p[1], p[2], p[3]);
@@ -700,6 +778,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
             ++faces[FK{s[0], s[1], s[2]}];
         }
     }
+    }
     rep.volume_ratio = surf.volume != 0 ? vol / surf.volume : 0;
     rep.min_volume = rep.tets ? minvol : 0;
     rep.min_dihedral_deg = mind;
@@ -715,8 +794,11 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
     for (auto& kv : bedge) if (kv.second != 2) ++rep.nonmanifold_edges;
     // écart de peau : centroïde et milieux d'arêtes de chaque face de bord, distance à la surface
     std::vector<float> errs(bfaces.size(), 0.f);
+    Span skin_span(prog, Verify, 0.70, 0.99, int64_t(bfaces.size()));   // faces de peau comparées à la surface
     parallel_for(int64_t(bfaces.size()), threads, [&](int64_t b, int64_t e, unsigned) {
+        auto tick = skin_span.tick();
         for (int64_t f = b; f < e; ++f) {
+            tick();
             V3 a = OP(bfaces[f][0]), bb = OP(bfaces[f][1]), c = OP(bfaces[f][2]);
             V3 s[4] = {(a + bb + c) * (1.0 / 3), (a + bb) * 0.5, (bb + c) * 0.5, (c + a) * 0.5};
             double m = 0;
@@ -731,6 +813,7 @@ Report mesh(const SurfaceMesh& in, const Params& prm, TetMesh& out, SurfaceMesh*
         rep.skin_p99_error = errs[k];
     }
     rep.t_checks = since(t0);
+    prog.report(Verify, 1.0);                 // contrôles terminés
     rep.seconds = since(t_all);
     rep.conflict_ratio = rep.band_vertices ? double(rep.sign_conflicts) / double(rep.band_vertices) : 0.0;
     rep.ambiguous_ratio = rep.band_vertices ? double(rep.ambiguous_points) / double(rep.band_vertices) : 0.0;

@@ -1,6 +1,7 @@
 // TetraNet — API publique (prototype). Millimètres, tableaux plats row-major.
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -31,7 +32,14 @@ struct Params {
     double warn_conflict_ratio = 0.01;    // désaccords entre les deux tests de signe / sommets de la bande : avertissement
     double warn_ambiguous_ratio = 0.002;  // sommets de la bande au nombre d'enroulement ambigu : avertissement
     double refuse_conflict_ratio = 0.05;  // au-delà : InconsistentSurface (surface trop cassée)
+    // Progression RÉELLE : `progress(phase, fraction)`, `phase` = Phase::Prepare / Tetrahedralize / Verify (0, 1, 2),
+    // `fraction` dans [0, 1], croissante dans une phase, 0 en entrée de phase et 1 en sortie. La fraction vient du
+    // travail effectivement terminé (compteurs dans les boucles), jamais d'une durée estimée. Appelée depuis les
+    // fils de calcul (jamais en parallèle : un verrou la sérialise) ; vide = aucune progression.
+    std::function<void(int, double)> progress;
 };
+
+enum Phase { Prepare = 0, Tetrahedralize = 1, Verify = 2 };
 
 enum class Status { Ok, OutOfTolerance, InvalidInput, TooLarge, InconsistentSurface };
 

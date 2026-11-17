@@ -368,29 +368,97 @@ def test_cone_minorant_matches_brute_force():
     assert (got <= f + 1e-12).all()
 
 
-def test_relief_respects_the_nozzle_limits():
-    from element_aeolis.general import build_relief
-    xs = ys = np.arange(0, 40.001, 0.5)
-    X, Y = np.meshgrid(xs, ys)
-    top = 10.0 + 3.0 * np.exp(-((X - 20) ** 2 + (Y - 20) ** 2) / 40.0)          # bosse gaussienne
-    for angle, reach in ((10.0, 2.0), (25.0, 1.0), (45.0, 4.0)):
-        r = build_relief(top, xs, ys, angle, reach, z_bottom=0.0)
-        assert r.d.max() <= 1e-9 and r.d.min() >= -reach - 1e-9
-        assert r.max_gradient <= np.tan(np.radians(angle)) * 1.01
-        # D(q) − D(p) ≤ min(r·tan α, reach) sur des couples tirés au hasard
-        rng = np.random.default_rng(0)
-        a, b = rng.integers(0, len(xs), (2, 400)), rng.integers(0, len(xs), (2, 400))
-        dist = np.hypot(xs[a[0]] - xs[b[0]], ys[a[1]] - ys[b[1]])
-        diff = r.d[a[1], a[0]] - r.d[b[1], b[0]]
-        assert (diff <= np.minimum(dist * np.tan(np.radians(angle)) * 1.01, reach) + 1e-9).all()
+def two_level_part() -> trimesh.Trimesh:
+    """Deux corps séparés de 1 mm : un prisme bas et un prisme haut, chacun à dessus en pente douce (8°)."""
+    low, high = wedge_plate(base=12.0), wedge_plate(base=30.0)
+    high.apply_translation([21.0, 0.0, 0.0])
+    return trimesh.util.concatenate([low, high])
+
+
+def _general_plan(mesh, angle, reach):
+    from element_aeolis.general import analyze
+    return analyze(mesh, nozzle_angle_deg=angle, nozzle_reach=reach, layer_height=None, first_layer=None,
+                   min_layer=0.1, max_layer=0.25)
+
+
+@pytest.mark.parametrize("angle, reach", [(10.0, 2.0), (25.0, 1.0), (45.0, 4.0), (80.0, 10.0)])
+def test_relief_respects_the_nozzle_limits(angle, reach):
+    """Dans chaque couche : pente ≤ angle de la buse (et ≤ 70°), creux ≤ longueur de buse ; entre couches : épaisseur
+    dans [0, 1,25·h] (une couche peut s'écraser sous une surface épousée, jamais s'épaissir de plus de 25 %) ; première
+    couche plate. Ce sont les conditions qui garantissent que la buse ne touche rien."""
+    plan = _general_plan(two_level_part(), angle, reach)
+    d, r = plan.relief.d, plan.relief
+    assert r.amp > 0 and r.patches >= 2
+    assert (d.max(axis=(1, 2)) - d.min(axis=(1, 2))).max() <= reach + 1e-6            # étendue par couche ≤ longueur de buse
+    gy, gx = np.gradient(d, r.ys, r.xs, axis=(1, 2))
+    assert np.hypot(gx, gy).max() <= np.tan(np.radians(min(angle, 70.0))) * 1.01
+    step = np.diff(d, axis=0)                                                       # épaisseur − h
+    assert step.max() <= 0.25 * plan.thickness * 1.001 and step.min() >= -plan.thickness * 1.001
+    assert np.abs(d[0]).max() == 0.0
+
+
+def test_relief_follows_every_upward_surface_not_only_the_highest():
+    """Régression (Benchy, 2026-11-14) : le relief unique, calé sur le sommet, laissait des marches sur toute surface
+    plus basse. Ici le dessus du prisme BAS, 18 mm sous le sommet, doit être une couche à lui seul."""
+    plan = _general_plan(two_level_part(), 30.0, 5.0)
+    x, y = np.meshgrid(np.linspace(2, 18, 9), np.linspace(2, 18, 9))
+    slope = np.tan(np.radians(8.0))
+    for x0, base in ((0.0, 12.0), (21.0, 30.0)):
+        top = base + slope * x.ravel()
+        z = np.array([plan.stack.z_xy(k, x.ravel() + x0, y.ravel()) for k in range(1, plan.count + 1)])
+        best = np.abs(z - top).max(axis=1)              # pire écart au dessus, pour chaque couche
+        assert best.min() <= 0.02, f"aucune couche n'épouse le dessus à z = {base}"
+
+
+def test_relief_follows_a_sloped_top_close_to_the_bed():
+    """Régression (Benchy, plat-bord arrière, 2026-11-15) : avec une épaisseur limitée à h·(1 ± 25 %), un dessus en
+    pente proche du plateau était écrêté en marches. Les couches s'écrasant désormais sous la peau, le dessus du prisme
+    bas (2 à 4,8 mm, 8°) est épousé d'un seul tenant, par UNE couche, sans jonction de bandes."""
+    plan = _general_plan(wedge_plate(base=2.0), 30.0, 5.0)
+    x, y = np.meshgrid(np.linspace(1, 19, 37), np.linspace(1, 19, 10))
+    top = 2.0 + np.tan(np.radians(8.0)) * x.ravel()
+    z = np.array([plan.stack.z_xy(k, x.ravel(), y.ravel()) for k in range(1, plan.count + 1)])
+    err = np.abs(z - top).min(axis=0)
+    assert plan.relief.patches >= 1
+    assert np.mean(err <= 0.02) >= 0.98 and err.max() <= plan.thickness / 2
+    k = int(np.argmin(np.abs(z - top).max(axis=1)))
+    assert np.abs(z[k] - top).max() <= 0.02                                           # une seule couche
+
+
+def test_relief_stays_local_to_the_surface_it_follows():
+    """Régression (Benchy) : le relief du sommet creusait toute la pièce. Les couches loin sous une surface (plus de
+    4 fois son dénivelé) et les colonnes loin d'elle restent planes."""
+    plan = _general_plan(two_level_part(), 30.0, 5.0)
+    r = plan.relief
+    rise = np.tan(np.radians(8.0)) * 20.0
+    k_low = int(np.searchsorted(plan.stack.c, 12.0 + rise))
+    k_far = int(np.searchsorted(plan.stack.c, 12.0 + rise + 4.0 * rise + 1.0))     # au-dessus du prisme bas, hors rampe
+    over_low = r.xs <= 15.0                                                         # hors du raccord du prisme haut
+    assert np.abs(r.d[k_low][:, over_low]).max() > 1.0                              # la couche du dessus bas est creusée
+    assert np.abs(r.d[k_far][:, over_low]).max() <= 1e-6                            # plus haut : plane
+
+
+def test_walls_stay_planar_below_the_skin():
+    """Régression (Benchy, 2026-11-15) : le décalage d'une surface épousée gagnait les parois sur 4 fois son dénivelé
+    (lignes tordues sur la face arrière, les flancs, autour du hublot). Désormais seules les `_SKIN_LAYERS` couches de
+    la peau suivent la surface ; dessous, les couches s'écrasent ou restent planes. Ici : la paroi du prisme haut, qui
+    domine le dessus du prisme bas, reste plane sous sa propre peau, et le prisme bas l'est sous la sienne."""
+    from element_aeolis.relief import _SKIN_LAYERS
+    plan = _general_plan(two_level_part(), 30.0, 5.0)
+    r, c, h = plan.relief, plan.stack.c, plan.thickness
+    skin = (_SKIN_LAYERS + 1) * h
+    high = r.xs >= 21.0
+    k_wall = c < 30.0 - skin                                                         # sous la peau du prisme haut
+    assert np.abs(r.d[k_wall][:, :, high]).max() <= 1e-6
+    low = (r.xs >= 0.5) & (r.xs <= 19.5)
+    k_low = c < 12.0 - skin                                                          # sous la peau du prisme bas
+    assert np.abs(r.d[k_low][:, :, low]).max() <= 1e-6
 
 
 def test_relief_vanishes_without_nozzle_slack():
-    from element_aeolis.general import build_relief
-    xs = ys = np.arange(0, 10.001, 0.5)
-    top = 5.0 + np.outer(np.linspace(0, 1, len(ys)), np.ones(len(xs)))
-    assert np.abs(build_relief(top, xs, ys, 0.0, 2.0, 0.0).d).max() == 0.0     # angle nul : planaire
-    assert np.abs(build_relief(top, xs, ys, 30.0, 0.0, 0.0).d).max() == 0.0    # buse sans longueur : planaire
+    for angle, reach in ((0.0, 2.0), (30.0, 0.0)):                                  # angle nul, buse sans longueur
+        plan = _general_plan(wedge_plate(), angle, reach)
+        assert plan.relief.amp == 0.0 and np.abs(plan.relief.d).max() == 0.0
 
 
 def test_section_region_keeps_cavities_as_holes():
@@ -486,7 +554,7 @@ def test_general_layers_follow_a_gentle_top_and_stay_inside_the_limits():
     assert plan.relief.amp > 0.1
     top_layer = plan.stack.count
     for k in (top_layer // 2, top_layer):
-        z = plan.stack.z_at(k, plan.relief.d)
+        z = plan.stack.z_grid(k)
         gy, gx = np.gradient(z, plan.relief.ys, plan.relief.xs)
         assert np.hypot(gx, gy).max() <= np.tan(np.radians(10.0)) * 1.01
         assert z.max() - z.min() <= 2.0 + 1e-9

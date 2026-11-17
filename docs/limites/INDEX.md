@@ -55,3 +55,4 @@ Les numéros sont ceux cités partout dans le code (`limite #NN`). Mesures chiff
 | [84b](084b.md) | Element Aeolis tranche toute géométrie (2026-10-31, demande de l'utilisateur : « Aeolis doit supporter tous les |
 | [85](085.md) | Famille de noms des algorithmes de tranchage (décision de l'utilisateur, 2026-10-29) : toujours préfixés |
 | [86](086.md) | Limite connue : fidélité de la coque avec TetraNet, parois plus fines que la maille |
+| [87](087.md) | Relief LOCAL du moteur général d'Element Aeolis : chaque surface tournée vers le haut est épousée par une peau, parois planes (Benchy, 2026-11-14/15) |

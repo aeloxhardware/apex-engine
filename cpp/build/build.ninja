@@ -39,7 +39,7 @@ include CMakeFiles\rules.ninja
 #############################################
 # Logical path to working directory; prefix for absolute paths.
 
-cmake_ninja_workdir = R$:\APEX_NEW_VERSION\slicer_alg\cpp\build\
+cmake_ninja_workdir = R$:\APEX_NEW_VERSION\slicer_engine\cpp\build\
 # =============================================================================
 # Object build statements for MODULE_LIBRARY target apex_core
 
@@ -49,268 +49,378 @@ cmake_ninja_workdir = R$:\APEX_NEW_VERSION\slicer_alg\cpp\build\
 
 build cmake_object_order_depends_target_apex_core: phony || .
 
-build CMakeFiles\apex_core.dir\src\core\printed_index.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\printed_index.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\printed_index.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\printed_index.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\kinematics.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\kinematics.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\kinematics.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\kinematics.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\support.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\support.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\support.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\support.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\tet_topology.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\tet_topology.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\tet_topology.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\tet_topology.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\kdtree.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\kdtree.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\kdtree.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\kdtree.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\bvh.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\bvh.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\bvh.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\bvh.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\field_solver.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\field_solver.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\field_solver.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\field_solver.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\linear_solver.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\linear_solver.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\linear_solver.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\linear_solver.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\mesh_repair.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\mesh_repair.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\heat_method.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\heat_method.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\mesh_intersect.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\mesh_intersect.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\reorientation.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\reorientation.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\interpolate.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\interpolate.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\layer_order.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\layer_order.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\mesh_distance.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\mesh_distance.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\step8_filters.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\step8_filters.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\isosurface.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\isosurface.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\step8_assembly.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\step8_assembly.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\geometry2d.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\geometry2d.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\mesh_repair.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\mesh_repair.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\past_material.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\past_material.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\mesh_intersect.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\mesh_intersect.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\gcode_export.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\gcode_export.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\interpolate.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\interpolate.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\toolpath2d.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\toolpath2d.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\mesh_distance.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\mesh_distance.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\overhang.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\overhang.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\isosurface.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\isosurface.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\segmentation.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\segmentation.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\geometry2d.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\geometry2d.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\src\core\scheduling.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\src\core\scheduling.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\past_material.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\past_material.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.engine.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\src\clipper.engine.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\src\core\gcode_export.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\gcode_export.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\src\core\toolpath2d.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\toolpath2d.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\src\core\step6_layer.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\step6_layer.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\src\core\overhang.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\overhang.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\src\core\segmentation.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\segmentation.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\src\core\scheduling.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\scheduling.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\src\core\skin_check.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\core\skin_check.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\core
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\src\gpu\vk_context.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\src\gpu\vk_context.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\src\gpu
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.engine.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\src\clipper.engine.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\third_party\clipper2\src
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.offset.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\src\clipper.offset.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.offset.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\src\clipper.offset.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\third_party\clipper2\src
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.rectclip.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\src\clipper.rectclip.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.rectclip.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\src\clipper.rectclip.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\third_party\clipper2\src
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
-build CMakeFiles\apex_core.dir\bindings\module.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_alg\cpp\bindings\module.cpp || cmake_object_order_depends_target_apex_core
+build CMakeFiles\apex_core.dir\bindings\module.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\bindings\module.cpp || cmake_object_order_depends_target_apex_core
   CONFIG = Release
   DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
   FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
-  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_alg\cpp\include -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_alg\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\include -external:W0
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
   OBJECT_DIR = CMakeFiles\apex_core.dir
   OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\bindings
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\R_\APEX_NEW_VERSION\slicer_engine\tetranet\src\tetranet.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\tetranet\src\tetranet.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\R_\APEX_NEW_VERSION\slicer_engine\tetranet\src
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+build CMakeFiles\apex_core.dir\R_\APEX_NEW_VERSION\slicer_engine\tetranet\src\features.cpp.obj: CXX_COMPILER__apex_core_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\tetranet\src\features.cpp || cmake_object_order_depends_target_apex_core
+  CONFIG = Release
+  DEFINES = -DPy_NO_LINK_LIB -Dapex_core_EXPORTS
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD /O2 /fp:precise /Zc:__cplusplus /permissive- /GL /bigobj /MP
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\..\tetranet\include -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\eigen -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\clipper2\include -external:IC:\Users\prazl\AppData\Local\Programs\Python\Python314\Include -external:IR:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\include -external:W0
+  OBJECT_DIR = CMakeFiles\apex_core.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_core.dir\R_\APEX_NEW_VERSION\slicer_engine\tetranet\src
+  TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
 
 
@@ -319,9 +429,9 @@ build CMakeFiles\apex_core.dir\bindings\module.cpp.obj: CXX_COMPILER__apex_core_
 
 
 #############################################
-# Link the shared module R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.cp314-win_amd64.pyd
+# Link the shared module R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.cp314-win_amd64.pyd
 
-build R$:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.cp314-win_amd64.pyd: CXX_MODULE_LIBRARY_LINKER__apex_core_Release CMakeFiles\apex_core.dir\src\core\printed_index.cpp.obj CMakeFiles\apex_core.dir\src\core\kinematics.cpp.obj CMakeFiles\apex_core.dir\src\core\support.cpp.obj CMakeFiles\apex_core.dir\src\core\tet_topology.cpp.obj CMakeFiles\apex_core.dir\src\core\kdtree.cpp.obj CMakeFiles\apex_core.dir\src\core\bvh.cpp.obj CMakeFiles\apex_core.dir\src\core\field_solver.cpp.obj CMakeFiles\apex_core.dir\src\core\linear_solver.cpp.obj CMakeFiles\apex_core.dir\src\core\mesh_repair.cpp.obj CMakeFiles\apex_core.dir\src\core\mesh_intersect.cpp.obj CMakeFiles\apex_core.dir\src\core\interpolate.cpp.obj CMakeFiles\apex_core.dir\src\core\mesh_distance.cpp.obj CMakeFiles\apex_core.dir\src\core\isosurface.cpp.obj CMakeFiles\apex_core.dir\src\core\geometry2d.cpp.obj CMakeFiles\apex_core.dir\src\core\past_material.cpp.obj CMakeFiles\apex_core.dir\src\core\gcode_export.cpp.obj CMakeFiles\apex_core.dir\src\core\toolpath2d.cpp.obj CMakeFiles\apex_core.dir\src\core\overhang.cpp.obj CMakeFiles\apex_core.dir\src\core\segmentation.cpp.obj CMakeFiles\apex_core.dir\src\core\scheduling.cpp.obj CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.engine.cpp.obj CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.offset.cpp.obj CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.rectclip.cpp.obj CMakeFiles\apex_core.dir\bindings\module.cpp.obj | C$:\Users\prazl\AppData\Local\Programs\Python\Python314\libs\python314.lib
+build R$:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.cp314-win_amd64.pyd: CXX_MODULE_LIBRARY_LINKER__apex_core_Release CMakeFiles\apex_core.dir\src\core\printed_index.cpp.obj CMakeFiles\apex_core.dir\src\core\kinematics.cpp.obj CMakeFiles\apex_core.dir\src\core\support.cpp.obj CMakeFiles\apex_core.dir\src\core\tet_topology.cpp.obj CMakeFiles\apex_core.dir\src\core\kdtree.cpp.obj CMakeFiles\apex_core.dir\src\core\bvh.cpp.obj CMakeFiles\apex_core.dir\src\core\field_solver.cpp.obj CMakeFiles\apex_core.dir\src\core\linear_solver.cpp.obj CMakeFiles\apex_core.dir\src\core\heat_method.cpp.obj CMakeFiles\apex_core.dir\src\core\reorientation.cpp.obj CMakeFiles\apex_core.dir\src\core\layer_order.cpp.obj CMakeFiles\apex_core.dir\src\core\step8_filters.cpp.obj CMakeFiles\apex_core.dir\src\core\step8_assembly.cpp.obj CMakeFiles\apex_core.dir\src\core\mesh_repair.cpp.obj CMakeFiles\apex_core.dir\src\core\mesh_intersect.cpp.obj CMakeFiles\apex_core.dir\src\core\interpolate.cpp.obj CMakeFiles\apex_core.dir\src\core\mesh_distance.cpp.obj CMakeFiles\apex_core.dir\src\core\isosurface.cpp.obj CMakeFiles\apex_core.dir\src\core\geometry2d.cpp.obj CMakeFiles\apex_core.dir\src\core\past_material.cpp.obj CMakeFiles\apex_core.dir\src\core\gcode_export.cpp.obj CMakeFiles\apex_core.dir\src\core\toolpath2d.cpp.obj CMakeFiles\apex_core.dir\src\core\step6_layer.cpp.obj CMakeFiles\apex_core.dir\src\core\overhang.cpp.obj CMakeFiles\apex_core.dir\src\core\segmentation.cpp.obj CMakeFiles\apex_core.dir\src\core\scheduling.cpp.obj CMakeFiles\apex_core.dir\src\core\skin_check.cpp.obj CMakeFiles\apex_core.dir\src\gpu\vk_context.cpp.obj CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.engine.cpp.obj CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.offset.cpp.obj CMakeFiles\apex_core.dir\third_party\clipper2\src\clipper.rectclip.cpp.obj CMakeFiles\apex_core.dir\bindings\module.cpp.obj CMakeFiles\apex_core.dir\R_\APEX_NEW_VERSION\slicer_engine\tetranet\src\tetranet.cpp.obj CMakeFiles\apex_core.dir\R_\APEX_NEW_VERSION\slicer_engine\tetranet\src\features.cpp.obj | C$:\Users\prazl\AppData\Local\Programs\Python\Python314\libs\python314.lib
   CONFIG = Release
   LANGUAGE_COMPILE_FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -MD
   LINK_FLAGS = /machine:x64 /INCREMENTAL:NO -LTCG
@@ -330,17 +440,81 @@ build R$:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.cp314-win_amd64.pyd: CXX
   POST_BUILD = cd .
   PRE_LINK = cd .
   TARGET_COMPILE_PDB = CMakeFiles\apex_core.dir\
-  TARGET_FILE = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.cp314-win_amd64.pyd
+  TARGET_FILE = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.cp314-win_amd64.pyd
   TARGET_IMPLIB = apex_core.lib
-  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.pdb
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.pdb
   TARGET_SUPPORT_DIR = CMakeFiles\apex_core.dir
+
+# =============================================================================
+# Object build statements for EXECUTABLE target apex_tetgen_worker
+
+
+#############################################
+# Order-only phony target for apex_tetgen_worker
+
+build cmake_object_order_depends_target_apex_tetgen_worker: phony || .
+
+build CMakeFiles\apex_tetgen_worker.dir\tools\tetgen_worker.cpp.obj: CXX_COMPILER__apex_tetgen_worker_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\tools\tetgen_worker.cpp || cmake_object_order_depends_target_apex_tetgen_worker
+  CONFIG = Release
+  DEFINES = -DTETLIBRARY
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\tetgen
+  OBJECT_DIR = CMakeFiles\apex_tetgen_worker.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_tetgen_worker.dir\tools
+  TARGET_COMPILE_PDB = CMakeFiles\apex_tetgen_worker.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_tetgen_worker.dir
+
+build CMakeFiles\apex_tetgen_worker.dir\third_party\tetgen\tetgen.cxx.obj: CXX_COMPILER__apex_tetgen_worker_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\tetgen\tetgen.cxx || cmake_object_order_depends_target_apex_tetgen_worker
+  CONFIG = Release
+  DEFINES = -DTETLIBRARY
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\tetgen
+  OBJECT_DIR = CMakeFiles\apex_tetgen_worker.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_tetgen_worker.dir\third_party\tetgen
+  TARGET_COMPILE_PDB = CMakeFiles\apex_tetgen_worker.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_tetgen_worker.dir
+
+build CMakeFiles\apex_tetgen_worker.dir\third_party\tetgen\predicates.cxx.obj: CXX_COMPILER__apex_tetgen_worker_unscanned_Release R$:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\tetgen\predicates.cxx || cmake_object_order_depends_target_apex_tetgen_worker
+  CONFIG = Release
+  DEFINES = -DTETLIBRARY
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -std:c++20 -MD
+  INCLUDES = -IR:\APEX_NEW_VERSION\slicer_engine\cpp\third_party\tetgen
+  OBJECT_DIR = CMakeFiles\apex_tetgen_worker.dir
+  OBJECT_FILE_DIR = CMakeFiles\apex_tetgen_worker.dir\third_party\tetgen
+  TARGET_COMPILE_PDB = CMakeFiles\apex_tetgen_worker.dir\
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_tetgen_worker.dir
+
+
+# =============================================================================
+# Link build statements for EXECUTABLE target apex_tetgen_worker
+
+
+#############################################
+# Link the executable R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.exe
+
+build R$:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.exe: CXX_EXECUTABLE_LINKER__apex_tetgen_worker_Release CMakeFiles\apex_tetgen_worker.dir\tools\tetgen_worker.cpp.obj CMakeFiles\apex_tetgen_worker.dir\third_party\tetgen\tetgen.cxx.obj CMakeFiles\apex_tetgen_worker.dir\third_party\tetgen\predicates.cxx.obj
+  CONFIG = Release
+  FLAGS = /DWIN32 /D_WINDOWS /EHsc /O2 /Ob2 /DNDEBUG -MD
+  LINK_FLAGS = /machine:x64 /INCREMENTAL:NO /subsystem:console
+  LINK_LIBRARIES = kernel32.lib user32.lib gdi32.lib winspool.lib shell32.lib ole32.lib oleaut32.lib uuid.lib comdlg32.lib advapi32.lib
+  OBJECT_DIR = CMakeFiles\apex_tetgen_worker.dir
+  POST_BUILD = cd .
+  PRE_LINK = cd .
+  TARGET_COMPILE_PDB = CMakeFiles\apex_tetgen_worker.dir\
+  TARGET_FILE = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.exe
+  TARGET_IMPLIB = apex_tetgen_worker.lib
+  TARGET_PDB = R:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.pdb
+  TARGET_SUPPORT_DIR = CMakeFiles\apex_tetgen_worker.dir
 
 
 #############################################
 # Utility command for edit_cache
 
 build CMakeFiles\edit_cache.util: CUSTOM_COMMAND
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D R:\APEX_NEW_VERSION\slicer_alg\cpp\build && R:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\bin\cmake-gui.exe -SR:\APEX_NEW_VERSION\slicer_alg\cpp -BR:\APEX_NEW_VERSION\slicer_alg\cpp\build"
+  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D R:\APEX_NEW_VERSION\slicer_engine\cpp\build && R:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\bin\cmake-gui.exe -SR:\APEX_NEW_VERSION\slicer_engine\cpp -BR:\APEX_NEW_VERSION\slicer_engine\cpp\build"
   DESC = Running CMake cache editor...
   pool = console
   restat = 1
@@ -352,7 +526,7 @@ build edit_cache: phony CMakeFiles\edit_cache.util
 # Utility command for rebuild_cache
 
 build CMakeFiles\rebuild_cache.util: CUSTOM_COMMAND
-  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D R:\APEX_NEW_VERSION\slicer_alg\cpp\build && R:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\bin\cmake.exe --regenerate-during-build -SR:\APEX_NEW_VERSION\slicer_alg\cpp -BR:\APEX_NEW_VERSION\slicer_alg\cpp\build"
+  COMMAND = C:\WINDOWS\system32\cmd.exe /C "cd /D R:\APEX_NEW_VERSION\slicer_engine\cpp\build && R:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\bin\cmake.exe --regenerate-during-build -SR:\APEX_NEW_VERSION\slicer_engine\cpp -BR:\APEX_NEW_VERSION\slicer_engine\cpp\build"
   DESC = Running CMake to regenerate build system...
   pool = console
   restat = 1
@@ -362,9 +536,13 @@ build rebuild_cache: phony CMakeFiles\rebuild_cache.util
 # =============================================================================
 # Target aliases.
 
-build apex_core: phony R$:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.cp314-win_amd64.pyd
+build apex_core: phony R$:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.cp314-win_amd64.pyd
 
-build apex_core.cp314-win_amd64.pyd: phony R$:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.cp314-win_amd64.pyd
+build apex_core.cp314-win_amd64.pyd: phony R$:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.cp314-win_amd64.pyd
+
+build apex_tetgen_worker: phony R$:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.exe
+
+build apex_tetgen_worker.exe: phony R$:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.exe
 
 # =============================================================================
 # Folder targets.
@@ -372,9 +550,9 @@ build apex_core.cp314-win_amd64.pyd: phony R$:\APEX_NEW_VERSION\slicer_alg\cpp\l
 # =============================================================================
 
 #############################################
-# Folder: R:/APEX_NEW_VERSION/slicer_alg/cpp/build
+# Folder: R:/APEX_NEW_VERSION/slicer_engine/cpp/build
 
-build all: phony R$:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.cp314-win_amd64.pyd
+build all: phony R$:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_core.cp314-win_amd64.pyd R$:\APEX_NEW_VERSION\slicer_engine\cpp\lib\apex_tetgen_worker.exe
 
 # =============================================================================
 # Built-in targets
@@ -383,14 +561,14 @@ build all: phony R$:\APEX_NEW_VERSION\slicer_alg\cpp\lib\apex_core.cp314-win_amd
 #############################################
 # Re-run CMake if any of its inputs changed.
 
-build build.ninja R$:\APEX_NEW_VERSION\slicer_alg\cpp\build\cmake_install.cmake: RERUN_CMAKE | CMakeCache.txt CMakeFiles\4.4.3\CMakeCXXCompiler.cmake CMakeFiles\4.4.3\CMakeRCCompiler.cmake CMakeFiles\4.4.3\CMakeSystem.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCXXInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCheckCompilerFlagCommonPatterns.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCommonLanguageInclude.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeGenericSystem.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeInitializeConfigs.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeLanguageInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeRCInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeSystemSpecificInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeSystemSpecificInitialize.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckCXXCompilerFlag.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckCXXSourceCompiles.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\CMakeCommonCompilerMacros.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\MSVC.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPackageHandleStandardArgs.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPackageMessage.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPython.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPython\Support.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CMakeCXXLinkerInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CMakeCommonLinkerInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckCommon.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckCompilerFlag.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckFlagCommonConfig.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckSourceCompiles.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Linker\MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Linker\MSVC.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-Initialize.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-MSVC.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\WindowsPaths.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Common.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Config.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11ConfigVersion.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11NewTools.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Targets.cmake R$:\APEX_NEW_VERSION\slicer_alg\cpp\CMakeLists.txt
+build build.ninja R$:\APEX_NEW_VERSION\slicer_engine\cpp\build\cmake_install.cmake: RERUN_CMAKE | CMakeCache.txt CMakeFiles\4.4.4\CMakeCXXCompiler.cmake CMakeFiles\4.4.4\CMakeRCCompiler.cmake CMakeFiles\4.4.4\CMakeSystem.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCXXInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCheckCompilerFlagCommonPatterns.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCommonLanguageInclude.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeGenericSystem.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeInitializeConfigs.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeLanguageInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeRCInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeSystemSpecificInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeSystemSpecificInitialize.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckCXXCompilerFlag.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckCXXSourceCompiles.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckIncludeFileCXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckLibraryExists.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\CMakeCommonCompilerMacros.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\MSVC.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPackageHandleStandardArgs.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPackageMessage.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPython.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPython\Support.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindThreads.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CMakeCXXLinkerInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CMakeCommonLinkerInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckCommon.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckCompilerFlag.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckFlagCommonConfig.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckSourceCompiles.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Linker\MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Linker\MSVC.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-Initialize.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-MSVC.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\WindowsPaths.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Common.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Config.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11ConfigVersion.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11NewTools.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Targets.cmake R$:\APEX_NEW_VERSION\slicer_engine\cpp\CMakeLists.txt
   pool = console
 
 
 #############################################
 # A missing CMake input file is not an error.
 
-build CMakeCache.txt CMakeFiles\4.4.3\CMakeCXXCompiler.cmake CMakeFiles\4.4.3\CMakeRCCompiler.cmake CMakeFiles\4.4.3\CMakeSystem.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCXXInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCheckCompilerFlagCommonPatterns.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCommonLanguageInclude.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeGenericSystem.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeInitializeConfigs.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeLanguageInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeRCInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeSystemSpecificInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeSystemSpecificInitialize.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckCXXCompilerFlag.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckCXXSourceCompiles.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\CMakeCommonCompilerMacros.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\MSVC.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPackageHandleStandardArgs.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPackageMessage.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPython.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPython\Support.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CMakeCXXLinkerInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CMakeCommonLinkerInformation.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckCommon.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckCompilerFlag.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckFlagCommonConfig.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckSourceCompiles.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Linker\MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Linker\MSVC.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-Initialize.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-MSVC.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\WindowsPaths.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Common.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Config.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11ConfigVersion.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11NewTools.cmake R$:\APEX_NEW_VERSION\slicer_alg\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Targets.cmake R$:\APEX_NEW_VERSION\slicer_alg\cpp\CMakeLists.txt: phony
+build CMakeCache.txt CMakeFiles\4.4.4\CMakeCXXCompiler.cmake CMakeFiles\4.4.4\CMakeRCCompiler.cmake CMakeFiles\4.4.4\CMakeSystem.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCXXInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCheckCompilerFlagCommonPatterns.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeCommonLanguageInclude.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeGenericSystem.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeInitializeConfigs.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeLanguageInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeRCInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeSystemSpecificInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CMakeSystemSpecificInitialize.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckCXXCompilerFlag.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckCXXSourceCompiles.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckIncludeFileCXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\CheckLibraryExists.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\CMakeCommonCompilerMacros.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Compiler\MSVC.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPackageHandleStandardArgs.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPackageMessage.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPython.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindPython\Support.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\FindThreads.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CMakeCXXLinkerInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CMakeCommonLinkerInformation.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckCommon.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckCompilerFlag.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckFlagCommonConfig.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Internal\CheckSourceCompiles.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Linker\MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Linker\MSVC.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Linker\Windows-MSVC.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-Initialize.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-MSVC-CXX.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows-MSVC.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\Windows.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\cmake\data\share\cmake-4.4\Modules\Platform\WindowsPaths.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Common.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Config.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11ConfigVersion.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11NewTools.cmake R$:\APEX_NEW_VERSION\slicer_engine\.venv\Lib\site-packages\pybind11\share\cmake\pybind11\pybind11Targets.cmake R$:\APEX_NEW_VERSION\slicer_engine\cpp\CMakeLists.txt: phony
 
 
 #############################################

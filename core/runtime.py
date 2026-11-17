@@ -57,6 +57,7 @@ class RuntimeState:
     # progression (core/progress.py)
     progress_sink: Optional[Callable[[float], None]] = None
     stage_switcher: Optional[Callable[[str], None]] = None
+    substep_sink: Optional[Callable[[str, float], None]] = None   # (sous-etape, fraction) : core/progress.substep
     progress_last_fraction: float = 0.0
     progress_last_time: float = 0.0
     progress_scale: tuple = (0.0, 1.0)

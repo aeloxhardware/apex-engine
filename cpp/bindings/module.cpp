@@ -1806,7 +1806,7 @@ PYBIND11_MODULE(apex_core, m) {
         "tetranet_mesh",
         [](const DoubleArray& vertices, const IntArray& faces, double cell_size, double snap_alpha,
            double skin_tolerance, double refuse_ratio, unsigned threads, double feature_angle_deg,
-           double feature_snap_alpha) {
+           double feature_snap_alpha, const py::object& progress) {
             tetranet::SurfaceMesh in;
             in.vertices.assign(vertices.data(), vertices.data() + vertices.size());
             in.faces.resize(static_cast<size_t>(faces.size()));
@@ -1815,6 +1815,15 @@ PYBIND11_MODULE(apex_core, m) {
             p.cell_size = cell_size; p.snap_alpha = snap_alpha; p.skin_tolerance = skin_tolerance;
             p.refuse_conflict_ratio = refuse_ratio; p.threads = threads;
             p.feature_angle_deg = feature_angle_deg; p.feature_snap_alpha = feature_snap_alpha;
+            if (!progress.is_none()) {
+                // Appelée depuis les fils de calcul (le GIL est libéré pendant `mesh`) : on le reprend le temps du rappel.
+                // `progress` reste vivant tout l'appel (référence du paramètre) ; une erreur Python est ignorée : une barre
+                // ne doit jamais faire échouer le maillage.
+                p.progress = [&progress](int phase, double fraction) {
+                    py::gil_scoped_acquire acquire;
+                    try { progress(phase, fraction); } catch (const py::error_already_set&) { PyErr_Clear(); }
+                };
+            }
             tetranet::TetMesh out; tetranet::SurfaceMesh cleaned; tetranet::Report r;
             {
                 py::gil_scoped_release release;
@@ -1843,8 +1852,9 @@ PYBIND11_MODULE(apex_core, m) {
         },
         py::arg("vertices"), py::arg("faces"), py::arg("cell_size"), py::arg("snap_alpha") = 0.5,
         py::arg("skin_tolerance") = 0.05, py::arg("refuse_ratio") = 0.05, py::arg("threads") = 0u,
-        py::arg("feature_angle_deg") = 0.0, py::arg("feature_snap_alpha") = 0.35,
-        "Maillage tetraedrique TetraNet : dict (maillage, surface nettoyee, diagnostic).");
+        py::arg("feature_angle_deg") = 0.0, py::arg("feature_snap_alpha") = 0.35, py::arg("progress") = py::none(),
+        "Maillage tetraedrique TetraNet : dict (maillage, surface nettoyee, diagnostic). `progress(phase, fraction)` : "
+        "avancement reel (phase 0 preparation, 1 tetraedralisation, 2 verification ; fraction 0..1).");
 
     py::class_<apex::SkinCheckIndex>(m, "SkinCheckIndex",
                                      "Controle de collision du lissage Bird (grille incrementale).")

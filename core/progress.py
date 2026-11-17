@@ -51,6 +51,31 @@ def switch_stage(slug: str) -> None:
         switcher(slug)
 
 
+def set_substep_sink(sink: Optional[Callable[[str, float], None]]) -> None:
+    """Rappel `sink(sous_etape, fraction)` des SOUS-etapes d'une etape (ex. les trois phases de TetraNet dans
+    « tetrahedralization »). Independant de `begin` : la barre de l'etape garde sa propre fraction."""
+    st = runtime.state()
+    with st.lock:
+        st.substep_sink = sink
+
+
+def substep_sink() -> Optional[Callable[[str, float], None]]:
+    """Le rappel des sous-etapes s'il y en a un (pour le passer a un noyau natif), sinon `None`."""
+    st = runtime.state()
+    with st.lock:
+        return st.substep_sink
+
+
+def substep(name: str, fraction: float) -> None:
+    """Avancement REEL d'une sous-etape (`fraction` dans [0, 1], travail effectivement termine). No-op sans
+    `set_substep_sink`. Les fils de calcul peuvent l'appeler : le rappel est lu sous verrou, appele hors verrou."""
+    st = runtime.state()
+    with st.lock:
+        sink = st.substep_sink
+    if sink is not None:
+        sink(name, min(1.0, max(0.0, float(fraction))))
+
+
 def end() -> None:
     st = runtime.state()
     with st.lock:

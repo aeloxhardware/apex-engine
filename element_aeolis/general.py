@@ -6,29 +6,36 @@ creuses, plusieurs corps) : il TRANCHE PAR SECTIONS PLANAIRES DÉFORMÉES.
 
 Principe. La couche k est la section du maillage par la surface
 
-    z = F_k(x, y) = c_k + λ(c_k) · D(x, y)
+    z = F_k(x, y) = c_k + δ_k(x, y)
 
-où c_k est un plan (c_k = z_bas + t1 + (k−1)·h), D(x, y) un RELIEF DOUX ≤ 0 et λ une rampe 0 → 1 sur les derniers
-millimètres de la pièce. Sans relief (D = 0), c'est un tranchage planaire classique ; avec lui, les couches du haut
-épousent le dessus de la pièce là où il est doux, au lieu de former des marches. Comme toute section planaire,
-cela vaut pour n'importe quelle topologie (une colonne verticale peut traverser plusieurs intervalles de matière).
+où c_k est un plan (c_k = z_bas + t1 + (k−1)·h) et δ_k le RELIEF LOCAL de la couche (`relief.py`), qui descend ou
+monte la couche. Sans relief
+(δ = 0), c'est un tranchage planaire classique ; avec lui, CHAQUE surface tournée vers le haut (pont, toit, dessus
+d'une caisse), à n'importe quelle hauteur, est une couche à elle seule au lieu de marches d'escalier. Comme toute
+section planaire, cela vaut pour n'importe quelle topologie (une colonne verticale peut traverser plusieurs
+intervalles de matière).
 
-Relief et limites de la buse. D vient du dessus de la pièce T(x, y) (point le plus haut de chaque colonne), réduit à
-une fonction que la buse peut suivre. Deux réglages de l'imprimante :
+Limites de la buse. Deux réglages de l'imprimante :
 
   * `nozzle_angle_deg` : pente maximale, depuis l'horizontale, que la surface déjà imprimée peut avoir autour de la
     pointe (0° = épaule plate, 90° = aiguille) ;
   * `nozzle_reach` : longueur de buse sous le conduit de ventilation, donc dénivelé maximal toléré entre la pointe
     et la matière voisine plus haute (mm).
 
-Pour tout couple de points (p, q), le relief vérifie D(q) − D(p) ≤ φ(|p − q|) avec φ(r) = min(r·tan α, reach).
-Comme la matière déjà posée en q est sous F_{k−1}(q) et que la pointe est en F_k(p), la matière voisine ne peut jamais
-dépasser la pointe de plus que φ : la buse ne touche rien, PAR CONSTRUCTION (le contrôle de collision ne fait que
-le vérifier). Le relief est le plus grand D vérifiant cette condition et suivant le dessus : un minorant
-« cône tronqué », calculé par une transformée en chanfrein sur une grille de 0,5 mm.
+Le relief vérifie, dans chaque couche, une pente ≤ tan α (et ≤ 70°), et max δ − min δ ≤ longueur de buse. Comme la
+matière déjà posée en q est sous F_{k−1}(q) ≤ F_k(q) et que la pointe est en F_k(p), la matière voisine ne peut jamais
+dépasser la pointe de plus que min(r·tan α, longueur) : la buse ne touche rien, PAR CONSTRUCTION (le contrôle de
+collision ne fait que le vérifier).
 
-Épaisseur. Elle vaut h + Δλ·D : elle varie d'au plus 25 % autour de h, grâce à l'amplitude plafonnée à un quart de la
-longueur de la rampe, donc reste dans [plancher, plafond] du profil d'imprimante.
+Épaisseur. Elle vaut h + δ_k − δ_{k−1}, dans [0, 1,25·h] : sous une surface épousée, seules les couches de sa peau la
+suivent, celles du dessous s'écrasent (épaisseur nulle) au lieu de se tordre. Une couche écrasée ou plus mince que
+le plancher n'est pas imprimée ; sa tranche revient à la couche suivante (`GeneralStack.base`), sans dépasser le
+plafond.
+
+Historique. Jusqu'au 2026-11-14 le relief était UNIQUE : D(x, y), calé sur les seules colonnes les plus hautes et
+appliqué à toute la hauteur par une rampe λ(c). Mesuré sur un Benchy (80°, 10 mm) : marches sur toutes les surfaces
+plus basses que le toit, et cônes à 80° creusés sous le toit à travers toute la pièce (parois jusqu'à 1,5 mm de la
+surface du modèle).
 """
 from __future__ import annotations
 
@@ -43,89 +50,18 @@ from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
 from core import progress as _progress
 from . import headcheck as hc
 from . import heightfield as hf
+from .regions import level_geometry
 from . import toolpath as tp
+from .relief import Relief, amplitude, build_relief, cone_minorant  # noqa: F401  (`cone_minorant` : nom historique)
+from .relief import _AMP_FRACTION, _CHAMFER_SAFETY
 
-RELIEF_CELL = 0.5            # pas de la grille du relief et de la transformée de distance (mm)
-_CHAMFER_SAFETY = 0.93       # cos(22,5°) : la transformée en chanfrein tolère jusqu'à 1/0,924 fois la pente
+RELIEF_CELL = 0.25           # pas de la grille du relief et de la transformée de distance (mm)
 _MAX_EDGE = 1.0              # côté xy maximal des triangles qu'on déforme (mm)
 _MAX_FACES = 700_000
-_RAMP_FACTOR = 8.0           # longueur de la rampe = 8 × longueur de buse (bornée par la hauteur de la pièce)
-_AMP_FRACTION = 0.25         # amplitude du relief ≤ 25 % de la longueur de la rampe
 
 
 class NotSliceableError(ValueError):
     """Le maillage n'a donné aucune couche (vide, ouvert, dégénéré)."""
-
-
-# --------------------------------------------------------------------------------------- relief
-
-def cone_minorant(f: np.ndarray, step: float) -> np.ndarray:
-    """min_q f(q) + step·|p − q|/cellule, par transformée en chanfrein (poids 1 et √2 × `step`).
-
-    `f` vaut +inf aux nœuds sans source. Deux balayages ; dans chaque ligne, la propagation gauche-droite
-    puis droite-gauche est faite d'un coup par cumul de minimum."""
-    out = np.array(f, dtype=float)
-    ny, nx = out.shape
-    wd = step * math.sqrt(2.0)
-    ramp = np.arange(nx) * step
-    for rows in (range(ny), range(ny - 1, -1, -1)):
-        prev = None
-        for j in rows:
-            row = out[j]
-            if prev is not None:
-                row = np.minimum(row, prev + step)
-                row[1:] = np.minimum(row[1:], prev[:-1] + wd)
-                row[:-1] = np.minimum(row[:-1], prev[1:] + wd)
-            row = np.minimum.accumulate(row - ramp) + ramp
-            row = np.minimum.accumulate((row + ramp)[::-1])[::-1] - ramp
-            out[j] = row
-            prev = row
-    return out
-
-
-@dataclass
-class Relief:
-    xs: np.ndarray
-    ys: np.ndarray
-    d: np.ndarray                 # (ny, nx), dans [−amp, 0]
-    amp: float                    # amplitude réellement utilisée (≤ nozzle_reach)
-    c_full: float                 # plan à partir duquel la rampe est complète
-    ramp_len: float
-    max_gradient: float           # max |∇D| (pente), sans unité
-
-    def lam(self, c) -> np.ndarray:
-        return np.clip((np.asarray(c, float) - (self.c_full - self.ramp_len)) / self.ramp_len, 0.0, 1.0)
-
-    @property
-    def grid(self) -> hf.Heightfield:
-        return hf.Heightfield(self.xs, self.ys, self.d, self.d, None)   # type: ignore[arg-type]
-
-    def at(self, x, y) -> np.ndarray:
-        return self.grid._interp(self.d, x, y)
-
-
-def build_relief(top: np.ndarray, xs: np.ndarray, ys: np.ndarray, angle_deg: float, reach: float,
-                 z_bottom: float) -> Relief:
-    """Relief D dans [−amp, 0] qui suit le dessus de la pièce là où la buse le permet.
-
-    Sources : seulement les colonnes du dessus les plus hautes (à `amp` près de z_top) : c'est leur relief que les
-    couches du haut épousent. D(p) = Tlim(p) − max Tlim avec Tlim = min(min_q T(q) + φ(|p−q|)), le minorant
-    « cône tronqué » : 1-lipschitzien en pente tan α, et d'amplitude ≤ amp."""
-    ztop = float(np.nanmax(top))
-    height = ztop - z_bottom
-    ramp_len = max(min(height, _RAMP_FACTOR * reach), 1e-6)
-    amp = min(reach, _AMP_FRACTION * ramp_len)
-    flat = Relief(xs, ys, np.zeros((len(ys), len(xs))), 0.0, ztop, ramp_len, 0.0)
-    if amp < 1e-3 or angle_deg <= 0.0:
-        return flat
-    slope = math.tan(math.radians(min(angle_deg, 89.0))) * _CHAMFER_SAFETY
-    band = top >= ztop - amp - 1e-9                     # NaN → faux
-    src = np.where(band, top, np.inf)
-    cone = cone_minorant(src, slope * (xs[1] - xs[0]))
-    tlim = np.minimum(cone, float(src.min()) + amp)     # plafond de dénivelé : la longueur de buse
-    d = tlim - float(tlim.max())
-    gy, gx = np.gradient(d, ys, xs)
-    return Relief(xs, ys, d, amp, float(tlim.max()), ramp_len, float(np.hypot(gx, gy).max()))
 
 
 # --------------------------------------------------------------------------------------- piles de couches
@@ -133,31 +69,80 @@ def build_relief(top: np.ndarray, xs: np.ndarray, ys: np.ndarray, angle_deg: flo
 class GeneralStack:
     """Même interface que `LayerStack` pour le G-code : `sample(x, y)` → colonne avec `layer_z`, `layer_thickness`."""
 
-    def __init__(self, relief: Relief, z_bottom: float, planes: np.ndarray):
+    def __init__(self, relief: Relief, z_bottom: float, planes: np.ndarray, min_thickness: float = 0.0,
+                 max_thickness: float = math.inf):
         self.relief = relief
         self.z_bottom = z_bottom
         self.c = planes
-        self.lam = relief.lam(planes)
         self.count = len(planes)
+        self.base = self._bases(min_thickness, max_thickness)
 
-    def z_at(self, k: int, d) -> np.ndarray:
-        return self.c[k - 1] + self.lam[k - 1] * d
+    def _bases(self, min_thickness: float, max_thickness: float) -> np.ndarray:
+        """Dessus de la matière posée sous chaque couche, aux nœuds : la surface de la dernière couche IMPRIMÉE en
+        dessous. Une couche plus mince que `min_thickness` (écrasée sous une surface épousée) n'est pas imprimée ; sa
+        tranche revient à la couche suivante, qui la dépose en plus de la sienne. Sans ce report, chaque tranche trop
+        mince laissait un vide, visible en encoches sur les parois (flanc d'un Benchy sous le plat-bord). Le report ne
+        doit pas porter la couche suivante au-delà du plafond `max_thickness` : la tranche est alors imprimée mince
+        (comptée dans `fraction_below_min`), une buse trop haute sur la matière étant pire qu'une couche trop fine."""
+        base = np.empty_like(self.relief.d)
+        self.kept = np.zeros(self.relief.d.shape, dtype=bool)
+        floor = np.full(self.relief.d.shape[1:], self.z_bottom, dtype=self.relief.d.dtype)
+        for k in range(self.count):
+            base[k] = floor
+            zk = self.c[k] + self.relief.d[k]
+            nxt = self.c[k + 1] + self.relief.d[k + 1] if k + 1 < self.count else zk
+            keep = (zk - floor >= min_thickness) | ((zk - floor > 1e-6) & (nxt - floor > max_thickness))
+            self.kept[k] = keep
+            floor = np.where(keep, zk, floor)
+        return base
+
+    def _printed(self, g: np.ndarray, k: int, where: tuple) -> np.ndarray:
+        """Interpolation bilinéaire de la grille `g` de la couche k, limitée aux nœuds où la couche est IMPRIMÉE.
+
+        À côté d'un petit détail épousé, la même couche est écrasée un ou deux millimètres plus bas (pont autour de
+        l'anneau incliné d'un porte-canne de Benchy, 0,8 mm de large, soit trois nœuds) : une interpolation ordinaire
+        mêlait les deux hauteurs et les cordons du bord de l'anneau ondulaient en bosses. Sans nœud imprimé autour du
+        point, interpolation ordinaire."""
+        ix, iy, tx, ty = where
+        corners = ((iy, ix, (1 - tx) * (1 - ty)), (iy, ix + 1, tx * (1 - ty)),
+                   (iy + 1, ix, (1 - tx) * ty), (iy + 1, ix + 1, tx * ty))
+        m = self.kept[min(max(k, 1), self.count) - 1]
+        num = np.zeros(np.shape(tx)); den = np.zeros(np.shape(tx)); plain = np.zeros(np.shape(tx))
+        for jy, jx, w in corners:
+            v = g[jy, jx]
+            plain += w * v
+            wm = w * m[jy, jx]
+            num += wm * v
+            den += wm
+        return np.where(den > 1e-9, num / np.maximum(den, 1e-12), plain)
+
+    def base_xy(self, k: int, where: tuple) -> np.ndarray:
+        """Dessus de la matière posée sous la couche k (à partir de 1) aux points déjà localisés."""
+        return self._printed(self.base[k - 1], k, where)
+
+    def z_xy(self, k: int, x=None, y=None, *, where: tuple | None = None) -> np.ndarray:
+        """Hauteur de la couche k (à partir de 1) aux points (x, y), ou aux points déjà localisés (`where`)."""
+        where = where if where is not None else self.relief.locate(x, y)
+        return self.c[k - 1] + self._printed(self.relief.d[min(max(k, 1), self.count) - 1], k, where)
+
+    def z_grid(self, k: int) -> np.ndarray:
+        """Hauteur de la couche k aux nœuds de la grille du relief."""
+        return self.c[k - 1] + self.relief.d[k - 1]
 
     def sample(self, x, y) -> "_Column":
-        return _Column(self, self.relief.at(x, y))
+        return _Column(self, self.relief.locate(x, y))
 
 
 class _Column:
-    def __init__(self, stack: GeneralStack, d: np.ndarray):
-        self.stack, self.d = stack, d
+    def __init__(self, stack: GeneralStack, where: tuple):
+        self.stack, self.where = stack, where
 
     def layer_z(self, k: int, j: int = 0) -> np.ndarray:
-        return self.stack.z_at(k, self.d)
+        return self.stack.z_xy(k, where=self.where)
 
     def layer_thickness(self, k: int, j: int = 0) -> np.ndarray:
-        if k <= 1:
-            return self.layer_z(1) - self.stack.z_bottom
-        return self.layer_z(k) - self.layer_z(k - 1)
+        """Épaisseur DÉPOSÉE : jusqu'au dessus de la dernière couche imprimée dessous (`GeneralStack.base`)."""
+        return self.layer_z(k) - self.stack.base_xy(k, self.where)
 
 
 # --------------------------------------------------------------------------------------- sections
@@ -269,7 +254,9 @@ class GeneralPlan:
     field: hf.Heightfield                     # dessus/dessous rastérisés (étendue pour le contrôle de la tête)
     z_bottom: float
     regions: list = field(default_factory=list)
+    sections: list = field(default_factory=list)  # sections brutes, couches écrasées comprises (peau pleine)
     slope_deg: float = 0.0
+    min_thickness: float = 0.0                # plancher : une couche plus mince (écrasée) n'est pas imprimée
 
     @property
     def count(self) -> int:
@@ -292,42 +279,57 @@ def analyze(mesh: trimesh.Trimesh, *, nozzle_angle_deg: float, nozzle_reach: flo
         raise NotSliceableError("aucune face tournée vers le haut")
     z_bottom = float(mesh.bounds[0, 2])
     z_top = float(mesh.bounds[1, 2])
-    relief = build_relief(top, xs, ys, nozzle_angle_deg, nozzle_reach, z_bottom)
+    height = z_top - z_bottom
+    amp = amplitude(height, nozzle_angle_deg, nozzle_reach)
     # Épaisseur nominale : avec relief, elle varie de ±25 % ; elle doit rester dans [plancher, plafond].
-    spread = 1.0 + (_AMP_FRACTION if relief.amp > 0 else 0.0)
+    spread = 1.0 + (_AMP_FRACTION if amp > 0 else 0.0)
     h = layer_height if layer_height else 0.2
     h = min(max(h, min_layer * spread), max_layer / spread) if max_layer / spread >= min_layer * spread else max(min_layer, min(h, max_layer))
     t1 = first_layer if first_layer is not None else min(max(0.2, min_layer), max_layer)
-    height = z_top - z_bottom
     rest = max(height - t1, 0.0)
     n_main = 1 + (max(1, int(round(rest / h))) if rest > 1e-9 else 0)
     h_eff = rest / (n_main - 1) if n_main > 1 else h
     # Plans jusqu'à z_top + amp : une colonne dont le dessus est sous la surface du relief finit plus tard.
-    n_total = n_main + int(math.ceil(relief.amp / max(h_eff, 1e-9))) + 1
+    n_total = n_main + int(math.ceil(amp / max(h_eff, 1e-9))) + 1
     planes = z_bottom + t1 + h_eff * np.arange(n_total)
-    stack = GeneralStack(relief, z_bottom, planes)
+    relief = build_relief(mesh, (xs, ys), planes, nozzle_angle_deg, nozzle_reach, min_layer)
+    stack = GeneralStack(relief, z_bottom, planes, min_layer, max_layer)
     v, f = _refine(mesh.vertices, mesh.faces, _MAX_EDGE)
     field_ = hf.Heightfield(xs, ys, top, bottom, None)   # type: ignore[arg-type]
-    slope = math.degrees(math.atan(relief.max_gradient * float(stack.lam.max()))) if relief.amp > 0 else 0.0
-    return GeneralPlan(relief, stack, v, f, h_eff, field_, z_bottom, slope_deg=slope)
+    slope = math.degrees(math.atan(relief.max_gradient)) if relief.amp > 0 else 0.0
+    return GeneralPlan(relief, stack, v, f, h_eff, field_, z_bottom, slope_deg=slope, min_thickness=min_layer)
 
 
 def compute_regions(plan: GeneralPlan) -> None:
-    """Région de chaque couche : section du maillage par la surface F_k (à mi-épaisseur). Progression réelle."""
+    """Région de chaque couche : section du maillage par la surface F_k (à mi-épaisseur), privée des zones où la
+    couche est écrasée (épaisseur sous `min_thickness`, sous une surface épousée) : rien n'y est déposé. Progression
+    réelle."""
     st, rel = plan.stack, plan.relief
-    d_v = rel.at(plan.vertices[:, 0], plan.vertices[:, 1])
+    where = rel.locate(plan.vertices[:, 0], plan.vertices[:, 1])
     z = plan.vertices[:, 2]
-    plan.regions = []
+    below = np.zeros(len(z))                      # δ de la couche du dessous aux sommets (plateau : 0)
+    plan.regions, plan.sections = [], []
     for i in range(st.count):
         _progress.report(i, st.count)
         c_mid = st.c[i] - (plan.stack.c[0] - plan.z_bottom if i == 0 else plan.thickness) / 2.0
-        f = z - c_mid - rel.lam(c_mid) * d_v
+        here = st._printed(rel.d[i], i + 1, where)      # nœuds imprimés seulement (voir `_printed`)
+        f = z - c_mid - 0.5 * (here + below)      # surface à mi-épaisseur : moyenne des deux couches
+        below = here
         region = section_region(plan.vertices, plan.faces, f)
+        plan.sections.append(region if region.area >= 1e-3 else Polygon())
+        thick = st.z_grid(i + 1) - st.base[i]
+        kept = (st.base[i + 1] > st.base[i]) if i + 1 < st.count else thick > 1e-6
+        if not region.is_empty and not kept.all():
+            # Bord tracé sur l'épaisseur interpolée, pas sur le masque des nœuds : un masque coupe en escalier au pas
+            # de la grille (encoches de 0,1 mm sur les parois du plat-bord d'un Benchy).
+            level = np.where(kept, np.maximum(thick, plan.min_thickness), np.minimum(thick, plan.min_thickness - 1e-4))
+            region = _polygons_only(region.intersection(level_geometry(rel.xs, rel.ys, level, plan.min_thickness - 5e-5)))
         plan.regions.append(region if region.area >= 1e-3 else Polygon())
     while plan.regions and plan.regions[-1].is_empty:
         plan.regions.pop()
+        plan.sections.pop()
         st.count -= 1
-        st.c, st.lam = st.c[:-1], st.lam[:-1]
+        st.c = st.c[:-1]
     if not plan.regions:
         raise NotSliceableError("aucune section : le maillage est ouvert ou dégénéré")
 
@@ -335,7 +337,10 @@ def compute_regions(plan: GeneralPlan) -> None:
 def layer_paths(plan: GeneralPlan, params, speed_first: float, speed: float):
     """Parois et remplissage de chaque couche, relevés sur F_k. Rend ([(k, 0, vitesse, polylignes 3D)], [types de chaque polyligne par couche]).
 
-    Peau pleine : la part de la région absente d'une des `nb` couches du dessous ou d'une des `nt` du dessus."""
+    Peau pleine : la part de la région absente d'une des `nb` couches du dessous ou d'une des `nt` du dessus. Présence
+    lue sur les sections brutes : une couche écrasée sous une surface épousée n'est pas imprimée, mais sa matière l'est
+    (par la couche suivante) ; la compter absente rendait pleines toutes les couches sous chaque peau (+13 % de
+    filament sur un prisme en pente)."""
     tpar: tp.ToolpathParams = params.toolpath
     st, rel = plan.stack, plan.relief
     h = plan.thickness
@@ -348,8 +353,8 @@ def layer_paths(plan: GeneralPlan, params, speed_first: float, speed: float):
         _progress.report(i, total)
         if region.is_empty:
             continue
-        below = _intersection(regs, range(i - nb, i))
-        above = _intersection(regs, range(i + 1, i + 1 + nt))
+        below = _intersection(plan.sections, range(i - nb, i))
+        above = _intersection(plan.sections, range(i + 1, i + 1 + nt))
         core = below.intersection(above) if not (below.is_empty or above.is_empty) else Polygon()
         solid = region.difference(core) if not core.is_empty else region
         if not core.is_empty:
@@ -360,7 +365,7 @@ def layer_paths(plan: GeneralPlan, params, speed_first: float, speed: float):
         for pl, xy in zip(path.polylines, xy_list):
             if len(xy) < 2:
                 continue
-            z = st.z_at(i + 1, rel.at(xy[:, 0], xy[:, 1]))
+            z = st.z_xy(i + 1, xy[:, 0], xy[:, 1])
             polys3d.append(np.column_stack([xy, z]))
             layer_kinds.append(pl.kind)
         out.append((i + 1, 0, speed_first if i == 0 else speed, polys3d))
@@ -440,5 +445,5 @@ def head_check(plan: GeneralPlan, layers_data, env: hc.HeadEnvelope, margin: flo
         if not region.is_empty:
             shapely.prepare(region)
             inside = shapely.contains_xy(region, gx.ravel(), gy.ravel()).reshape(gx.shape)
-            zk = plan.stack.z_at(k, rel.d)
+            zk = plan.stack.z_grid(k)
             printed_h[:] = np.where(inside, np.maximum(printed_h, zk), printed_h)

@@ -40,7 +40,7 @@ import traceback
 import numpy as np
 
 from config import schema
-from core import progress as _core_progress, runtime
+from core import _cpp, progress as _core_progress, runtime
 
 EXIT_OK, EXIT_ERROR, EXIT_INVALID, EXIT_REFUSED = 0, 1, 2, 3
 
@@ -161,8 +161,16 @@ def parse_request(text: str) -> dict:
         gcode_params = schema.from_jsonable(GcodeParams, data.get("gcode_params", {}), base=gcode_base)
     except (ValueError, TypeError, KeyError) as exc:
         raise InvalidRequest(str(exc)) from exc
+    params = dataclasses.replace(params, runtime=_with_native_kernel(params.runtime))
     return {"algorithm": algorithm, "mesh": data["mesh"], "output_dir": data["output_dir"], "output_name": name,
             "params": params, "gcode_params": gcode_params}
+
+
+def _with_native_kernel(options):
+    """Le CLI est l'appelant : il emprunte le noyau C++ des qu'il est charge (decision du 2026-10-27, l'application
+    lance toujours le moteur avec son noyau). Le moteur ne lit plus l'environnement et une requete ne peut pas fixer
+    `runtime` : sans cela TetraNet retomberait en silence sur TetGen. Noyau absent : options inchangees (Python)."""
+    return dataclasses.replace(options, native=True) if _cpp.available() else options
 
 
 def export_refusal_message(report, gcode_params) -> str:
@@ -247,11 +255,15 @@ def _slice_ardor(request: dict, final_path: str, temp_path: str, progress, log, 
     from main import export_gcode_checked, run_pipeline
     from element_ardor.step1_ingest import MeshIngestError, SurfaceInconsistentError
 
+    def substep(slug: str, sub: str, fraction: float) -> None:
+        """Avancement reel d'une sous-etape (TetraNet : prepare / tetrahedralize / verify)."""
+        _emit(log, {"type": "substep", "slug": slug, "sub": sub, "fraction": float(fraction)})
+
     try:
         # Le journal libre du pipeline (print) va sur la sortie d'erreur : la sortie standard ne
         # porte que le resultat.
         with runtime.use(request["params"].runtime), contextlib.redirect_stdout(log):
-            result = run_pipeline(request["mesh"], request["params"], progress=progress)
+            result = run_pipeline(request["mesh"], request["params"], progress=progress, substep=substep)
             progress("export", 0.0)
             _core_progress.begin(lambda fraction: progress("export", fraction))   # R-017
             try:

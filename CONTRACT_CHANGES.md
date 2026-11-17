@@ -4,6 +4,18 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajout du 2026-11-14 (le numero reste 3, A CONFIRMER par l'utilisateur) : relief local du moteur general d'Aeolis
+Le moteur general d'Element Aeolis (`report.mode = "general"`) ne deforme plus ses couches par un relief unique cale sur
+le sommet de la piece : chaque surface tournee vers le haut (pente <= 45 deg et <= `nozzle_angle_deg`) est epousee par ses
+propres couches (`element_aeolis/relief.py`, limite #87). Revu le 2026-11-15 : une PEAU de 3 couches epouse chaque
+surface, les couches du dessous s'ecrasent (non imprimees) au lieu de se tordre, raccords jusqu'a 70 deg ; l'epaisseur
+deposee reste dans [plancher, plafond] du profil (`report.thickness_*`), `report.relief_mm` vaut desormais la longueur
+de buse (plus le quart de la hauteur). **Le G-code du mode general change pour un meme modele et les
+memes reglages** ; aucun champ du schema, aucun defaut, aucun libelle ne change, et le moteur « surface en hauteur » est
+intact. **Ce que le consommateur doit faire** : rien. Question ouverte, a trancher par l'utilisateur (regle dure n° 7) : ce
+changement de G-code vient d'un correctif d'algorithme, pas d'un defaut ; s'il doit compter comme incompatible, le numero
+passe a 4 dans le commit qui le publie.
+
 ## Ajout du 2026-11-07 (le numero reste 3) : `params.runtime`, plus de variable d'environnement
 `PipelineParams.runtime` (`RuntimeOptions` : `native`, `gpu`, `grid_mode`, `tetgen_worker`, `tetgen_log`,
 `speculative_tetgen`, `step6_threads`) remplace `APEX_USE_CPP`, `APEX_USE_GPU`, `APEX_CPP_GRID_MODE`,
