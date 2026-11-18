@@ -79,11 +79,12 @@ def _tetranet_progress_kwargs() -> dict:
 
 
 def tetranet_available() -> bool:
-    """Le noyau natif est charge ET contient TetraNet (jamais une erreur s'il manque)."""
-    if not _cpp.enabled():
-        return False
-    module = _cpp.module()
-    return module is not None and hasattr(module, "tetranet_mesh")
+    """Le noyau natif est charge ET contient TetraNet (jamais une erreur s'il manque).
+
+    Independant du commutateur natif (`RuntimeOptions.native`) : ce commutateur choisit entre deux implementations
+    EQUIVALENTES (Python et C++) ; TetraNet n'a pas d'implementation Python. Avant le 2026-11-17, `native=False`
+    faisait retomber `mesher="tetranet"` en silence sur TetGen en Python (plus de 10 min sur le Benchy)."""
+    return _cpp.available() and hasattr(_cpp.module(), "tetranet_mesh")
 
 
 def _ingest_with_tetranet(
@@ -102,8 +103,9 @@ def _ingest_with_tetranet(
         placement_offset = target_z - float(vertices[:, 2].min())
         if placement_offset != 0.0:
             vertices = vertices + np.array([0.0, 0.0, placement_offset])
-    out = _cpp.module().tetranet_mesh(vertices, faces, float(resolution) * TETRANET_CELL_PER_RESOLUTION,
-                                      0.5, 0.05, float(refuse_ratio), 0, float(feature_angle_deg),
+    options = {"snap_alpha": 0.5, "skin_tolerance": 0.05, "refuse_ratio": float(refuse_ratio),
+               "feature_angle_deg": float(feature_angle_deg)}
+    out = _cpp.module().tetranet_mesh(vertices, faces, float(resolution) * TETRANET_CELL_PER_RESOLUTION, options,
                                       **_tetranet_progress_kwargs())
     mesher_report = {k: v for k, v in out.items()
                      if k not in ("tet_vertices", "tetrahedra", "surface_vertices", "surface_faces")}

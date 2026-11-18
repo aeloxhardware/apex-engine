@@ -32,6 +32,8 @@ struct Params {
     double warn_conflict_ratio = 0.01;    // désaccords entre les deux tests de signe / sommets de la bande : avertissement
     double warn_ambiguous_ratio = 0.002;  // sommets de la bande au nombre d'enroulement ambigu : avertissement
     double refuse_conflict_ratio = 0.05;  // au-delà : InconsistentSurface (surface trop cassée)
+    bool check_cover = true;         // mesure aussi l'écart surface -> bord du maillage (matière manquante, coins comblés)
+    double cover_shallow_alpha = 0.25;  // plus près du bord que alpha x h : compté peau extérieure sans test d'enroulement
     // Progression RÉELLE : `progress(phase, fraction)`, `phase` = Phase::Prepare / Tetrahedralize / Verify (0, 1, 2),
     // `fraction` dans [0, 1], croissante dans une phase, 0 en entrée de phase et 1 en sortie. La fraction vient du
     // travail effectivement terminé (compteurs dans les boucles), jamais d'une durée estimée. Appelée depuis les
@@ -58,6 +60,9 @@ struct Report {
     int64_t tets = 0, dropped_degenerate = 0, sign_conflicts = 0;
     // contrôles
     double skin_max_error = 0.0, skin_p99_error = 0.0;  // mm, maillage -> surface
+    // mm, surface -> bord du maillage, sur la peau extérieure du solide seulement (faces internes écartées)
+    double skin_cover_max_error = 0.0, skin_cover_p99_error = 0.0;
+    int64_t cover_samples = 0, cover_internal_samples = 0;
     double volume_ratio = 0.0;       // volume du maillage / volume de la surface
     double min_dihedral_deg = 0.0;
     double min_volume = 0.0;         // mm3

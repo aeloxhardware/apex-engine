@@ -28,8 +28,11 @@ suivis : R-030 point 2 → jalon « moteur 100 % C++ » suivi par R-014 ; R-030 
 
 8. **Limites de qualité d'Apex (2026-11-01), applicables ici sans exception** : Apex doit être
    le sommet des slicers, donc sans défaut de conception. Fichier source ≤ 800 lignes, fonction
-   ≤ 80 lignes, signature ≤ 8 paramètres (`src/tetranet.cpp` fait déjà 725 lignes : il se découpe
-   avant de grossir, jamais après). Aucune constante de tolérance cachée : tout seuil est un champ
+   ≤ 80 lignes, signature ≤ 8 paramètres. Découpé le 2026-11-17 (l'ancien `src/tetranet.cpp` avait atteint
+   830 lignes et une fonction `mesh` de 400 lignes) : `tetranet.cpp` (enchaînement des phases), `surface.cpp`
+   (soudure, topologie, arbre de recherche, enroulement), `stuffing.cpp` (réseau, coupes, tétraèdres),
+   `checks.cpp` (contrôles), `cover.cpp` (points de surface, peau extérieure), en-têtes internes `internal.hpp`,
+   `stuffing.hpp`, `checks.hpp`, `cover.hpp`. Sorties identiques au bit près sur les 5 modèles de mesure. Aucune constante de tolérance cachée : tout seuil est un champ
    de paramètres nommé, documenté et testé. Aucun état global. Toute correction a un test qui
    échoue sans elle, et les seuils de `corpus/CRITERES.md` sont rejoués. La qualité des
    tétraèdres « non atteinte » ci-dessous est une dette à fermer, pas un état à accepter.
@@ -66,5 +69,16 @@ suivis : R-030 point 2 → jalon « moteur 100 % C++ » suivi par R-014 ; R-030 
   - **C (protection des arêtes vives, `Params::feature_angle_deg`, désactivée par défaut)** : bon sur une boîte à maille
     1,5 mm (p99 de peau 0,13 → 0,015 mm), mais l'angle dièdre minimal chute de 23 à 5° à maille 1,0 mm, et aucun gain
     sur death ni turkish. Non fiable, à reprendre (test `tests/test_tetranet_features.py`, échec attendu documenté).
+- **2026-11-17** (détail : `docs/RAPPORT.md`, dernière section) :
+  - **Soudure linéaire** : le hachage ne mélangeait pas les bits (coordonnées float32 → toutes les clés dans un seul
+    bucket) ; Benchy 48,6 s → 2,2 s, même maillage.
+  - **Écart mesuré dans les deux sens** (`check_cover`, `Report::skin_cover_*`) : surface → bord, peau extérieure
+    seulement. Avant, une paroi de 0,3 mm absente du maillage sortait « Ok ».
+  - **Essayés et retirés** : raffinement de la peau par bissection après remplissage (Benchy p99 0,276 → 0,223 mm en
+    8 tours pour ×3,5 de durée, death bloqué, turkish pire), capture des parois minces dans le réseau (11 à 2 040 nœuds,
+    gain négligeable). Le reliquat dominant est fait de parois de 0,7 à 1 maille : deux nappes dans un tétraèdre du
+    réseau. Seul un réseau localement plus fin peut les représenter.
+  - **Liaison Python** : `tetranet_mesh(vertices, faces, cell_size, options={}, progress=None)`, une clé d'option
+    inconnue est une erreur.
 - Reste : phase 5 (plateau, tolérance automatique), phase 7 (parallélisme déjà partiel), comparaison
-  de bout en bout avec TetGen, test des cassures dans le pipeline complet.
+  de bout en bout avec TetGen, test des cassures dans le pipeline complet, réseau localement plus fin aux parois minces.

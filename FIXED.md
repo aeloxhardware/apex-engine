@@ -2283,3 +2283,38 @@ test** sur la source des deux fonctions, plutôt que laissé à la convention.
 pas diverger en silence.
 
 **247/247 tests** (233 avant, zéro régression).
+
+---
+
+## TetraNet : soudure quadratique des sommets (coordonnées float32), 2026-11-17
+
+**Cause mesurée** : le hachage de la soudure ne mélangeait pas les bits ; un double issu d'un STL (float32) a ses 29 bits
+de poids faible nuls, et `unordered_map` (MSVC) range les clés par les bits de poids faible : simulation sur 163 842
+sommets, **toutes les clés dans un seul bucket**. Benchy officiel (225 143 faces) : soudure 45,9 s sur 48,6 s de
+maillage. **Fix** : finaliseur splitmix64 sur chaque mot + `reserve` (`tetranet/src/surface.cpp`). **Résultat** : 2,2 s,
+même maillage (204 438 tétraèdres). Test : `tests/test_tetranet_progress.py::test_soudure_des_sommets_rapide_sur_coordonnees_float32`.
+
+## TetraNet retombait en silence sur TetGen en Python (commutateur natif), 2026-11-17
+
+**Cause** : `tetranet_available()` exigeait `RuntimeOptions.native`, commutateur qui choisit entre deux implémentations
+ÉQUIVALENTES ; TetraNet n'a pas d'implémentation Python. Avec `native=False`, `mesher="tetranet"` partait sans un mot sur
+TetGen en Python (plus de 10 min sur le Benchy au lieu de 2 s). L'interface n'était pas touchée (elle exige le noyau).
+**Fix** : TetraNet dépend de la seule présence du module ; module absent → `MeshIngestError` explicite.
+Tests : `tests/test_step1_tetranet.py::test_tetranet_ignores_the_native_switch`, `::test_missing_native_kernel_is_an_explicit_refusal`
+(les 6 tests de ce fichier, sautés sans `--native`, tournent désormais dans les deux positions).
+
+## Nombre d'enroulement Python : 17,8 Gio demandés d'un coup, 2026-11-17
+
+**Cause** (relevée le 2026-11-13, non enregistrée) : `generalized_winding_number`, chemin Python, allouait des tableaux
+points × triangles × 3 sans découpage (28 128 faces : ingestion plantée). **Fix** : paquets d'au plus 10⁶ couples
+(point, triangle) ; chaque point est calculé seul, le résultat ne change pas d'un bit.
+Test : `tests/test_step1_ingest_repair.py::test_python_winding_number_is_computed_in_bounded_chunks`.
+
+## TetraNet déclarait « Ok » un maillage auquel il manque de la matière, 2026-11-17
+
+**Cause** : le contrôle ne mesurait que l'écart du bord du maillage à la surface. Une paroi plus fine que la maille,
+absente du maillage, ne produit aucune face de bord loin de la surface : une plaque de 0,3 mm entièrement absente
+(volume 93 %) sortait avec un écart de 1,6e-14 mm. **Fix** : écart surface → bord (`check_cover`), sur la seule peau
+extérieure (faces internes de coques qui se chevauchent écartées par le nombre d'enroulement, validé contre le calcul
+exact). **Résultat** : death 1,2 mm, turkish 3,1 mm, Benchy 1,3 mm de surface loin du bord, désormais dans le rapport
+et le statut. Test : `tests/test_tetranet_cover.py`.

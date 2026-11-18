@@ -6,6 +6,23 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 **Tests : 505/505 dans les positions `APEX_USE_CPP=0`, `=1` et `=1` + `APEX_USE_GPU=1`** (2026-10-13 soir, suite complète).
 
 
+## 2026-11-17 — TetraNet : vitesse et fidélité de la coque, essais un par un (détail : `tetranet/docs/RAPPORT.md`)
+- 🟢 **Soudure de TetraNet linéaire** : Benchy 48,6 s → 2,2 s, même maillage (hachage sans mélange de bits).
+- 🟢 **TetraNet découpé** (830 lignes → 6 fichiers sous 400 lignes, `mesh` de 400 lignes → phases), sorties identiques
+  au bit près ; liaison `tetranet_mesh(..., options, progress)` (clé inconnue = erreur).
+- 🟢 **Écart surface → bord mesuré** (`check_cover`) : une paroi de 0,3 mm absente sortait « Ok » ; death 1,2 mm,
+  turkish 3,1 mm, Benchy 1,3 mm de surface loin du bord, désormais dans le rapport et le statut.
+- 🟢 **Plus de repli silencieux de TetraNet sur TetGen en Python** (commutateur natif) ; noyau absent = refus explicite.
+- 🟢 **Enroulement Python par paquets** (17,8 Gio demandés d'un coup avant).
+- 🟢 Mesuré et NON retenu : raffinement de la peau par bissection après remplissage, capture des parois minces dans le
+  réseau, option `Y` de TetGen (maillage quasi sans raffinement, qualité dégradée).
+- 🟢 **Projection des contours (étape 5c) par défaut** (décision de l'utilisateur, 2026-11-18 ; contrat 4, PAL-006, R-033) : contours death p99 0,294 → 0,017 mm, Benchy 0,187 → 0,014,
+  turkish 0,232 → 0,136, sans danger avec TetGen, 0 à +11 % de durée, aucun test cassé (patch prêt). Bloque : change le
+  G-code, donc contrat 3 → 4 ; l'interface (qui envoie 3) doit suivre (R-033).
+- 🟢 **Binaires suivis par git** (`cpp/build/`, `cpp/lib/`) : RESTENT suivis (décision de l'utilisateur, 2026-11-18).
+- ♦️ **Interface au contrat 4** (R-033) : tant qu'elle envoie 3, chaque tranchage est refusé (code 2).
+- ⬛ Parois de 0,7 à 1 maille (reliquat dominant de la limite #86) : réseau localement plus fin, non essayé.
+
 ## 2026-10-27 (soir) — Demandes de `apex/integration/REQUESTS.md` traitees cote moteur (sans noyau natif : poste Linux, Python seul)
 - 🟢 R-007 : ligne `; apex_kinematics pivot_to_tip=… b_sign=… tilt_sign=… z_reference=…` dans le G-code (`kinematics_header_line` / `parse_kinematics_header`). R-010 : bloc chiffre `apex_block_begin v1` (`file_io/apex_header.py`, AES-GCM par le paquet `cryptography`, sans lui : rien d'ecrit), **etages 1 a 6 verifies contre `apex_cipher_vectors.json` de l'interface**, nonces derives du contenu (G-code reproductible). Port natif a faire avec R-014.
 - 🟢 R-008 : `tests/vectors/kinematics_vectors.json` (27 vecteurs, 3 configurations), `scripts/gen_kinematics_vectors.py --check`.

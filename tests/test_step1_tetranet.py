@@ -57,6 +57,26 @@ def test_very_broken_surface_is_refused_with_the_agreed_message(tmp_path):
     assert "incohérent" in message and exc.value.diagnostic["surface_holes"] == 1
 
 
+def test_tetranet_ignores_the_native_switch(tmp_path):
+    """TetraNet n'a pas d'implementation Python : `native=False` ne doit plus basculer en silence sur TetGen
+    (2026-11-17 : plus de 10 min sur le Benchy au lieu de 2 s, sans un mot)."""
+    from core import _cpp
+    box = trimesh.creation.box(extents=(10, 10, 10))
+    previous = _cpp.set_enabled(False)
+    try:
+        _md, _tm, rep = step1_ingest.run(_write(tmp_path, box), resolution=2.0, mesher="tetranet")
+    finally:
+        _cpp.set_enabled(previous)
+    assert rep.mesher == "tetranet"
+
+
+def test_missing_native_kernel_is_an_explicit_refusal(tmp_path, monkeypatch):
+    box = trimesh.creation.box(extents=(10, 10, 10))
+    monkeypatch.setattr(step1_ingest, "tetranet_available", lambda: False)
+    with pytest.raises(step1_ingest.MeshIngestError, match="TetraNet demande"):
+        step1_ingest.run(_write(tmp_path, box), resolution=2.0, mesher="tetranet")
+
+
 def test_tetgen_stays_the_default_path(tmp_path):
     box = trimesh.creation.box(extents=(10, 10, 10))
     md, tm, rep = step1_ingest.run(_write(tmp_path, box), resolution=2.0)

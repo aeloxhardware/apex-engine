@@ -594,3 +594,25 @@ def test_surface_inconsistent_diagnostic_carries_numbers_for_translation(monkeyp
     assert err.value.diagnostic["self_intersections"] == 0
     assert err.value.diagnostic["surface_holes"] == 3
     assert "1\u202f234 points incohérents" in str(err.value)
+
+
+def test_python_winding_number_is_computed_in_bounded_chunks(monkeypatch):
+    """Regression 2026-11-13 : le chemin Python allouait points x triangles d'un coup (17,8 Gio demandes pour 28 128
+    faces, ingestion plantee). Il travaille maintenant par paquets bornes, et le decoupage ne change aucun bit."""
+    from core import _cpp
+    from element_ardor import _self_intersection_geometry as geometry
+    mesh = trimesh.creation.icosphere(subdivisions=2, radius=5.0)
+    triangles = np.ascontiguousarray(mesh.triangles, dtype=np.float64)
+    points = np.random.default_rng(3).uniform(-8.0, 8.0, size=(257, 3))
+    previous = _cpp.set_enabled(False)
+    try:
+        whole = geometry._winding_chunk(points, triangles)
+        sizes = []
+        original = geometry._winding_chunk
+        monkeypatch.setattr(geometry, "_WINDING_PAIRS_PER_CHUNK", 10 * len(triangles))
+        monkeypatch.setattr(geometry, "_winding_chunk", lambda p, t: sizes.append(len(p) * len(t)) or original(p, t))
+        chunked = geometry.generalized_winding_number(points, triangles)
+    finally:
+        _cpp.set_enabled(previous)
+    assert np.array_equal(whole, chunked)
+    assert len(sizes) == 26 and max(sizes) <= 10 * len(triangles)

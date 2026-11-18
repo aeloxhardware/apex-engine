@@ -139,6 +139,10 @@ def triangle_triangle_segment(triangle_a: np.ndarray, triangle_b: np.ndarray):
     return reference + direction * low, reference + direction * high
 
 
+# Couples (point, triangle) par paquet : chaque tableau (P, T, 3) en float64 fait au plus ~24 Mo.
+_WINDING_PAIRS_PER_CHUNK = 1_000_000
+
+
 def generalized_winding_number(points: np.ndarray, triangles: np.ndarray) -> np.ndarray:
     """
     Nombre d'enroulement generalise de `points` par rapport a la surface
@@ -150,9 +154,11 @@ def generalized_winding_number(points: np.ndarray, triangles: np.ndarray) -> np.
     le rend correct pour une surface qui se recouvre elle-meme, la ou un
     test de parite par lancer de rayon repondrait « exterieur ».
 
-    Vectorise sur les points ET les triangles ; l'appelant doit garder le
-    produit `len(points) * len(triangles)` raisonnable (usage vise : quelques
-    centaines de points de test contre le maillage entier).
+    Vectorise sur les points ET les triangles, par paquets de points : un
+    tableau intermediaire ne depasse pas `_WINDING_PAIRS_PER_CHUNK` couples
+    (point, triangle). Sans paquets, 28 128 faces et quelques dizaines de
+    milliers de points demandaient 17,8 Gio (ingestion plantee, 2026-11-13).
+    Chaque point est calcule seul : le resultat ne depend pas du decoupage.
     """
     if _cpp.enabled():
         points_arr = np.ascontiguousarray(
@@ -163,6 +169,15 @@ def generalized_winding_number(points: np.ndarray, triangles: np.ndarray) -> np.
         )
 
     points = np.asarray(points, dtype=np.float64).reshape(-1, 3)
+    triangles = np.asarray(triangles, dtype=np.float64)
+    step = max(1, _WINDING_PAIRS_PER_CHUNK // max(1, len(triangles)))
+    if len(points) <= step:
+        return _winding_chunk(points, triangles)
+    return np.concatenate([_winding_chunk(points[i:i + step], triangles) for i in range(0, len(points), step)])
+
+
+def _winding_chunk(points: np.ndarray, triangles: np.ndarray) -> np.ndarray:
+    """`generalized_winding_number` pour un paquet de points (chemin Python)."""
     a = triangles[None, :, 0, :] - points[:, None, :]
     b = triangles[None, :, 1, :] - points[:, None, :]
     c = triangles[None, :, 2, :] - points[:, None, :]

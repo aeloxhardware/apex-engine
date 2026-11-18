@@ -276,8 +276,10 @@ class PipelineParams:
     # la peau, trajectoires de surface et ordre (element_ardor/skin/, chantier du 2026-10-28). Non mesure sur les quatre
     # modeles : ne jamais l'activer par defaut sans mesure.
     skin: Optional[skin_chain.SkinParams] = None
-    # Coque ramenee sur la surface d'origine (step5c, R-030 point 8) : opt-in, None = desactive.
-    skin_projection: Optional[SkinProjectionParams] = None
+    # Coque ramenee sur la surface d'origine (step5c, R-030 point 8, palliatif PAL-006 de la limite #86) : ACTIVE par
+    # defaut depuis le contrat 4 (2026-11-17 : contours de death p99 0,294 -> 0,017 mm avec TetraNet, 0,032 -> 0,001
+    # avec TetGen, 0 a +11 % de duree, tetranet/docs/RAPPORT.md). None = desactive.
+    skin_projection: Optional[SkinProjectionParams] = field(default_factory=SkinProjectionParams)
     # Options d'execution (natif, GPU, TetGen, fils) : plus aucune variable d'environnement (R-030 point 3).
     runtime: RuntimeOptions = field(default_factory=runtime.options)
 

@@ -265,7 +265,7 @@ struct PipelineParams {
     std::optional<SupportCheckParams> support_check{std::nullopt};
     bool reachable_tilt_from_machine{true};
     std::optional<SkinParams> skin{std::nullopt};
-    std::optional<SkinProjectionParams> skin_projection{std::nullopt};
+    std::optional<SkinProjectionParams> skin_projection{SkinProjectionParams{.chord_tolerance = 0.02, .max_rounds = 3, .max_shift = 1.5, .crease_angle_deg = 8.0, .crease_tolerance = 0.0001, .batch = 200000}};
     RuntimeOptions runtime{RuntimeOptions{.native = false, .gpu = false, .grid_mode = "stamped", .tetgen_worker = true, .tetgen_log = std::nullopt, .speculative_tetgen = true, .step6_threads = std::nullopt}};
 };
 

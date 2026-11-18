@@ -16,7 +16,7 @@ def _supports_features() -> bool:
     try:
         box = trimesh.creation.box(extents=[4, 4, 4])
         _cpp.module().tetranet_mesh(np.ascontiguousarray(box.vertices, dtype=np.float64),
-                                    np.ascontiguousarray(box.faces, dtype=np.int64), 2.0, 0.5, 0.05, 0.05, 0, 30.0)
+                                    np.ascontiguousarray(box.faces, dtype=np.int64), 2.0, {"feature_angle_deg": 30.0})
         return True
     except TypeError:
         return False
@@ -43,7 +43,8 @@ def box():
 
 def _mesh(box, cell, angle):
     return _cpp.module().tetranet_mesh(np.ascontiguousarray(box.vertices, dtype=np.float64),
-                                       np.ascontiguousarray(box.faces, dtype=np.int64), cell, 0.5, 0.05, 0.05, 0, angle)
+                                       np.ascontiguousarray(box.faces, dtype=np.int64), cell,
+                                       {"feature_angle_deg": angle})
 
 
 def test_feature_protection_is_off_by_default(box):

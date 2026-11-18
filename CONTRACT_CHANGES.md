@@ -4,6 +4,18 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 4 (2026-11-17) : INCOMPATIBLE, le numero passe de 3 a 4
+`PipelineParams.skin_projection` (etape 5c : contours ramenes sur la surface d'origine) est ACTIF par defaut
+(`SkinProjectionParams()` au lieu de `null`). C'etait annonce dans l'ajout du 2026-11-07 ci-dessous : un defaut qui
+change le G-code incremente le contrat.
+- **Ce qui change pour un meme modele** (mesures du 2026-11-17, `tetranet/docs/RAPPORT.md`) : les contours de couche
+  sont ramenes sur le STL. TetraNet : ecart p99 death 0,294 -> 0,017 mm, Benchy 0,187 -> 0,014, turkish 0,232 -> 0,136.
+  TetGen : death 0,032 -> 0,001 mm. Points de trajectoire +7 a +9 %, duree 0 a +11 %, matiere sans appui et
+  orientations inatteignables inchangees a quelques pour mille pres.
+- **Ce que le consommateur doit faire** : passer `APEX_CONTRACT_VERSION` a 4, recopier `config/params.schema.json`
+  (defaut de `skin_projection`), envoyer `"contract": 4` dans la requete (une requete au contrat 3 est refusee, code 2).
+  Pour retrouver l'ancien G-code : `"skin_projection": null`. Demande correspondante dans `apex/integration/REQUESTS.md`.
+
 ## Ajout du 2026-11-14 (le numero reste 3, A CONFIRMER par l'utilisateur) : relief local du moteur general d'Aeolis
 Le moteur general d'Element Aeolis (`report.mode = "general"`) ne deforme plus ses couches par un relief unique cale sur
 le sommet de la piece : chaque surface tournee vers le haut (pente <= 45 deg et <= `nozzle_angle_deg`) est epousee par ses

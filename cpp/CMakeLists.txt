@@ -45,7 +45,12 @@ pybind11_add_module(apex_core
   third_party/clipper2/src/clipper.offset.cpp
   third_party/clipper2/src/clipper.rectclip.cpp
   bindings/module.cpp
+  bindings/tetranet_binding.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/src/tetranet.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/src/surface.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/src/stuffing.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/src/checks.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/src/cover.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../tetranet/src/features.cpp
 )
 

@@ -988,7 +988,14 @@
        "type": "null"
       }
      ],
-     "default": null
+     "default": {
+      "batch": 200000,
+      "chord_tolerance": 0.02,
+      "crease_angle_deg": 8.0,
+      "crease_tolerance": 0.0001,
+      "max_rounds": 3,
+      "max_shift": 1.5
+     }
     },
     "support_check": {
      "anyOf": [
@@ -1699,5 +1706,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 3
+ "x-apex-contract": 4
 }

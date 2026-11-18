@@ -78,3 +78,81 @@ Mesure : écart de chaque point de contour (sommets + 3 points par segment) à l
   détection des parois minces.
 - **C** : sur une boîte, p99 de peau 0,13 → 0,015 mm et rapport de volume 0,995 → 0,9996 à maille 1,5 mm ; à maille 1,0 mm
   l'angle dièdre minimal passe de 23° à 5°. Aucun gain sur death ni turkish. Désactivée par défaut.
+
+## Écart dans les deux sens, raffinement de la peau, parois minces (2026-11-17)
+
+Mesures du 2026-11-17, résolution 1,5 (maille 1,0 mm), noyau natif, 12 fils. Modèles : `death`, `turkish`, Benchy
+officiel (225 143 faces). Les petits modèles de référence (`l_shape`, `l-triple`) ont un écart nul dans tous les cas.
+
+### Ce que TetraNet ne mesurait pas
+Le statut ne regardait que l'écart du BORD DU MAILLAGE à la surface. Mesuré dans l'autre sens (surface → bord), sur la
+seule peau extérieure du solide (faces internes de coques qui se chevauchent écartées par le nombre d'enroulement,
+validé contre l'enroulement exact : 3 465 contre ~3 100 points internes sur death, 44 836 contre ~45 700 sur turkish) :
+
+| modèle | maillage → surface p99 / max | surface → bord p99 / max |
+|---|---:|---:|
+| death | 0,381 / 0,499 mm | 0,379 / 1,22 mm |
+| turkish | 0,336 / 0,580 mm | 0,94 / 3,06 mm |
+| Benchy | 0,276 / 0,428 mm | 0,44 / 1,34 mm |
+
+Une plaque de 0,3 mm absente du maillage (volume 93 %) sortait « Ok » : écart maillage → surface 1,6e-14 mm. Sur le
+Benchy, parmi les faces de bord à plus de 0,05 mm, 88 % coupent une arête vive, 11 % suivent mal la courbure, 1,5 %
+enjambent une paroi mince ; au-delà de 0,2 mm, plus de la moitié des faces de death (1 792 / 3 167) et 46 % de celles de
+turkish ENJAMBENT UNE PAROI d'épaisseur proche de la maille : deux nappes de surface dans un même tétraèdre du réseau,
+que les gabarits de Labelle-Shewchuk ne représentent pas (la matière manque au-delà de la face).
+**Gardé** : `check_cover` (défaut : actif), contrôle `cover_error` de `src/checks.cpp`, test
+`tests/test_tetranet_cover.py`. Coût après réduction (test d'enroulement seulement au-delà de 0,25 h, un par triangle) :
++0,3 s sur le Benchy, +0,2 à 0,5 s sur turkish, +0,05 s sur death.
+
+### Raffinement de la peau après remplissage : essayé, NON retenu
+Bissection des arêtes du bord dont la face s'écarte de la surface (dans un sens ou dans l'autre), tous les tétraèdres
+autour de l'arête coupés (maillage conforme), nouveau sommet sur l'arête vive (intersection des plans des deux faces les
+plus proches) ou au point de surface le plus proche ; position refusée si un tétraèdre se retourne ou passe sous 5°.
+
+| modèle | tours | maillage → surface p99 | > 0,1 mm | surface → bord p99 | durée du maillage |
+|---|---:|---:|---:|---:|---:|
+| death | 0 / 2 / 8 | 0,381 / 0,381 / 0,381 | 15,4 / 12,8 / 10,2 % | 0,379 / 0,298 / 0,283 | 0,7 / 1,6 / 5,4 s |
+| turkish | 0 / 2 / 8 | 0,336 / 0,340 / 0,332 | 11,7 / 13,6 / 15,0 % | 0,94 / 0,94 / 0,94 | 4,2 / 7,7 / 20,7 s |
+| Benchy | 0 / 2 / 8 | 0,276 / 0,246 / 0,223 | 12,6 / 9,7 / 7,2 % | 0,44 / 0,38 / 0,37 | 3,0 / 4,9 / 10,4 s |
+
+Pourquoi : les tétraèdres du bord sortis du remplissage sont plats ; déplacer un sommet de 0,3 mm les retourne (31 576
+coupes refusées sur le Benchy en 8 tours) ; les faces qui enjambent une paroi ne se corrigent pas en coupant (6 703
+arêtes de paroi sur death). Une première version qui posait le sommet à mi-chemin quand la projection était refusée
+EMPIRAIT le maillage (sommets de bord hors de la surface : 4 827 des 5 804 faces fautives de death après 4 tours).
+Code retiré ; conception ci-dessus.
+
+### Capture des parois minces dans le réseau : essayé, NON retenu
+Un nœud de la bande dont le point de peau le plus proche est sur une paroi plus mince que la maille (rayon tiré à
+travers, face opposée à moins de h) et à moins de 0,25 / 0,355 / 0,45 h du plan médian y est déplacé et compté dedans.
+Nœuds capturés : death 11 / 19 / 31, Benchy 0 / 11 / 25, turkish 986 / 1 535 / 2 040 ; surface → bord p99 de turkish
+0,94 → 0,93 / 0,93 / 0,84 mm, rien sur death ni le Benchy. Les parois fautives font 0,7 à 1 maille : leur plan médian est
+à plus de 0,35 h de tout nœud extérieur. Code retiré.
+
+### Maille plus fine partout (pour situer le coût)
+| modèle | résolution | tétraèdres | durée | maillage → surface p99 | surface → bord p99 / max |
+|---|---:|---:|---:|---:|---:|
+| death | 1,5 / 1,0 / 0,75 | 0,22 / 0,69 / 1,61 M | 0,7 / 2,0 / 4,8 s | 0,381 / 0,182 / 0,127 | 0,379 / 0,236 / 0,168 ; max 1,22 / 0,82 / 0,76 |
+| turkish | 1,5 / 1,0 / 0,75 | 0,67 / 2,19 / 5,05 M | 4,2 / 12,6 / 27,4 s | 0,336 / 0,250 / 0,147 | 0,94 / 0,90 / 0,74 ; max 3,06 / 2,96 / 2,71 |
+| Benchy | 1,5 / 1,0 / 0,75 | 0,20 / 0,69 / 1,57 M | 3,0 / 5,2 / 8,1 s | 0,276 / 0,161 / 0,125 | 0,44 / 0,19 / 0,14 ; max 1,34 / 1,20 / 0,34 |
+
+Turkish garde ~6 % de sa peau extérieure à plus de 0,3 mm même à maille 0,5 mm : détails de 0,1 à 0,6 mm d'épaisseur
+(feuilles ouvertes : 62 points sur 9 265, négligeables), en partie plus fins qu'un cordon de buse.
+
+### Projection des contours (étape 5c, piste D) sur le pipeline complet
+Écart des points de contour (sommets + 3 par segment) au STL, étapes 1 à 8 :
+
+| modèle | mailleur | p99 sans → avec D | > 0,1 mm sans → avec D | durée sans → avec D |
+|---|---|---:|---:|---:|
+| death | TetraNet | 0,294 → 0,017 mm | 7,07 → 0,21 % | 14,0 → 15,0 s |
+| turkish | TetraNet | 0,232 → 0,136 mm | 8,09 → 1,88 % | 35,3 → 35,0 s |
+| Benchy | TetraNet | 0,187 → 0,014 mm | 4,65 → 0,05 % | 17,3 → 19,2 s |
+| death | TetGen | 0,032 → 0,001 mm (max 0,069 → 0,021) | 0 → 0 % | 17,9 → 16,4 s |
+| turkish | TetGen | 0,006 → 0,000 mm (max 0,300 → 0,085) | 0,003 → 0 % | 28,3 → 32,9 s |
+
+Matière sans appui, orientations inatteignables, couches : inchangées à quelques pour mille près. D corrige les arêtes
+vives au niveau des contours (en 1D, peu coûteux) ; elle ne recrée pas la matière absente du maillage.
+
+### Option `Y` de TetGen (sans point ajouté sur la surface) : NON retenue
+Elle supprime en pratique le raffinement : l_shape 1 677 → 40 tétraèdres, death 333 950 → 5 425, turkish 320 372 →
+15 790 ; orientations inatteignables 23 → 63 % des points (l_shape), 39 → 58 % (death) ; matière sans appui de death
+1,5 → 3,0 %. Le gain de temps (death 17,9 → 5,2 s) vient d'un maillage dégradé.

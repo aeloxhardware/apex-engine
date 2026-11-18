@@ -389,8 +389,9 @@ def run(
     if mesher == "tetranet":
         if junction_zones:
             print("[step1] TetraNet : zones de jonction non prises en charge, retour a TetGen")
-        elif not tetranet_available():
-            print("[step1] TetraNet : noyau natif absent, retour a TetGen")
+        elif not tetranet_available():   # jamais de repli silencieux : TetGen en Python est un autre resultat, 10x plus lent
+            raise MeshIngestError("TetraNet demande, mais le noyau natif est absent ou ne le contient pas : "
+                                  "reconstruire avec scripts/build_cpp.py, ou choisir mesher='tetgen'.")
         else:
             if near_platform_resolution is not None:
                 print("[step1] TetraNet : raffinement pres du plateau pas encore porte, ignore")

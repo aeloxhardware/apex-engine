@@ -2,6 +2,26 @@
 
 L'historique des sessions (ancien `LAST_SESSION.md`, 1 390 lignes) est dans `docs/journal/` (voir `INDEX.md`).
 
+## Session du 2026-11-17 — TetraNet : vitesse, fidélité de la coque, essais un par un
+Mesures détaillées : `tetranet/docs/RAPPORT.md` (dernière section) ; limite #86 revue ; correctifs dans `FIXED.md`.
+- **Soudure de TetraNet** (hachage sans mélange : toutes les clés float32 dans un bucket) : Benchy 48,6 s → 2,2 s.
+- **TetraNet découpé** (830 lignes, `mesh` de 400 lignes → 6 fichiers sous 400 lignes) ; sorties identiques au bit près
+  (empreinte SHA-256 sur 5 modèles). Liaison `tetranet_mesh(vertices, faces, cell_size, options, progress)` dans
+  `cpp/bindings/tetranet_binding.cpp`, clé inconnue = erreur (10 paramètres positionnels avant).
+- **Essais et décisions** (4 modèles de référence + Benchy) :
+  - GARDÉ : écart surface → bord dans TetraNet (`check_cover`, peau extérieure seulement ; une plaque de 0,3 mm absente
+    sortait « Ok ») ; refus explicite si TetraNet est demandé sans noyau (avant : TetGen en Python, en silence) ;
+    enroulement Python par paquets (17,8 Gio demandés avant).
+  - NON RETENU, code retiré : raffinement de la peau par bissection après remplissage ; capture des parois minces dans le
+    réseau ; option `Y` de TetGen (maillage quasi sans raffinement : death 333 950 → 5 425 tétraèdres, orientations
+    inatteignables 39 → 58 %).
+  - APPLIQUÉ (décision de l'utilisateur, 2026-11-18) : projection des contours (étape 5c) par défaut, contrat 4, PAL-006. Contours death p99 0,294 → 0,017 mm, Benchy
+    0,187 → 0,014, turkish 0,232 → 0,136 ; avec TetGen, sans danger (death 0,032 → 0,001). Change le G-code : contrat
+    3 → 4, que l'interface (qui envoie 3) doit suivre, sinon chaque tranchage est refusé : demande R-033 dans `apex`.
+- **Décision de l'utilisateur (2026-11-18)** : `cpp/build/` et `cpp/lib/` RESTENT suivis par git (malgré `.gitignore`) :
+  les retirer les supprimerait sur une autre machine qui s'en sert sans compiler.
+- **Reste ouvert** : parois de 0,7 à 1 maille (réseau localement plus fin, non essayé) ; build Linux du noyau natif.
+
 ## Session du 2026-11-13 — mesure du pipeline complet sur une hélice, durée de la tétraédralisation
 Aucun code du dépôt modifié : mesures seulement (scripts et STL laissés hors dépôt, voir « Non conservé »).
 - **Modèle** : hélice verticale générée à la demande (moyeu R 8 × 30 mm, 3 pales vrillées 45° → 15°, rayon 52 mm), STL étanche,
@@ -29,8 +49,8 @@ Aucun code du dépôt modifié : mesures seulement (scripts et STL laissés hors
   TetGen / TetraNet ; vérification du mandrin (`chuck_checked=False`).
 - **Non conservé** : scripts de génération et de mesure (générateur d'hélice, lanceur chronométré par étape, extraction des
   trajectoires, page de l'aperçu) restés dans le scratchpad de la session, hors dépôt (`scripts/` est trié, R-030 point 9).
-- **À décider** : option explicite `Y` pour TetGen (désactivée par défaut, mesurée sur les 4 modèles, `APEX_CONTRACT_VERSION`
-  incrémenté si le G-code change) ; script de build Linux du noyau natif ; découpage par blocs de `generalized_winding_number`.
+- **À décider** : option explicite `Y` pour TetGen (mesurée le 2026-11-17 : rejetée) ; script de build Linux du noyau
+  natif ; découpage par blocs de `generalized_winding_number` (fait le 2026-11-17).
 
 ## Session du 2026-11-07 — R-030 : résorption de la dette du moteur
 - Point 3 : plus de variable d'environnement qui change le résultat, plus de `global` mutable. Options explicites

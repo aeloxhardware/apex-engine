@@ -20,8 +20,7 @@ def _native():
 def _mesh(progress_cb):
     sphere = trimesh.creation.icosphere(subdivisions=4, radius=20)
     return _native().tetranet_mesh(np.ascontiguousarray(sphere.vertices, dtype=np.float64),
-                                   np.ascontiguousarray(sphere.faces, dtype=np.int64), 1.0, 0.5, 0.05, 0.05, 0, 0.0,
-                                   progress=progress_cb)
+                                   np.ascontiguousarray(sphere.faces, dtype=np.int64), 1.0, progress=progress_cb)
 
 
 def test_trois_phases_croissantes_de_0_a_1():
@@ -66,7 +65,7 @@ def test_soudure_des_sommets_rapide_sur_coordonnees_float32():
     soup = sphere.vertices.astype(np.float32).astype(np.float64)[sphere.faces].reshape(-1, 3)   # sommets non fusionnes
     faces = np.arange(len(soup), dtype=np.int64).reshape(-1, 3)
     start = time.perf_counter()
-    out = _native().tetranet_mesh(np.ascontiguousarray(soup), faces, 10.0, 0.5, 0.05, 0.05, 0, 0.0)
+    out = _native().tetranet_mesh(np.ascontiguousarray(soup), faces, 10.0)
     elapsed = time.perf_counter() - start
     assert out["surface_faces_count"] == len(faces)
     assert elapsed < 6.0, f"soudure de {len(soup)} sommets : {elapsed:.1f} s (collisions de hachage ?)"
