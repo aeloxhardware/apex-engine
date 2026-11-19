@@ -71,6 +71,17 @@ def _reorient_bridge_toolpath(
     span_direction_2d: np.ndarray,
     params: Step6Params,
 ) -> list[np.ndarray]:
+    """Voir `_bridge_infill_and_walls` : remplissage puis parois, en une seule liste."""
+    infill, walls = _bridge_infill_and_walls(outer, holes, span_direction_2d, params)
+    return infill + walls
+
+
+def _bridge_infill_and_walls(
+    outer: np.ndarray,
+    holes: list[np.ndarray],
+    span_direction_2d: np.ndarray,
+    params: Step6Params,
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """
     Trajectoire d'un contour pont : parois normales (wall_count), PUIS
     bridge_anchor_extra_walls parois supplementaires resserrees sur le
@@ -86,14 +97,14 @@ def _reorient_bridge_toolpath(
         outer, holes, params.nozzle_width, total_wall_levels, params.degenerate_area_ratio
     )
     if not walls:
-        return [outer]
+        return [], [outer]
 
     sweep_angle = float(np.arctan2(span_direction_2d[1], span_direction_2d[0])) + np.pi / 2.0
     infill = _generate_infill(
         innermost, params.infill_density, params.infill_pattern, params.nozzle_width, sweep_angle
     )
 
-    return infill + walls
+    return infill, walls
 
 
 def _monotonic_runs(offsets: np.ndarray, min_amplitude: float = 1e-12) -> list[tuple[int, int]]:
@@ -321,10 +332,25 @@ def _split_rings_in_toolpath(
     en travers de la piece (voir docstring de section). Le cout en trajets a
     vide supplementaires est donc a mesurer, jamais suppose negligeable.
     """
+    return _split_rings_with_kinds(toolpath, [0] * len(toolpath), include_open_polylines, share_vertices,
+                                   min_amplitude)[0]
+
+
+def _split_rings_with_kinds(
+    toolpath: list[np.ndarray],
+    kinds: list[int],
+    include_open_polylines: bool = False,
+    share_vertices: bool = False,
+    min_amplitude: float = 1e-12,
+) -> tuple[list[np.ndarray], list[int]]:
+    """`_split_rings_in_toolpath` qui porte en plus le type de ligne : chaque troncon garde celui de son anneau."""
     result: list[np.ndarray] = []
-    for poly in toolpath:
+    result_kinds: list[int] = []
+    for poly, kind in zip(toolpath, kinds):
         if _is_closed_ring(poly) or include_open_polylines:
-            result.extend(_split_ring_into_runs(poly, share_vertices, min_amplitude))
+            pieces = _split_ring_into_runs(poly, share_vertices, min_amplitude)
         else:
-            result.append(poly)
-    return result
+            pieces = [poly]
+        result.extend(pieces)
+        result_kinds.extend([kind] * len(pieces))
+    return result, result_kinds

@@ -37,7 +37,7 @@ Usage (venv d'Apex) :
       [--head-tolerance=45] [--sampling=0 (0 = tous les points)] [--margin=1.0] [--feed=25 (mm/s)]
 """
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 import pickle
 import sys
@@ -197,6 +197,7 @@ def _check_native(native_cls, sequence, ctx: _NativeCheckContext, report, collis
         collision_points.extend(pts[tested_idx[hit]].tolist())
         closest = float(dist.min()) if len(dist) else np.inf
         report[z] = {"moment": e["moment"], "area": e["area"], "hits": hits,
+                     "object_points": pts[tested_idx[(dist < reach) & ~plate]].tolist(),
                      "worst_penetration": float(max(0.0, reach - closest)),
                      "over_tolerance": over_tol[z],
                      "max_head_deviation": float(max(x.max() for x in err_z)) if err_z else 0.0}
@@ -301,6 +302,7 @@ class _CheckContext:
     over_tol: dict
     report: dict
     collision_points: list
+    object_points: list = field(default_factory=list)   # pointes ou la tete touche la piece (pas le plateau)
 
 
 def _check_line(p, a, ctx: _CheckContext, trees: tuple, hits: dict):
@@ -336,6 +338,8 @@ def _check_line(p, a, ctx: _CheckContext, trees: tuple, hits: dict):
         closest = min(closest, d)
         if d < reach:
             hits["piece"] += 1
+            if not on_plate:
+                ctx.object_points.append(p[i].tolist())
         if d < reach or on_plate:
             ctx.collision_points.append(p[i].tolist())
     return tested, closest
@@ -367,6 +371,7 @@ def _check_python(sequence, ctx: _CheckContext) -> int:
             hits["tolerance"] += len(far)
             ctx.collision_points.extend(p[far].tolist())
         closest = np.inf
+        first_object = len(ctx.object_points)
         zone_done = []
         for p, a in zip(e["paths"], angles_z):
             zone_tree = cKDTree(np.vstack(zone_done)) if zone_done else None
@@ -375,6 +380,7 @@ def _check_python(sequence, ctx: _CheckContext) -> int:
             closest = min(closest, d_line)
             zone_done.extend(_dense([p]))
         ctx.report[z] = {"moment": e["moment"], "area": e["area"], "hits": hits,
+                         "object_points": ctx.object_points[first_object:],
                          "worst_penetration": float(max(0.0, ctx.reach - closest)),
                          "over_tolerance": ctx.over_tol[z],
                          "max_head_deviation": float(max(x.max() for x in err_z)) if err_z else 0.0}

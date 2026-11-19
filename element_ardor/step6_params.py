@@ -119,6 +119,12 @@ class Step6Params:
     # l'epaisseur d'un cordon : elle ne cree aucun appui manquant.
     run_split_min_amplitude: float = 1e-12
 
+    # Couches PLEINES (2026-11-18, `element_ardor/step6_solid.py`) : nombre de couches remplies a 100 % sous
+    # chaque dessus et au-dessus de chaque dessous (sur des couches courbes : voisines par rang d'isovaleur). 0 =
+    # aucune (historique : remplissage clairseme a nu sur toute surface du dessus, Benchy).
+    solid_top_layers: int = 0
+    solid_bottom_layers: int = 0
+
     # --- OSCILLATING_SPIRAL (opt-in) --------------------------------------
     # Point de l'axe du plateau (x, y, z, repere machine) : centre de la
     # spirale. Source de verite unique = MachineProfile.platform_origin

@@ -46,6 +46,7 @@ import numpy as np
 import trimesh
 import trimesh.proximity
 
+from core import line_types
 from core import progress as _progress
 from core.geometry_utils import (
     composed_rotation_directions,
@@ -376,7 +377,8 @@ def _native_schedule(layers, mesh_data, tet_mesh, color_map, scalar_field, param
         int(params.max_open_holes), int(params.deadline_ray_samples),
     )
     colored_layers = [
-        replace(layer, toolpath_2d=list(polys), segment_colors=list(colors), color_id=dominant)
+        replace(layer, toolpath_2d=list(polys), segment_colors=list(colors), color_id=dominant,
+                toolpath_kinds=line_types.inherit_kinds(layer.toolpath_2d or [], layer.toolpath_kinds, list(polys)))
         for layer, (polys, colors, dominant) in zip(layers, out_layers)
     ]
     schedule = PrintSchedule(passes=[

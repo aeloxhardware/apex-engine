@@ -296,7 +296,7 @@
   },
   "FieldSolverParams": {
    "additionalProperties": false,
-   "description": "FieldSolverParams(resolution: 'float' = 1.5, max_solver_iterations: 'int' = 2000, convergence_tolerance: 'float' = 1e-08, direct_solve_node_threshold: 'int' = 30000, use_ilu_preconditioner: 'bool' = False, platform_anchor_weight: 'float' = 1000000.0, up_vector: 'Optional[np.ndarray]' = None, heat_method_time_factor: 'float' = 100.0, radial_tilt_origin: 'Optional[np.ndarray]' = None, heat_project_reachable: 'bool' = True)",
+   "description": "FieldSolverParams(resolution: 'float' = 1.5, max_solver_iterations: 'int' = 2000, convergence_tolerance: 'float' = 1e-08, direct_solve_node_threshold: 'int' = 30000, use_ilu_preconditioner: 'bool' = False, platform_anchor_weight: 'float' = 1000000.0, up_vector: 'Optional[np.ndarray]' = None, heat_method_time_factor: 'float' = 100.0, radial_tilt_origin: 'Optional[np.ndarray]' = None, heat_project_reachable: 'bool' = True, planar: 'Optional[PlanarParams]' = None)",
    "properties": {
     "convergence_tolerance": {
      "default": 1e-08,
@@ -317,6 +317,17 @@
     "max_solver_iterations": {
      "default": 2000,
      "type": "integer"
+    },
+    "planar": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/PlanarParams"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
     },
     "platform_anchor_weight": {
      "default": 1000000.0,
@@ -766,6 +777,18 @@
       "heat_method_time_factor": 100.0,
       "heat_project_reachable": true,
       "max_solver_iterations": 2000,
+      "planar": {
+       "bridge_span": 25.0,
+       "ceiling_deg": 80.0,
+       "core": 2.0,
+       "flat_height": 0.6,
+       "lip": 1.5,
+       "min_patch_area": 4.0,
+       "overhang_deg": 60.0,
+       "ramp": 8.0,
+       "slope_reach": 2.0,
+       "smooth_iterations": 20
+      },
       "platform_anchor_weight": 1000000.0,
       "radial_tilt_origin": null,
       "resolution": 1.5,
@@ -914,6 +937,25 @@
      "default": true,
      "type": "boolean"
     },
+    "planar_sections": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/PlanarSectionParams"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": {
+      "angle_tol_deg": 0.5,
+      "close_tol": 0.001,
+      "flat_tol": 0.05,
+      "match_tol": 0.5,
+      "neighbourhood": 2.0,
+      "sample_step": 0.05,
+      "simplify_tol": 0.01
+     }
+    },
     "reachable_tilt_from_machine": {
      "default": true,
      "type": "boolean"
@@ -993,6 +1035,7 @@
       "chord_tolerance": 0.02,
       "crease_angle_deg": 8.0,
       "crease_tolerance": 0.0001,
+      "in_layer": true,
       "max_rounds": 3,
       "max_shift": 1.5
      }
@@ -1030,6 +1073,8 @@
       "nozzle_width": 0.4,
       "out_of_plane_interpolation_power": 2.0,
       "run_split_min_amplitude": 0.05,
+      "solid_bottom_layers": 3,
+      "solid_top_layers": 4,
       "spiral_alternation_threshold": null,
       "spiral_axis_origin": null,
       "spiral_peak_spacing": null,
@@ -1053,6 +1098,88 @@
     }
    },
    "title": "PipelineParams",
+   "type": "object"
+  },
+  "PlanarParams": {
+   "additionalProperties": false,
+   "description": "PlanarParams(overhang_deg: 'float' = 60.0, ceiling_deg: 'float' = 80.0, lip: 'float' = 1.5, slope_reach: 'float' = 2.0, bridge_span: 'float' = 25.0, min_patch_area: 'float' = 4.0, core: 'float' = 2.0, ramp: 'float' = 8.0, flat_height: 'float' = 0.6, smooth_iterations: 'int' = 20)",
+   "properties": {
+    "bridge_span": {
+     "default": 25.0,
+     "type": "number"
+    },
+    "ceiling_deg": {
+     "default": 80.0,
+     "type": "number"
+    },
+    "core": {
+     "default": 2.0,
+     "type": "number"
+    },
+    "flat_height": {
+     "default": 0.6,
+     "type": "number"
+    },
+    "lip": {
+     "default": 1.5,
+     "type": "number"
+    },
+    "min_patch_area": {
+     "default": 4.0,
+     "type": "number"
+    },
+    "overhang_deg": {
+     "default": 60.0,
+     "type": "number"
+    },
+    "ramp": {
+     "default": 8.0,
+     "type": "number"
+    },
+    "slope_reach": {
+     "default": 2.0,
+     "type": "number"
+    },
+    "smooth_iterations": {
+     "default": 20,
+     "type": "integer"
+    }
+   },
+   "type": "object"
+  },
+  "PlanarSectionParams": {
+   "additionalProperties": false,
+   "description": "PlanarSectionParams(angle_tol_deg: 'float' = 0.5, flat_tol: 'float' = 0.05, match_tol: 'float' = 0.5, close_tol: 'float' = 0.001, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, neighbourhood: 'float' = 2.0)",
+   "properties": {
+    "angle_tol_deg": {
+     "default": 0.5,
+     "type": "number"
+    },
+    "close_tol": {
+     "default": 0.001,
+     "type": "number"
+    },
+    "flat_tol": {
+     "default": 0.05,
+     "type": "number"
+    },
+    "match_tol": {
+     "default": 0.5,
+     "type": "number"
+    },
+    "neighbourhood": {
+     "default": 2.0,
+     "type": "number"
+    },
+    "sample_step": {
+     "default": 0.05,
+     "type": "number"
+    },
+    "simplify_tol": {
+     "default": 0.01,
+     "type": "number"
+    }
+   },
    "type": "object"
   },
   "PurgeCostModel": {
@@ -1217,7 +1344,7 @@
   },
   "SkinParams": {
    "additionalProperties": false,
-   "description": "SkinParams(thickness: 'float' = 0.2, pattern: 'str' = 'rectilinear', head_tolerance_deg: 'float' = 45.0, trim_radius: 'float' = 2.0, max_iter: 'int' = 8, loop_sampling: 'float' = 2.0, exclusion_rounds: 'int' = 3, plate_radius: 'Optional[float]' = None, face_sample: 'Optional[int]' = None, head_sample_spacing: 'float' = 5.0, workers: 'Optional[int]' = None)",
+   "description": "SkinParams(thickness: 'float' = 0.2, pattern: 'str' = 'rectilinear', head_tolerance_deg: 'float' = 45.0, trim_radius: 'float' = 2.0, max_iter: 'int' = 8, loop_sampling: 'float' = 2.0, exclusion_rounds: 'int' = 3, plate_radius: 'Optional[float]' = None, face_sample: 'Optional[int]' = None, head_sample_spacing: 'float' = 5.0, workers: 'Optional[int]' = None, stair_min_deg: 'Optional[float]' = 2.0, stair_max_deg: 'Optional[float]' = 80.0, proxy_loop: 'bool' = True, latest_band: 'bool' = False)",
    "properties": {
     "exclusion_rounds": {
      "default": 3,
@@ -1242,6 +1369,10 @@
      "default": 45.0,
      "type": "number"
     },
+    "latest_band": {
+     "default": false,
+     "type": "boolean"
+    },
     "loop_sampling": {
      "default": 2.0,
      "type": "number"
@@ -1264,6 +1395,32 @@
       }
      ],
      "default": null
+    },
+    "proxy_loop": {
+     "default": true,
+     "type": "boolean"
+    },
+    "stair_max_deg": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": 80.0
+    },
+    "stair_min_deg": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": 2.0
     },
     "thickness": {
      "default": 0.2,
@@ -1289,7 +1446,7 @@
   },
   "SkinProjectionParams": {
    "additionalProperties": false,
-   "description": "SkinProjectionParams(chord_tolerance: 'float' = 0.02, max_rounds: 'int' = 3, max_shift: 'float' = 1.5, crease_angle_deg: 'float' = 8.0, crease_tolerance: 'float' = 0.0001, batch: 'int' = 200000)",
+   "description": "SkinProjectionParams(chord_tolerance: 'float' = 0.02, max_rounds: 'int' = 3, max_shift: 'float' = 1.5, crease_angle_deg: 'float' = 8.0, crease_tolerance: 'float' = 0.0001, batch: 'int' = 200000, in_layer: 'bool' = True)",
    "properties": {
     "batch": {
      "default": 200000,
@@ -1306,6 +1463,10 @@
     "crease_tolerance": {
      "default": 0.0001,
      "type": "number"
+    },
+    "in_layer": {
+     "default": true,
+     "type": "boolean"
     },
     "max_rounds": {
      "default": 3,
@@ -1416,6 +1577,14 @@
     "run_split_min_amplitude": {
      "default": 1e-12,
      "type": "number"
+    },
+    "solid_bottom_layers": {
+     "default": 0,
+     "type": "integer"
+    },
+    "solid_top_layers": {
+     "default": 0,
+     "type": "integer"
     },
     "spiral_alternation_threshold": {
      "anyOf": [
@@ -1706,5 +1875,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 4
+ "x-apex-contract": 5
 }

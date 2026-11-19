@@ -48,7 +48,9 @@ struct LayerContours {
 };
 
 // Polylignes (K*3 : u, v, offset hors-plan) de la couche, dans l'ordre de `_fill_layer`.
+// `kinds` (optionnel) recoit le type de chaque polyligne, mêmes codes que `core/line_types.py` :
+// 1 paroi exterieure (contour d'origine, bord des cavites), 2 paroi interieure, 3 remplissage, 4 pont.
 std::vector<std::vector<double>> fill_layer(const LayerContours& layer, const Step6Config& config,
-                                            const BridgeInfo& bridge);
+                                            const BridgeInfo& bridge, std::vector<std::uint8_t>* kinds = nullptr);
 
 }  // namespace apex

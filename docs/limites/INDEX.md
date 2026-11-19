@@ -56,3 +56,5 @@ Les numéros sont ceux cités partout dans le code (`limite #NN`). Mesures chiff
 | [85](085.md) | Famille de noms des algorithmes de tranchage (décision de l'utilisateur, 2026-10-29) : toujours préfixés |
 | [86](086.md) | Limite connue : fidélité de la coque avec TetraNet, parois plus fines que la maille |
 | [87](087.md) | Relief LOCAL du moteur général d'Element Aeolis : chaque surface tournée vers le haut est épousée par une peau, parois planes (Benchy, 2026-11-14/15) |
+| [88](088.md) | Element Ardor imprime comme un trancheur classique hors des vrais surplombs : couches planes, couches pleines, projection dans le plan de la couche (Benchy, 2026-11-18/19) |
+| [89](089.md) | Lissage non planaire d'Ardor rouvert sur les couches planes (P2 rapide, re-calage des bandes, substitut de P4), contours exacts des couches planes (étape 5d) (Benchy, 2026-11-19) |

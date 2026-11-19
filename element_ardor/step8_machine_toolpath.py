@@ -89,6 +89,7 @@ from element_ardor.step8_points import (  # noqa: F401  (réexport : imports exi
     _iter_schedule_points_native,
     _layer_normal,
     gradient_direction_field,
+    tag_line_types,
 )
 
 
@@ -139,7 +140,9 @@ def run(
     if params.per_point_normal and direction_field is not None and raw_points:
         _apply_per_point_normals(raw_points, layers_by_id, direction_field)
     _progress.milestone(0.3)                 # normales par point
-    return resolve_raw_points(raw_points, machine_profile, params)
+    toolpath, diagnostics = resolve_raw_points(raw_points, machine_profile, params)
+    tag_line_types(toolpath.points, raw_points, layers_by_id)   # paroi / remplissage / pont, pour colorer l'apercu
+    return toolpath, diagnostics
 
 
 def resolve_raw_points(

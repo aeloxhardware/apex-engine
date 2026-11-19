@@ -35,6 +35,24 @@ entre-temps), et commence ses messages de commit par le numéro complet. **Copie
 niveaux à monter et règle des conflits : `apex/integration/RULES.md`, §9. Le détail des
 changements du moteur reste dans le DT et les limites numérotées de ce fichier.
 
+**VERSIONNER À CHAQUE MESSAGE ET À CHAQUE FIN DE TÂCHE (décision de l'utilisateur, 2026-11-18, règle
+absolue).** (1) **Chaque message envoyé par l'utilisateur** qui aboutit à un travail, aussi petit soit-il
+(même une simple demande de lecture suivie d'un complément), cause **un changement de version**.
+(2) **Chaque fin de tâche de l'IA** (la génération est terminée et l'IA va s'arrêter) **augmente au
+moins le dernier niveau** du numéro (Correctif), et les niveaux plus hauts si le changement le
+justifie. Avant de rendre la main, la session : monte le numéro, met à jour `config/APEX_VERSION`,
+`apex/VERSION` et `apex/VERSIONS.md`, puis l'écrit dans sa réponse finale. Une session qui s'arrête
+sans avoir versionné a mal terminé son travail : elle doit le faire avant de répondre, jamais après
+un rappel de l'utilisateur. Aucune exception « changement trop petit » ou « rien n'a été commité ».
+
+**JUSTIFIER CHAQUE VERSIONNAGE (décision de l'utilisateur, 2026-11-18).** Chaque changement de
+version porte une justification écrite, dans `apex/VERSIONS.md` et dans la réponse finale à
+l'utilisateur. Elle dit : (1) **quel niveau a été monté et pourquoi celui-là** (ex. « Correctif :
+corrige un défaut, aucune fonction nouvelle ») ; (2) **pourquoi les niveaux supérieurs n'ont pas été
+montés** ; (3) **ce que le message de l'utilisateur demandait** et qui a causé la montée. Un
+versionnage sans justification, ou dont la justification ne correspond pas au niveau monté, viole la
+règle : la session le corrige avant de s'arrêter.
+
 Le moteur et l'interface se développent séparément, une session par dépôt :
 `apex/integration/RULES.md` (règles et contrat entre les deux) et
 `apex/integration/REQUESTS.md` (demandes ouvertes, à lire en début de session).

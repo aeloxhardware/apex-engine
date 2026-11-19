@@ -8,7 +8,11 @@ face soit portee. Ici phi est celui de la methode de la chaleur (`ScalarField.va
 des couches de l'etape 5.
 
 Statuts : 0 retenue, 1 inatteignable (tete a plus de `head_tolerance_deg` de la normale), 2 collision plateau,
-3 collision objet, 4 contact plateau.
+3 collision objet, 4 contact plateau, 7 sans marches (face que les couches ne decoupent pas en escalier : paroi
+parallele a la direction de croissance, ou dessus parallele aux couches).
+
+Accessibilite (2026-11-19) : grille de phi et faces representatives (`access.py`), au lieu de localiser chaque point
+de la tete dans les tetraedres pour chaque face.
 """
 from __future__ import annotations
 
@@ -20,12 +24,15 @@ import trimesh
 from scipy.spatial import cKDTree
 
 from core.mesh_types import MachineProfile, ScalarField, TetMesh
+from element_ardor.skin import access
 from element_ardor.step8_machine_toolpath import Step8Params, _RawPoint, _resolve_all_axis_angles_coupled
 from element_ardor.step9_collision_sim import CollisionSimParams, _filter_nozzle_contact_zone, _surface_sample_points
 
 NOZZLE_WIDTH = 0.4
 STATUS_RETAINED, STATUS_UNREACHABLE, STATUS_PLATE, STATUS_OBJECT, STATUS_PLATE_CONTACT = 0, 1, 2, 3, 4
 STATUS_NAMES = {0: "retenue", 1: "inatteignable", 2: "collision plateau", 3: "collision objet", 4: "contact plateau"}
+STATUS_NO_STEPS = 7
+STATUS_NAMES[STATUS_NO_STEPS] = "sans marches"
 PLATE_CONTACT_TOL = 1e-3
 FACE_BATCH = 64
 
@@ -36,6 +43,14 @@ class SkinZoneParams:
     head_tolerance_deg: float = 45.0         # ecart maximal tete / normale (decision provisoire, comme Bird)
     head_sample_spacing: float = 5.0         # comme l'etape 9
     face_batch: int = FACE_BATCH
+    # faces en escalier : angle entre la normale (vers l'exterieur) et la direction de croissance des couches (grad
+    # phi) dans [stair_min_deg, stair_max_deg]. En dessous, la face est parallele aux couches (un dessus plat, deja
+    # lisse) ; au-dessus, la marche laissee par une couche d'epaisseur h vaut h.cos(angle), negligeable. None : toutes
+    # les faces sont candidates (comportement d'avant le 2026-11-19).
+    stair_min_deg: Optional[float] = 2.0
+    stair_max_deg: Optional[float] = 80.0
+    access_cell: float = 0.5                 # pas de la grille de phi de l'accessibilite (mm)
+    group_cell: float = 1.0                  # cellule des groupes de faces evalues ensemble (mm)
 
 
 @dataclass(frozen=True)
@@ -45,7 +60,7 @@ class ZoneSampling:
     face_sample: Optional[int] = None
     seed: int = 0
     surface: object = None
-    workers: Optional[int] = None
+    workers: Optional[int] = None    # sans effet depuis le 2026-11-19 (accessibilite sur grille, un processus)
 
 
 @dataclass
@@ -152,54 +167,51 @@ def surface_mesh(tet_mesh: TetMesh, solid: PrintedSolid, max_edge: float, surfac
     return surf_v, faces, normals, areas, centers
 
 
-_ACCESS: dict = {}
+def _stair_faces(tet_mesh: TetMesh, scalar_field: ScalarField, centers, normals, params: SkinZoneParams) -> np.ndarray:
+    """Faces que les couches decoupent en escalier (voir `SkinZoneParams.stair_min_deg`) : la direction de croissance
+    est le gradient de phi du tetraedre le plus proche du centre de la face."""
+    if params.stair_min_deg is None or scalar_field.gradient is None:
+        return np.ones(len(centers), bool)
+    tet_centres = tet_mesh.tet_vertices[tet_mesh.tetrahedra].mean(axis=1)
+    _d, tid = cKDTree(tet_centres).query(centers, workers=-1)
+    g = scalar_field.gradient[tid]
+    g = g / np.maximum(np.linalg.norm(g, axis=1), 1e-12)[:, None]
+    angle = np.degrees(np.arccos(np.clip(np.einsum("ij,ij->i", normals, g), -1.0, 1.0)))
+    return (angle >= params.stair_min_deg) & (angle <= params.stair_max_deg)
 
 
-def _access_chunk(ids: np.ndarray):
-    a = _ACCESS
-    plate = np.zeros(len(ids), bool)
-    last = np.full(len(ids), len(a["isovalues"]) - 1)
-    for s in range(0, len(ids), a["batch"]):
-        part = ids[s:s + a["batch"]]
-        rot = rotation_matrices(a["angles"][part], a["axes"])
-        pts = np.einsum("fij,pj->fpi", rot, a["head"]) + a["centers"][part][:, None, :]
-        plate[s:s + len(part)] = (pts[:, :, 2] < a["margin"]).any(axis=1)
-        phi = a["solid"].phi_at(pts.reshape(-1, 3)).reshape(len(part), -1)
-        low = np.min(np.where(np.isnan(phi), np.inf, phi), axis=1)
-        ins = np.isfinite(low)
-        last[s:s + len(part)][ins] = np.searchsorted(a["isovalues"], low[ins] - 1e-9, side="left") - 1
-    return plate, last
+def _head_angles(machine: MachineProfile, centers, normals, tri):
+    """Angles de tete (buse vers -n, cinematique reelle) aux centres et ecart tete / normale en degres, pire du centre
+    et des trois sommets (C impose par la position : l'orientation atteignable depend du point)."""
+    axes = machine.rotation_axes
+    step8 = Step8Params()
+    ref = np.array([0.0, 0.0, 1.0])
+    if len(centers) == 0:
+        return np.zeros((0, len(axes))), np.zeros(0)
+    raw = [_RawPoint(position=c, desired_direction=n, layer_id=0, segment_index=0, color_id=None,
+                     feedrate=1.0, extrusion=0.0, is_travel=False) for c, n in zip(centers, normals)]
+    a, err = _resolve_all_axis_angles_coupled(raw, axes, ref, machine, step8)
+    corners = tri.reshape(-1, 3)
+    raw_c = [_RawPoint(position=q, desired_direction=normals[j // 3], layer_id=0, segment_index=0,
+                       color_id=None, feedrate=1.0, extrusion=0.0, is_travel=False) for j, q in enumerate(corners)]
+    _a, err_c = _resolve_all_axis_angles_coupled(raw_c, axes, ref, machine, step8)
+    dev = np.maximum(np.asarray(err), np.asarray(err_c).reshape(-1, 3).max(axis=1))
+    return np.asarray(a), np.degrees(dev)
 
 
-@dataclass(frozen=True)
-class _AccessInputs:
-    """Donnees partagees (fork) par les calculs d'accessibilite par face."""
-    head: np.ndarray
-    centers: np.ndarray
-    angles: np.ndarray
-    axes: list
-    solid: object
-    isovalues: np.ndarray
-    margin: float
-    batch: int
-
-
-def _last_accessible(inputs: _AccessInputs, face_ids, workers):
-    """(plateau, dernier moment accessible) par face de `face_ids` : la tete posee sur la face, buse vers -n, ne doit
-    ni entrer dans le plateau ni, tant que la face n'est pas portee, dans la piece. Faces independantes : reparties
-    sur des processus (fork ; la memoire est partagee, rien n'est copie)."""
-    import os
-    batch = inputs.batch
-    _ACCESS.update(vars(inputs))
-    workers = workers if workers is not None else max(1, min(8, (os.cpu_count() or 2)))
-    if workers <= 1 or len(face_ids) < 4 * batch or not hasattr(os, "fork"):
-        return _access_chunk(face_ids)
-    from concurrent.futures import ProcessPoolExecutor
-    import multiprocessing
-    chunks = np.array_split(face_ids, workers * 4)
-    with ProcessPoolExecutor(workers, mp_context=multiprocessing.get_context("fork")) as pool:
-        parts = list(pool.map(_access_chunk, chunks))
-    return np.concatenate([p for p, _l in parts]), np.concatenate([l for _p, l in parts])
+def _head_points(machine: MachineProfile, sim: CollisionSimParams, params: SkinZoneParams) -> np.ndarray:
+    """Points de la tete (repere de la buse) hors de la zone de contact de la pointe, avec deux coques a la marge de
+    securite."""
+    head = _surface_sample_points(machine.nozzle_model, params.head_sample_spacing)
+    head = _filter_nozzle_contact_zone(head, sim.nozzle_contact_clearance)
+    # l'echantillonneur de l'etape 9 garde au moins un point par face du modele de tete (61 000 points sur la tete
+    # v4) : un point par cellule de 0,6 x l'espacement suffit a ce pre-filtre, P5 controle ensuite tous les points
+    _u, keep = np.unique(np.floor(head / (0.6 * params.head_sample_spacing)).astype(np.int64), axis=0,
+                         return_index=True)
+    head = head[np.sort(keep)]
+    _c, _d, tid = trimesh.proximity.closest_point(machine.nozzle_model, head)
+    hn = machine.nozzle_model.face_normals[tid]
+    return np.vstack([head, head + sim.safety_margin * hn, head - sim.safety_margin * hn])
 
 
 def compute(
@@ -235,43 +247,39 @@ def compute(
                      len(isovalues) - 1)
 
     candidates = np.flatnonzero(free)
+    stairs = _stair_faces(tet_mesh, scalar_field, centers, normals, params)
+    status[free & ~stairs] = STATUS_NO_STEPS
+    candidates = candidates[stairs[candidates]]
     if face_sample is not None and face_sample < len(candidates):
         candidates = np.sort(np.random.default_rng(seed).choice(candidates, size=face_sample, replace=False))
     evaluated = np.zeros(len(faces), bool)
     evaluated[candidates] = True
     status[candidates] = STATUS_RETAINED
+    rep, group = access.representatives(centers, normals, candidates, params.group_cell)
 
-    axes = machine.rotation_axes
-    step8 = Step8Params()
-    ref = np.array([0.0, 0.0, 1.0])
-    angles = np.zeros((len(faces), len(axes)))
+    angles = np.zeros((len(faces), len(machine.rotation_axes)))
     deviation = np.zeros(len(faces))
-    raw = [_RawPoint(position=centers[i], desired_direction=normals[i], layer_id=0, segment_index=0, color_id=None,
-                     feedrate=1.0, extrusion=0.0, is_travel=False) for i in candidates]
-    a, err = _resolve_all_axis_angles_coupled(raw, axes, ref, machine, step8)
-    angles[candidates], deviation[candidates] = np.asarray(a), np.asarray(err)
-    corners = tri[candidates].reshape(-1, 3)
-    raw_c = [_RawPoint(position=q, desired_direction=normals[candidates[j // 3]], layer_id=0, segment_index=0,
-                       color_id=None, feedrate=1.0, extrusion=0.0, is_travel=False) for j, q in enumerate(corners)]
-    _a, err_c = _resolve_all_axis_angles_coupled(raw_c, axes, ref, machine, step8)
-    deviation[candidates] = np.maximum(deviation[candidates], np.asarray(err_c).reshape(-1, 3).max(axis=1))
-    deviation = np.degrees(deviation)
+    rep_angles, rep_dev = _head_angles(machine, centers[rep], normals[rep], tri[rep])
+    angles[candidates] = rep_angles[group]
+    spread = np.degrees(np.arccos(np.clip(np.einsum("ij,ij->i", normals[candidates], normals[rep][group]), -1, 1)))
+    deviation[candidates] = rep_dev[group] + spread
     status[candidates[deviation[candidates] > params.head_tolerance_deg]] = STATUS_UNREACHABLE
 
-    head = _surface_sample_points(machine.nozzle_model, params.head_sample_spacing)
-    head = _filter_nozzle_contact_zone(head, sim.nozzle_contact_clearance)
-    _c, _d, tid = trimesh.proximity.closest_point(machine.nozzle_model, head)
-    hn = machine.nozzle_model.face_normals[tid]
-    head = np.vstack([head, head + sim.safety_margin * hn, head - sim.safety_margin * hn])   # marge de securite
-    reach = candidates[status[candidates] == STATUS_RETAINED]
+    head = _head_points(machine, sim, params)
+    reach_rep = np.flatnonzero(rep_dev <= params.head_tolerance_deg)
+    grid = access.PhiGrid.build(verts, tet_mesh.tetrahedra, scalar_field.values, params.access_cell)
+    plate_r, last_r = access.last_accessible(grid, head, rotation_matrices(rep_angles[reach_rep], machine.rotation_axes),
+                                             centers[rep[reach_rep]], isovalues, sim.safety_margin)
+    plate_g = np.zeros(len(rep), bool)
+    last_g = np.full(len(rep), -1)
+    plate_g[reach_rep], last_g[reach_rep] = plate_r, last_r
     last_all = np.full(len(faces), -1)
-    plate, last = _last_accessible(
-        _AccessInputs(head, centers, angles, axes, solid, isovalues, sim.safety_margin, params.face_batch),
-        reach, workers)
-    last_all[reach] = last
-    status[reach[plate]] = STATUS_PLATE
+    last_all[candidates] = last_g[group]
+    on_plate = np.zeros(len(faces), bool)
+    on_plate[candidates] = plate_g[group]
+    status[(status == STATUS_RETAINED) & on_plate] = STATUS_PLATE
     blocked = np.zeros(len(faces), bool)
-    blocked[reach] = last < moment[reach]
+    blocked[candidates] = last_all[candidates] < moment[candidates]
     status[(status == STATUS_RETAINED) & blocked] = STATUS_OBJECT
     return SkinZones(vertices=surf_v, faces=faces, normals=normals, areas=areas, status=status, moment=moment,
                      deviation_deg=deviation, evaluated=evaluated, angles=angles, last_access=last_all,
@@ -368,11 +376,15 @@ def split_along_level(vertices, faces, phi, face_mask, level):
 
 
 def partition(z: SkinZones, edge_face_angle: float = EDGE_FACE_ANGLE_DEG, facet_smoothing=None,
-              micro_inradius: float = MICRO_INRADIUS, trim_points=None, trim_radius: float = 2.0) -> dict:
+              micro_inradius: float = MICRO_INRADIUS, trim_points=None, trim_radius: float = 2.0,
+              retime=None, latest_band: bool = False) -> dict:
     """Morceaux (aretes vives), bandes de moments en nombre minimal, frontieres lisses le long des isovaleurs, zones,
     micro-zones : renvoie le dictionnaire que la voie Bird ecrivait dans `_skin_pass<k>.npz` (cles `vertices`,
     `faces`, `status`, `moment`, `zone`, `zone_moment`, `normals`, `areas`, `isovalues`, `nozzle_width`, ...).
-    `trim_points` : points de collision cumules de P5 (rognage local), faces a moins de `trim_radius` retirees."""
+    `trim_points` : points de collision cumules de P5 (rognage local), faces a moins de `trim_radius` retirees.
+    `retime` : liste de (points, moment) -- la tete a touche la PIECE en lissant ces points au moment donne : les
+    faces a moins de `trim_radius` ne sont plus accessibles a ce moment (dernier moment accessible ramene a mi-chemin
+    entre leur propre moment et celui-ci) ; la partition les remet dans une bande plus precoce, ou les retire si plus aucune ne convient."""
     isovalues = z.isovalues
     surf_vertices, faces, surf_phi = z.vertices, z.faces, z.phi
     normals, angles, status, moment, last = z.normals, z.angles, z.status.copy(), z.moment, z.last_access.copy()
@@ -388,20 +400,38 @@ def partition(z: SkinZones, edge_face_angle: float = EDGE_FACE_ANGLE_DEG, facet_
             tree = cKDTree(trim_pts)
             near = np.minimum(tree.query(tri.reshape(-1, 3))[0].reshape(-1, 3).min(axis=1), tree.query(centers)[0])
             status[(status == 0) & (near <= trim_radius)] = STATUS_OBJECT
+    for pts, at in (retime or ()):
+        pts = np.asarray(pts, dtype=float).reshape(-1, 3)
+        if len(pts):
+            tree = cKDTree(pts)
+            near = np.minimum(tree.query(tri.reshape(-1, 3))[0].reshape(-1, 3).min(axis=1), tree.query(centers)[0])
+            sel = near <= trim_radius
+            # a mi-chemin entre le moment propre de la face (le plus tot possible : la matiere voisine n'est montee
+            # qu'a sa hauteur) et le moment fautif : l'ecart est divise par deux a chaque tour de la boucle de P5
+            last[sel] = np.minimum(last[sel], np.minimum((moment[sel] + int(at)) // 2, int(at) - 1))
+    status[(status == 0) & (last < moment)] = STATUS_OBJECT
     return _partition_core(
-        _PartitionInput(surf_vertices, faces, surf_phi, normals, angles, status, moment, last, areas, isovalues),
+        _PartitionInput(surf_vertices, faces, surf_phi, normals, angles, status, moment, last, areas, isovalues,
+                        latest_band),
         edge_face_angle, facet_smoothing, micro_inradius)
 
 
-def _assign_bands(piece2, band_moments: dict, moment2, last2, n_edge_pieces: int, n_faces: int):
-    """Bande de chaque face : plus petit moment choisi >= moment porteur ET <= dernier moment accessible."""
+def _assign_bands(piece2, band_moments: dict, moment2, last2, n_edge_pieces: int, n_faces: int, latest=False):
+    """Bande de chaque face : plus petit moment choisi >= moment porteur ET <= dernier moment accessible ; avec
+    `latest`, le plus GRAND (seules les faces que la tete ne peut plus atteindre plus tard partent dans une bande
+    precoce : la frontiere entre bandes reste autour de l'obstacle au lieu de traverser tout le morceau)."""
     band = np.full(n_faces, -1)
     for p in range(n_edge_pieces):
         sel = np.flatnonzero(piece2 == p)
         pts = band_moments[p]
-        j = np.searchsorted(pts, moment2[sel], side="left")
-        ok = j < len(pts)
-        ok[ok] = pts[j[ok]] <= last2[sel][ok]
+        if latest:
+            j = np.searchsorted(pts, last2[sel], side="right") - 1
+            ok = j >= 0
+            ok[ok] = pts[j[ok]] >= moment2[sel][ok]
+        else:
+            j = np.searchsorted(pts, moment2[sel], side="left")
+            ok = j < len(pts)
+            ok[ok] = pts[j[ok]] <= last2[sel][ok]
         # repli (rare) : premier moment choisi valide pour la face
         for q in np.flatnonzero(~ok):
             valid = np.flatnonzero((pts >= moment2[sel[q]]) & (pts <= last2[sel[q]]))
@@ -443,6 +473,7 @@ class _PartitionInput:
     last: np.ndarray
     areas: np.ndarray
     isovalues: np.ndarray
+    latest_band: bool = False
 
 
 def _partition_core(inp: _PartitionInput, edge_face_angle, facet_smoothing, micro_inradius) -> dict:
@@ -484,7 +515,7 @@ def _partition_core(inp: _PartitionInput, edge_face_angle, facet_smoothing, micr
     # attributs herites de la face d'origine ; moment porteur recalcule
     status2, piece2, last2 = status[origin], piece[origin], last[origin]
     moment2 = layer_rank(phi[f].max(axis=1), isovalues)
-    band = _assign_bands(piece2, band_moments, moment2, last2, n_edge_pieces, len(f))
+    band = _assign_bands(piece2, band_moments, moment2, last2, n_edge_pieces, len(f), inp.latest_band)
     tri2 = v[f]
     areas2 = 0.5 * np.linalg.norm(np.cross(tri2[:, 1] - tri2[:, 0], tri2[:, 2] - tri2[:, 0]), axis=1)
     zone, zone_moment = _connected_zones(f, areas2, status2, piece2, band, moment2)

@@ -25,3 +25,4 @@ le plus récent en premier. Le contexte de la session courante reste dans `LAST_
 | [17_0000-00-00.md](17_0000-00-00.md) | 4. Mesures acquises |
 | [18_0000-00-00.md](18_0000-00-00.md) | 5. INCIDENT MÉMOIRE (l'ordinateur a planté, 47 Go saturés) — précautions obligatoires |
 | [19_0000-00-00.md](19_0000-00-00.md) | 6. Prochaines étapes (ordre convenu) |
+| [20_2026-11-19.md](20_2026-11-19.md) | Lissage non planaire d'Ardor sur les couches planes, contours exacts des couches planes (mesures) |

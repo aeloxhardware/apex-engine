@@ -311,3 +311,69 @@ def trace(skin, options: TraceOptions | None = None, log=False, cache=None):
         removed = dedupe_shared_passes(out, width)
         if log: print(f"passes partagees entre zones retirees : {removed} points")
     return out
+
+
+def proxy(skin, thickness: float = 0.2, spacing: float = 1.0, max_jump: float = 1.5) -> dict:
+    """Substitut de P4 pour la boucle de rognage (2026-11-19) : par zone, un point de la surface par cellule de
+    `spacing` mm (centre de la face la plus proche du centre de la cellule), descendu de t/2 le long de sa normale,
+    ordonne au plus proche voisin et coupe en polylignes aux sauts de plus de `max_jump` mm. Meme format que
+    `trace` (`moment`, `area`, `faces`, `paths`, `normals`, `extrusion`) : P5 y teste la tete aux memes endroits que
+    sur les vraies trajectoires echantillonnees tous les 2 mm, sans tracer les motifs a chaque tour (163 s de P4 sur
+    le Benchy). Les vraies trajectoires sont tracees une fois, a la fin de la boucle, et verifiees."""
+    centres = skin["vertices"][skin["faces"]].mean(axis=1)
+    normals = skin["normals"]
+    zone = skin["zone"]
+    out = {}
+    for z, m in enumerate(skin["zone_moment"]):
+        faces = np.flatnonzero(zone == z)
+        if not len(faces):
+            continue
+        c = centres[faces]
+        cell = np.floor(c / spacing).astype(np.int64)
+        _u, group = np.unique(cell, axis=0, return_inverse=True)
+        group = group.ravel()
+        d = np.linalg.norm(c - (cell + 0.5) * spacing, axis=1)
+        order = np.lexsort((d, group))
+        first = np.ones(len(order), bool)
+        first[1:] = group[order][1:] != group[order][:-1]
+        pick = faces[order[first]]
+        pts = centres[pick] - normals[pick] * thickness / 2
+        nrm = normals[pick]
+        seq = _greedy_order(pts)
+        pts, nrm = pts[seq], nrm[seq]
+        cut = np.flatnonzero(np.linalg.norm(np.diff(pts, axis=0), axis=1) > max_jump) + 1
+        paths = [p for p in np.split(pts, cut) if len(p)]
+        pnormals = [q for q in np.split(nrm, cut) if len(q)]
+        paths = [p if len(p) >= 2 else np.vstack([p, p + 1e-3 * np.cross(q[0], [0.0, 0.0, 1.0] if abs(q[0][2]) < 0.9
+                                                                               else [1.0, 0.0, 0.0])])
+                 for p, q in zip(paths, pnormals)]
+        pnormals = [q if len(q) >= 2 else np.vstack([q, q]) for q in pnormals]
+        out[z] = {"moment": int(m), "area": float(skin["areas"][faces].sum()), "faces": faces, "paths": paths,
+                  "normals": pnormals, "extrusion": [1.0] * len(paths), "thickness": thickness, "proxy": True}
+    return out
+
+
+def _greedy_order(points: np.ndarray) -> np.ndarray:
+    """Ordre au plus proche voisin (depuis le premier point)."""
+    n = len(points)
+    if n <= 2:
+        return np.arange(n)
+    tree = cKDTree(points)
+    seen = np.zeros(n, bool)
+    order = [0]
+    seen[0] = True
+    for _ in range(n - 1):
+        cur = points[order[-1]]
+        k = 8
+        while True:
+            _d, idx = tree.query(cur, k=min(k, n))
+            free = [i for i in np.atleast_1d(idx) if not seen[i]]
+            if free:
+                break
+            if k >= n:
+                free = [int(np.flatnonzero(~seen)[0])]
+                break
+            k *= 4
+        order.append(int(free[0]))
+        seen[free[0]] = True
+    return np.asarray(order)

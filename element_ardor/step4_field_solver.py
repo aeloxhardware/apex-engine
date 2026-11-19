@@ -31,6 +31,7 @@ import scipy.sparse.linalg as spla
 
 from core import _cpp
 from core import progress as _progress
+from element_ardor.step4_planar import FieldInputs, PlanarParams, blend as _planar_blend
 from core.mesh_types import (
     MeshData,
     OverhangMap,
@@ -70,6 +71,9 @@ class FieldSolverParams:
     # le profil machine quand `position_coupled_axes == [0]`.
     radial_tilt_origin: Optional[np.ndarray] = None
     heat_project_reachable: bool = True
+    # Couches planes partout ou l'impression plane suffit (`element_ardor/step4_planar.py`, 2026-11-18) : None =
+    # champ de la chaleur seul (historique, couches courbes partout).
+    planar: Optional[PlanarParams] = None
 
     def __post_init__(self):
         if self.up_vector is None:
@@ -570,6 +574,10 @@ def run(
     platform_nodes = _identify_platform_nodes(tet_mesh, mesh_data, region_dependency_graph)
     _progress.milestone(0.1)                 # R-017 : gradients de forme et nœuds du plateau
     values = _heat_method_distance(tet_mesh, shape_gradients, volumes, platform_nodes, params)
+    if params.planar is not None:
+        inputs = FieldInputs(tet_mesh, mesh_data, shape_gradients, volumes, platform_nodes,
+                             region_dependency_graph.platform_contact_faces)
+        values = _planar_blend(inputs, values, params.planar, params)
     _progress.milestone(0.9)                 # diffusion, flux et integration resolus
     return ScalarField(
         values=values,

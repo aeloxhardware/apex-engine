@@ -2,6 +2,29 @@
 
 _Extrait de l'ancien CLAUDE.md (R-030 point 7)._
 
+## Piste ouverte : couches conformes dans Ardor (question de l'utilisateur, 2026-11-19)
+
+« Faire que les couches soient nativement parallèles aux surfaces plutôt que de lisser après coup. » Le lissage de la
+limite #89 est déjà une couche conforme, mais une seule (0,2 mm), creusée dans un corps resté plan. La version native :
+un champ φ = z en profondeur, dont les N dernières couches sous chaque surface montante atteignable deviennent des
+décalages de cette surface (épaisseur variable entre t_min et t_max, rampe sur la profondeur), toujours par la méthode
+de la chaleur (conditions de Dirichlet sur les faces de dessus). Contraintes à mesurer avant d'écrire : (1) une pente
+de dénivelé Δz demande au moins Δz / (t_max − t_min) couches de transition (toit du Benchy : 6,5 mm → ~33 couches à
+0,1-0,3 mm) ; (2) même limite cinématique que le lissage (B radial seulement : flancs à 45-80° hors d'atteinte quel que
+soit le champ) ; (3) un φ unique ne peut pas avoir deux surfaces de dessus superposées (pont sous le toit) comme
+isovaleurs voisines sans couches qui s'arrêtent en biseau ; (4) le rendu non plan d'Ardor avant la limite #88 a été
+jugé mauvais par l'utilisateur. Aeolis fait déjà ce décalage pour une surface en hauteur ; Aequor (à venir) en est le
+cadre prévu.
+
+Prototypes mesurés (2026-11-19, Benchy droit, hors du dépôt) : (a) orienter la direction de croissance vers la normale
+de la surface sur une profondeur D, puis réintégrer (`L φ = div X`) : sans effet (aire en pente encore en escalier 97 à
+98 %, angle médian couche / surface des pentes 2-20° : 13,4° → 11,6-15,3°) — le champ réintégré ne peut pas tourner
+localement. (b) Décalage HARMONIQUE u ajouté au champ plan : sur chaque morceau de surface en pente (2 à 45°), u =
+λ(c − h), c la hauteur moyenne du morceau, h celle du point de surface, u = 0 à D sous la surface et sur le plateau,
+λ ≤ 1 réduit pour garder l'épaisseur dans ±50 % : à D = 10 mm, aire des pentes 2-20° en escalier 100 → 33 % (angle
+médian 13,4 → 6,7°), 20-45° : 100 → 93 %, épaisseur p1-p99 0,13-0,30 mm (min 0,02 : à borner). Reste à faire :
+borner l'épaisseur partout, couches réelles et collisions sur les quatre modèles, rendu.
+
 ## Prochaine étape
 
 **Les 10 étapes du cœur algorithmique sont écrites, stables et testées

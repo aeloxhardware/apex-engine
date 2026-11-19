@@ -12,6 +12,7 @@ import networkx as nx
 import numpy as np
 import trimesh
 import trimesh.proximity
+from core import line_types
 from core.mesh_types import ColorMap, Layer, MeshData, RegionDependencyGraph
 from element_ardor.step6_toolpath2d import _lift_to_3d
 from element_ardor.step7_params import (  # noqa: F401
@@ -217,6 +218,7 @@ def _apply_colors_to_layers(
             replace(
                 layer,
                 toolpath_2d=new_toolpath,
+                toolpath_kinds=line_types.inherit_kinds(toolpath, layer.toolpath_kinds, new_toolpath),
                 segment_colors=new_colors,
                 color_id=_dominant_color(new_colors),
             )

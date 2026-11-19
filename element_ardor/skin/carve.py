@@ -25,7 +25,6 @@ from dataclasses import dataclass, field, replace
 from typing import Optional
 
 import numpy as np
-import trimesh
 from scipy.spatial import cKDTree
 
 from core.mesh_types import Layer, ScalarField, TetMesh
@@ -60,7 +59,10 @@ class ZoneDistance:
         self.calls = 0
         if self.empty:
             return
-        self.mesh = trimesh.Trimesh(zone_vertices, zone_faces, process=False)
+        from element_ardor.step5c_skin_projection import _Surface
+        # distance exacte : noyau natif (`MeshDistance`, teste contre trimesh dans test_cpp_equivalence_mesh) s'il
+        # est actif, trimesh sinon ; death : 168 s de `trimesh.proximity` avant le 2026-11-19
+        self.surface = _Surface(zone_vertices, zone_faces, np.zeros((len(zone_faces), 3)), 200_000)
         centers = zone_vertices[zone_faces].mean(axis=1)
         self.tree = cKDTree(centers)
         self.reach = params.band + float(np.linalg.norm(zone_vertices[zone_faces] - centers[:, None, :], axis=2).max())
@@ -73,7 +75,7 @@ class ZoneDistance:
         idx = np.flatnonzero(self.tree.query(points)[0] <= self.reach)
         for s in range(0, len(idx), 50_000):
             part = idx[s:s + 50_000]
-            _c, dist, _t = trimesh.proximity.closest_point(self.mesh, points[part])
+            _c, dist, _t = self.surface.closest(points[part])
             out[part] = np.minimum(dist, band) - t
             self.calls += len(part)
         return out

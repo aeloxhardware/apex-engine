@@ -6,6 +6,20 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 **Tests : 505/505 dans les positions `APEX_USE_CPP=0`, `=1` et `=1` + `APEX_USE_GPU=1`** (2026-10-13 soir, suite complète).
 
 
+## 2026-11-18/19 — Element Ardor : trancheur classique hors des vrais surplombs, puis lissage non planaire (limites #88, #89)
+- 🟢 **Couches planes par défaut** (#88) : inclinaison gardée autour des seuls surplombs non imprimables à plat, rampe
+  douce, direction lissée ; Benchy droit : 240 couches planes. Couches pleines (4 dessus, 3 dessous).
+- 🟢 **Étape 5d** (#89) : boucles planes recoupées exactement dans le STL (Benchy : 674 boucles sur 744 ; écart du
+  maillage TetraNet jusqu'à 0,3 mm supprimé), simplifiées à 0,01 mm (G-code du Benchy 25,4 → 13,3 Mo).
+- 🟢 **Lissage non planaire utilisable** (#89, facultatif, `"skin": {}`) : P2 ~100 min → 7 s (grille de φ,
+  représentants), faces en escalier seulement, re-calage des bandes au lieu du rognage, substitut de P4 dans la boucle ;
+  Benchy droit : 62 % de l'aire en escalier lissée (92 % des pentes faibles), chaîne 119 s, 0 collision.
+- 🟢 Les cinq échecs connus PRE-001 (`test_skin_chain.py`) réparés ; 642 tests dans chaque position.
+- ♦️ **Contrat 5** à publier avec le commit (G-code par défaut changé) ; l'interface doit suivre.
+- ⬛ Lissage par défaut (×3 à ×5 sur le temps de tranchage) : décision de l'utilisateur.
+- ⬛ Z du firmware négatif quand la tête penche au-delà de 90° (lissage) : vérifier le Z minimum de `config.g` (M208).
+- ⬛ Flancs presque verticaux de la coque : hors du plan radial de B, non lissables avec la cinématique actuelle.
+
 ## 2026-11-17 — TetraNet : vitesse et fidélité de la coque, essais un par un (détail : `tetranet/docs/RAPPORT.md`)
 - 🟢 **Soudure de TetraNet linéaire** : Benchy 48,6 s → 2,2 s, même maillage (hachage sans mélange de bits).
 - 🟢 **TetraNet découpé** (830 lignes → 6 fichiers sous 400 lignes, `mesh` de 400 lignes → phases), sorties identiques

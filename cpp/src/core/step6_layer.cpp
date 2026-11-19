@@ -141,7 +141,7 @@ void split_ring(const Flat3& ring, bool share, double min_amp, std::vector<Flat3
 }  // namespace
 
 std::vector<std::vector<double>> fill_layer(const LayerContours& layer, const Step6Config& cfg,
-                                            const BridgeInfo& bridge) {
+                                            const BridgeInfo& bridge, std::vector<std::uint8_t>* kinds) {
     const double* origin = layer.frame;
     const double* u = layer.frame + 3;
     const double* v = layer.frame + 6;
@@ -204,6 +204,7 @@ std::vector<std::vector<double>> fill_layer(const LayerContours& layer, const St
     }
 
     std::vector<Flat3> toolpath;
+    std::vector<std::uint8_t> path_kinds;     // un type par polyligne de `toolpath` (core/line_types.py)
     for (std::size_t outer_idx = 0; outer_idx < loops; ++outer_idx) {
         if (is_hole[outer_idx] || open_loops[outer_idx].size() < 6) continue;   // < 3 points : pas de zone
         const auto& hole_idxs = groups[outer_idx];
@@ -315,20 +316,28 @@ std::vector<std::vector<double>> fill_layer(const LayerContours& layer, const St
                 arr.insert(arr.end(), arr.begin(), arr.begin() + 3);
             }
             toolpath.push_back(std::move(arr));
+            // categorie -> type de ligne : 0 remplissage (3, ou 4 en pont), 1 paroi interieure (2), 2 et 3 paroi exterieure (1)
+            path_kinds.push_back(g.kind == 0 ? (has_bridge ? 4 : 3) : (g.kind == 1 ? 2 : 1));
         }
     }
 
     if (cfg.split_rings_into_runs) {
         std::vector<Flat3> result;
-        for (auto& poly : toolpath) {
+        std::vector<std::uint8_t> result_kinds;
+        for (std::size_t k = 0; k < toolpath.size(); ++k) {
+            auto& poly = toolpath[k];
+            const std::size_t before = result.size();
             if (is_closed_ring(poly) || cfg.split_open_polylines) {
                 split_ring(poly, cfg.continuous_rings, cfg.run_split_min_amplitude, result);
             } else {
                 result.push_back(std::move(poly));
             }
+            result_kinds.insert(result_kinds.end(), result.size() - before, path_kinds[k]);   // chaque troncon garde le type
         }
         toolpath = std::move(result);
+        path_kinds = std::move(result_kinds);
     }
+    if (kinds != nullptr) *kinds = std::move(path_kinds);
     return toolpath;
 }
 

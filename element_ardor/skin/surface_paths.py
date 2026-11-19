@@ -196,6 +196,27 @@ def hilbert_split(zm, width=NOZZLE_WIDTH, overlap=0.2, angle_deg=0.0, d_edge=Non
 
 
 # --- micro-zones (decision utilisateur 2026-09-28) -----------------------------
+def _euclidean_inradius(vertices, faces, step: float = 0.05) -> float:
+    """Plus grande distance EUCLIDIENNE d'un sommet ou d'un centre de face au bord de la zone (aretes portees par une
+    seule face, echantillonnees tous les `step` mm) : minorant de la distance mesuree sur la surface. 0 sans bord
+    ni face."""
+    from scipy.spatial import cKDTree
+    if len(faces) == 0:
+        return 0.0
+    e = np.sort(np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]]), axis=1)
+    uniq, count = np.unique(e, axis=0, return_counts=True)
+    edges = uniq[count == 1]
+    if len(edges) == 0:
+        return np.inf
+    a, b = vertices[edges[:, 0]], vertices[edges[:, 1]]
+    n = np.maximum(1, np.ceil(np.linalg.norm(b - a, axis=1) / step).astype(int))
+    i = np.repeat(np.arange(len(edges)), n + 1)
+    t = (np.arange((n + 1).sum()) - np.repeat(np.cumsum(n + 1) - (n + 1), n + 1)) / np.repeat(n, n + 1)
+    tree = cKDTree(a[i] + (b - a)[i] * t[:, None])
+    probes = np.vstack([vertices[np.unique(faces)], vertices[faces].mean(axis=1)])
+    return float(tree.query(probes)[0].max())
+
+
 def merge_micro_zones(vertices, faces, areas, zone, zone_moment, last_access, micro_inradius):
     """Rattache chaque micro-zone (plus grande distance au bord, mesuree sur
     la surface, < micro_inradius : trop etroite pour un cordon de bord et un
@@ -220,6 +241,13 @@ def merge_micro_zones(vertices, faces, areas, zone, zone_moment, last_access, mi
 
     def inradius(z):
         if z not in radius:
+            # la distance euclidienne au bord minore la distance sur la surface : si elle depasse deja le seuil, la
+            # zone n'est pas une micro-zone et le calcul geodesique (80 % du temps de la partition) est inutile.
+            # La valeur rendue n'est alors qu'un minorant, comparee seulement a `micro_inradius`.
+            lower = _euclidean_inradius(vertices, faces[zone == z])
+            if lower >= micro_inradius:
+                radius[z] = lower
+                return lower
             try:
                 radius[z] = float(ZoneMesh(vertices, faces[zone == z]).distance_to_boundary().max())
             except Exception:                                  # zone degeneree : traitee comme micro

@@ -36,6 +36,30 @@ def _layer_normal(local_frame: tuple[np.ndarray, np.ndarray, np.ndarray]) -> np.
     return normal / norm
 
 
+def tag_line_types(points: list, raw_points: "_RawPoints", layers_by_id: dict[int, Layer]) -> None:
+    """Pose `ToolpathPoint.line_type` : le type de la polyligne (`Layer.toolpath_kinds`) dont chaque point provient,
+    retrouvee par (`layer_id`, `segment_index`). Un trajet a vide, ou une couche sans types, reste a `NONE` (0)."""
+    if not isinstance(raw_points, _RawPoints) or len(points) != len(raw_points):
+        return
+    layer_ids = np.asarray(raw_points.layer_id)
+    segments = np.asarray(raw_points.segment_index)
+    types = np.zeros(len(points), dtype=np.uint8)
+    for layer_id in np.unique(layer_ids):
+        kinds = getattr(layers_by_id.get(int(layer_id)), "toolpath_kinds", None)
+        if kinds is None:
+            continue
+        mask = layer_ids == layer_id
+        kinds = np.asarray(kinds, dtype=np.uint8)
+        seg = segments[mask]
+        valid = (seg >= 0) & (seg < len(kinds))
+        column = np.zeros(len(seg), dtype=np.uint8)
+        column[valid] = kinds[seg[valid]]
+        types[mask] = column
+    types[np.asarray(raw_points.is_travel, dtype=bool)] = 0
+    for point, line_type in zip(points, types.tolist()):
+        point.line_type = line_type
+
+
 def _iter_schedule_points_native(schedule, layers_by_id, params):
     """Assemblage natif des points bruts (cpp/src/core/step8_assembly.cpp), au bit
     identique. None = noyau natif inactif ou entree inhabituelle : le chemin Python

@@ -41,6 +41,7 @@ import shapely.affinity
 from shapely.geometry import LineString, MultiPolygon, Polygon
 
 from core import _cpp, runtime
+from core import line_types
 from core import progress as _progress
 from core.geometry_utils import point_in_polygon_2d
 from core.mesh_types import Layer, MeshData, OverhangMap
@@ -91,9 +92,11 @@ from element_ardor.step6_bridge_runs import (  # noqa: F401  (réexport : import
     _is_closed_ring,
     _merge_short_runs,
     _monotonic_runs,
+    _bridge_infill_and_walls,
     _reorient_bridge_toolpath,
     _split_ring_into_runs,
     _split_rings_in_toolpath,
+    _split_rings_with_kinds,
 )
 
 
@@ -194,9 +197,10 @@ def run(
         for rank, value in enumerate(sorted({l.isovalue for l in layers if l.isovalue is not None}))
     }
 
+    from element_ardor import step6_solid      # couches pleines, apres le remplissage (les deux chemins)
     native_layers = _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank)
     if native_layers is not None:
-        return native_layers
+        return step6_solid.apply(native_layers, params, isovalue_rank)
 
     finished = [0]
 
@@ -214,8 +218,8 @@ def run(
     if workers > 1 and len(layers) > 1:
         from concurrent.futures import ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            return list(pool.map(runtime.bind(one_layer), layers))
-    return [one_layer(layer) for layer in layers]
+            return step6_solid.apply(list(pool.map(runtime.bind(one_layer), layers)), params, isovalue_rank)
+    return step6_solid.apply([one_layer(layer) for layer in layers], params, isovalue_rank)
 
 
 # Remplissage de couches ENTIERES en natif (cpp/src/core/step6_layer.cpp) : classification,
@@ -229,7 +233,10 @@ def _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank):
     """Liste de Layer avec `toolpath_2d` rempli, ou None si le chemin natif ne s'applique pas
     (noyau inactif, motif non natif, kd-tree sans version native)."""
     module = _native_fill_module(params)
+    # Un module natif ANTERIEUR aux types de ligne (`FILL_LAYERS_KINDS`) est ecarte : le chemin Python, identique, le
+    # remplace (jamais une trajectoire sans type).
     if (not params.native_layer or module is None or not hasattr(module, "fill_layers")
+            or not getattr(module, "FILL_LAYERS_KINDS", False)
             or params.infill_pattern not in _NATIVE_PATTERN_CODES or not layers):
         return None
     kdtree = getattr(mesh_data.kdtree, "_native", None)
@@ -278,9 +285,11 @@ def _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank):
             np.ascontiguousarray(frames[lo:hi]), np.ascontiguousarray(loop_begin[lo:hi + 1] - loop_begin[lo]),
             np.ascontiguousarray(point_begin[p_lo:p_hi + 1] - point_begin[p_lo]),
             np.ascontiguousarray(points[point_begin[p_lo]:point_begin[p_hi]]),
-            np.ascontiguousarray(sweep[lo:hi]), config, kdtree, is_bridge, span, int(threads)))
+            np.ascontiguousarray(sweep[lo:hi]), config, kdtree, is_bridge, span, int(threads), True))
         _progress.report(hi, n)
-    return [replace(layer, toolpath_2d=list(polys)) for layer, polys in zip(layers, result)]
+    # le noyau rend, par couche, (polylignes, types) : `with_kinds=True`
+    return [replace(layer, toolpath_2d=list(polys), toolpath_kinds=[int(k) for k in kinds])
+            for layer, (polys, kinds) in zip(layers, result)]
 
 
 def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, params: Step6Params,
@@ -292,15 +301,18 @@ def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, pa
     open_loops, index_groups = _classify_contour_indices(contours_2d)
 
     toolpath: list[np.ndarray] = []
+    kinds: list[int] = []
     for outer_idx, hole_idxs in index_groups:
         outer = open_loops[outer_idx]
         holes = [open_loops[h] for h in hole_idxs]
         members = {outer_idx, *hole_idxs}
         bridge_direction, outer_out_of_plane, source_2d, source_offsets = _group_source_data(
             layer, contours_2d, offsets_3d, members, outer_idx, mesh_data, overhang_map, params)
-        generated = _generate_group_polylines(layer, outer, holes, bridge_direction, params, isovalue_rank)
-        if generated is None:
+        result = _generate_group_polylines(layer, outer, holes, bridge_direction, params, isovalue_rank)
+        if result is None:
             continue
+        generated, group_kinds = result
+        kinds.extend(group_kinds)
 
         # contours d'origine n=0 (exterieur et trous), emis OUVERTS
         original_ids = {id(outer), *(id(h) for h in holes)}
@@ -318,13 +330,13 @@ def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, pa
             toolpath.append(arr)
 
     if params.split_rings_into_runs:
-        toolpath = _split_rings_in_toolpath(
-            toolpath, include_open_polylines=params.split_open_polylines,
+        toolpath, kinds = _split_rings_with_kinds(
+            toolpath, kinds, include_open_polylines=params.split_open_polylines,
             share_vertices=params.continuous_rings,
             min_amplitude=params.run_split_min_amplitude,
         )
 
-    return replace(layer, toolpath_2d=toolpath)
+    return replace(layer, toolpath_2d=toolpath, toolpath_kinds=kinds)
 
 
 def _group_source_data(layer: Layer, contours_2d: list, offsets_3d: list, members: set, outer_idx: int,
@@ -358,9 +370,11 @@ def _group_source_data(layer: Layer, contours_2d: list, offsets_3d: list, member
 
 def _generate_group_polylines(layer: Layer, outer, holes: list, bridge_direction, params: Step6Params,
                               isovalue_rank: dict):
-    """Polylignes (remplissage + parois + contours) d'un groupe ; None si la zone est trop fine."""
+    """(polylignes, types) d'un groupe : remplissage, parois, contours ; None si la zone est trop fine.
+    `types` (`core/line_types.py`) est parallele aux polylignes."""
     if bridge_direction is not None:
-        return _reorient_bridge_toolpath(outer, holes, bridge_direction, params)
+        infill, walls = _bridge_infill_and_walls(outer, holes, bridge_direction, params)
+        return infill + walls, _group_kinds(len(infill), walls, outer, holes, line_types.BRIDGE)
     sweep_angle = (
         _infill_angle_for_layer(layer, isovalue_rank)
         if params.infill_pattern is InfillPattern.CROSSED_ZIGZAG
@@ -373,7 +387,8 @@ def _generate_group_polylines(layer: Layer, outer, holes: list, bridge_direction
         )
         if not valid:
             return None
-        return list(infill) + list(offset_walls) + [outer] + list(holes)
+        walls = list(offset_walls) + [outer] + list(holes)
+        return list(infill) + walls, _group_kinds(len(infill), walls, outer, holes, line_types.INFILL)
     walls, innermost = _offset_walls(
         outer, holes, params.nozzle_width, params.wall_count, params.degenerate_area_ratio
     )
@@ -389,7 +404,16 @@ def _generate_group_polylines(layer: Layer, outer, holes: list, bridge_direction
         infill = _generate_infill(
             innermost, params.infill_density, params.infill_pattern, params.nozzle_width, sweep_angle,
         )
-    return infill + walls
+    return infill + walls, _group_kinds(len(infill), walls, outer, holes, line_types.INFILL)
+
+
+def _group_kinds(infill_count: int, walls: list, outer, holes: list, infill_kind: int) -> list[int]:
+    """Types d'un groupe `infill + walls` : le contour d'origine (`outer`, trous) est la paroi EXTERIEURE, les
+    autres parois sont interieures. L'identite (`is`) suffit : ce sont les memes objets que ceux passes au remplissage."""
+    original = {id(outer), *(id(h) for h in holes)}
+    return [infill_kind] * infill_count + [
+        line_types.WALL_OUTER if id(wall) in original else line_types.WALL_INNER for wall in walls]
+
 
 from element_ardor.step6_infill import (  # noqa: E402,F401  (reexport : imports et patchs existants)
     _SpiralShape,

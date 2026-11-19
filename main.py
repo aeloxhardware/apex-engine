@@ -62,6 +62,8 @@ from element_ardor.step4_field_solver import FieldSolverParams, run as field_sol
 from element_ardor.step5_layers import LayerParams, run as layers_run
 from element_ardor.step5b_collision_order import CollisionOrderParams, run as collision_order_run
 from element_ardor.step5c_skin_projection import SkinProjectionParams, run as skin_projection_run
+from element_ardor.step5d_planar_sections import PlanarSectionParams, run as planar_sections_run
+from element_ardor.step4_planar import PlanarParams
 from element_ardor.step6_toolpath2d import Step6Params, run as toolpath2d_run
 from element_ardor.step7_scheduling import Step7Params, run as scheduling_run
 from element_ardor.step8_machine_toolpath import Step8Params, gradient_direction_field, run as machine_toolpath_run
@@ -192,7 +194,12 @@ class PipelineParams:
     segmentation: SegmentationParams = field(default_factory=SegmentationParams)
     # Voie unique : champ = distance au plateau par la methode de la chaleur, flux
     # projete sur les inclinaisons atteignables, couches ordonnees par isovaleur.
-    field_solver: FieldSolverParams = field(default_factory=FieldSolverParams)
+    # Couches PLANES partout ou l'impression plane suffit (`element_ardor/step4_planar.py`, 2026-11-19) : la direction
+    # de la chaleur n'est gardee qu'autour des surplombs qu'un trancheur classique ne sait pas imprimer, avec une rampe
+    # douce. Mesure (natif, TetraNet, temps de chaleur 300 000) : Benchy droit 240 couches planes a 0,023 mm pres
+    # (0 % avant) ; matiere sans appui (etape 9b) death 3,23 -> 1,72 %, turkish 0,36 -> 0,10 %, l_shape 6,39 ->
+    # 6,79 %, l-triple 6,25 -> 6,32 % ; collisions toutes resolues (0 restante) sur les quatre.
+    field_solver: FieldSolverParams = field(default_factory=lambda: FieldSolverParams(planar=PlanarParams()))
     layers: LayerParams = field(default_factory=lambda: LayerParams())
     # out_of_plane_interpolation_power active par defaut ici (defaut de la
     # dataclass = None/desactive), meme precedent que field_solver ci-dessus
@@ -226,6 +233,9 @@ class PipelineParams:
         default_factory=lambda: Step6Params(
             out_of_plane_interpolation_power=2.0, split_rings_into_runs=True, continuous_rings=True,
             run_split_min_amplitude=0.05,
+            # Couches pleines (`element_ardor/step6_solid.py`, 2026-11-18) : 4 sous chaque dessus, 3 sur chaque
+            # dessous. Sans elles, le remplissage a 20 % etait a nu sur toute surface (pont, toit, fond du Benchy).
+            solid_top_layers=4, solid_bottom_layers=3,
         )
     )
     scheduling: Step7Params = field(default_factory=Step7Params)
@@ -280,6 +290,9 @@ class PipelineParams:
     # defaut depuis le contrat 4 (2026-11-17 : contours de death p99 0,294 -> 0,017 mm avec TetraNet, 0,032 -> 0,001
     # avec TetGen, 0 a +11 % de duree, tetranet/docs/RAPPORT.md). None = desactive.
     skin_projection: Optional[SkinProjectionParams] = field(default_factory=SkinProjectionParams)
+    # etape 5d (2026-11-19) : contours exacts des couches planes, recoupes dans le STL (limite #89). None : contours de
+    # l'isosurface (et de l'etape 5c) seulement.
+    planar_sections: Optional[PlanarSectionParams] = field(default_factory=PlanarSectionParams)
     # Options d'execution (natif, GPU, TetGen, fils) : plus aucune variable d'environnement (R-030 point 3).
     runtime: RuntimeOptions = field(default_factory=runtime.options)
 
@@ -443,6 +456,10 @@ def _layers_stage(params: PipelineParams, tet_mesh, mesh_data, scalar_field, reg
         layers = layers_run(tet_mesh, mesh_data, scalar_field, region_dependency_graph, params.layers)
     if params.skin_projection is not None:
         layers, _ = skin_projection_run(layers, mesh_data, params.skin_projection)
+    if params.planar_sections is not None:
+        layers, sections = planar_sections_run(layers, mesh_data, tet_mesh, scalar_field, params.planar_sections)
+        print(f"[main]   couches planes recoupees dans le STL : {sections.planar_layers}, boucles remplacees "
+              f"{sections.replaced_loops}, gardees {sections.kept_loops}")
     if params.collision_order is not None:
         with _core_progress.phase(0.7, 1.0):
             layers, order_report = collision_order_run(layers, params.machine_profile, params.collision_order)

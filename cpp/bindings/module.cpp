@@ -861,7 +861,7 @@ PYBIND11_MODULE(apex_core, m) {
         [](const DoubleArray& frames, const IntArray& loop_begin, const IntArray& point_begin,
            const DoubleArray& points, const DoubleArray& sweep_angles, const py::dict& cfg,
            const py::object& kdtree, const py::object& is_bridge_obj, const py::object& span_obj,
-           int threads) {
+           int threads, bool with_kinds) {
             const auto layer_count = static_cast<std::int64_t>(sweep_angles.size());
             apex::Step6Config config;
             config.nozzle_width = cfg["nozzle_width"].cast<double>();
@@ -900,34 +900,44 @@ PYBIND11_MODULE(apex_core, m) {
                 }
             }
             std::vector<std::vector<std::vector<double>>> results(static_cast<std::size_t>(layer_count));
+            std::vector<std::vector<std::uint8_t>> kind_results(static_cast<std::size_t>(layer_count));
             {
                 py::gil_scoped_release release;
                 static apex::internal::ParallelPool* pool = new apex::internal::ParallelPool(
                     std::max(1u, std::thread::hardware_concurrency()));
                 auto work = [&](std::int64_t b, std::int64_t e) {
                     for (std::int64_t l = b; l < e; ++l) {
-                        results[static_cast<std::size_t>(l)] = apex::fill_layer(layers[static_cast<std::size_t>(l)], config, bridge);
+                        results[static_cast<std::size_t>(l)] = apex::fill_layer(
+                            layers[static_cast<std::size_t>(l)], config, bridge,
+                            with_kinds ? &kind_results[static_cast<std::size_t>(l)] : nullptr);
                     }
                 };
                 if (threads == 1) work(0, layer_count);
                 else pool->run(layer_count, work, 2);
             }
             py::list out;
-            for (const auto& polys : results) {
+            for (std::size_t l = 0; l < results.size(); ++l) {
                 py::list one;
-                for (const auto& p : polys) {
+                for (const auto& p : results[l]) {
                     py::array_t<double> a({static_cast<py::ssize_t>(p.size() / 3), static_cast<py::ssize_t>(3)});
                     std::copy(p.begin(), p.end(), a.mutable_data());
                     one.append(a);
                 }
-                out.append(one);
+                if (!with_kinds) { out.append(one); continue; }
+                py::array_t<std::uint8_t> kinds(static_cast<py::ssize_t>(kind_results[l].size()));
+                std::copy(kind_results[l].begin(), kind_results[l].end(), kinds.mutable_data());
+                out.append(py::make_tuple(one, kinds));     // (polylignes, types) par couche
             }
             return out;
         },
         py::arg("frames"), py::arg("loop_begin"), py::arg("point_begin"), py::arg("points"),
         py::arg("sweep_angles"), py::arg("config"), py::arg("kdtree") = py::none(),
         py::arg("is_bridge") = py::none(), py::arg("span") = py::none(), py::arg("threads") = 0,
-        "Remplissage 2D de couches entieres (step6 `_fill_layer`), en parallele : liste (par couche) de polylignes (K,3).");
+        py::arg("with_kinds") = false,
+        "Remplissage 2D de couches entieres (step6 `_fill_layer`), en parallele : liste (par couche) de polylignes (K,3), "
+        "ou de (polylignes, types de ligne) avec `with_kinds`.");
+    // Capacite : fill_layers sait rendre les types de ligne (core/line_types.py).
+    m.attr("FILL_LAYERS_KINDS") = true;
 
     m.def(
         "build_raw_points",
@@ -1485,8 +1495,15 @@ PYBIND11_MODULE(apex_core, m) {
         [](const DoubleArray& positions, const DoubleArray& angles, const DoubleArray& extrusion,
            const py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>& skin,
            const DoubleArray& slow, const DoubleArray& zlow_grid, const DoubleArray& zlow_values,
-           const py::dict& p, const py::object& travel) {
+           const py::dict& p, const py::object& travel, const py::object& types_obj) {
             const auto n = static_cast<std::int64_t>(positions.shape(0));
+            // types de ligne (core/line_types.py), un par point ; None = aucune etiquette `;TYPE:`
+            py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast> types;
+            if (!types_obj.is_none()) {
+                types = types_obj.cast<py::array_t<std::uint8_t, py::array::c_style | py::array::forcecast>>();
+                if (types.ndim() != 1 || types.shape(0) != n)
+                    throw std::invalid_argument("types de ligne incoherents pour export_gcode_body");
+            }
             if (positions.ndim() != 2 || positions.shape(1) != 3 || angles.ndim() != 2 || angles.shape(1) != 2 ||
                 angles.shape(0) != n || extrusion.shape(0) != n || skin.shape(0) != n ||
                 (n > 0 && slow.shape(0) != n - 1) || zlow_grid.shape(0) != zlow_values.shape(0)) {
@@ -1547,7 +1564,8 @@ PYBIND11_MODULE(apex_core, m) {
             {
                 py::gil_scoped_release release;
                 body = apex::export_gcode_body(positions.data(), angles.data(), extrusion.data(), skin.data(),
-                                               slow.data(), n, zg, zv, P, st, tcp);
+                                               slow.data(), n, zg, zv, P, st, tcp,
+                                               types_obj.is_none() ? nullptr : types.data());
             }
             py::dict s;
             s["moves"] = st.moves; s["travels"] = st.travels; s["retractions"] = st.retractions;
@@ -1563,9 +1581,12 @@ PYBIND11_MODULE(apex_core, m) {
             return py::make_tuple(py::str(body), s);
         },
         py::arg("positions"), py::arg("angles"), py::arg("extrusion"), py::arg("skin"), py::arg("slow"),
-        py::arg("zlow_grid"), py::arg("zlow_values"), py::arg("params"), py::arg("travel") = py::none());
+        py::arg("zlow_grid"), py::arg("zlow_values"), py::arg("params"), py::arg("travel") = py::none(),
+        py::arg("types") = py::none());
     // Capacite : export_gcode_body accepte le controle des degagements (2026-10-13).
     m.attr("EXPORT_TRAVEL_CHECK") = true;
+    // Capacite : export_gcode_body ecrit les etiquettes `;TYPE:` quand on lui donne les types de ligne.
+    m.attr("EXPORT_LINE_TYPES") = true;
 
     m.def(
         "feed_plan_caps",

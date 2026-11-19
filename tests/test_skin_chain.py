@@ -1,5 +1,9 @@
 """Lissage non-planaire sur la voie chaleur : zones (P2), trajectoires de surface (P4), ordre et collisions (P5),
-enchainement complet (element_ardor/skin/chain.py), sur l_shape_overhang.stl."""
+enchainement complet (element_ardor/skin/chain.py), sur un prisme a toit incline de 18 degres (genere a la volee).
+
+Avant le 2026-11-19 : l_shape_overhang.stl. Depuis que les couches d'Ardor sont planes partout ou rien ne les oblige
+a pencher (limite #88), ses faces sont toutes paralleles ou perpendiculaires aux couches : aucune marche a lisser.
+Le toit incline, lui, est tranche en escalier par des couches planes."""
 import dataclasses
 import os
 
@@ -12,11 +16,22 @@ from element_ardor import step1_ingest as s1, step2_overhang as s2, step3_segmen
 from element_ardor import step4_field_solver as s4, step5_layers as s5
 from element_ardor.skin import chain, zones as sz
 
-STL = os.path.join(os.path.dirname(__file__), "..", "res", "test_models", "l_shape_overhang.stl")
+
+
+def _ramp_stl(directory) -> str:
+    """Prisme 24 x 12 mm, hauteur 4 mm d'un cote et 12 mm de l'autre : toit incline de atan(8/24) = 18 degres."""
+    from shapely.geometry import Polygon
+    prism = trimesh.creation.extrude_polygon(Polygon([(0, 0), (24, 0), (24, 4), (0, 12)]), 12.0)
+    prism.apply_transform(trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0]))
+    prism.apply_translation(-prism.bounds[0])
+    path = os.path.join(str(directory), "ramp.stl")
+    prism.export(path)
+    return path
 
 
 @pytest.fixture(scope="module")
-def heat():
+def heat(tmp_path_factory):
+    STL = _ramp_stl(tmp_path_factory.mktemp("skin"))
     p = M.PipelineParams()
     md, tm, rep = s1.run(STL, resolution=p.resolution, near_platform_resolution=p.near_platform_resolution,
                          near_platform_margin=p.near_platform_margin, place_on_platform=True)
@@ -30,18 +45,23 @@ def heat():
 def result(heat):
     p, md, tm, om, field, layers = heat
     return chain.run(chain.SkinInputs(tm, field, layers, md, om, M._effective_toolpath2d_params(p)),
-                     p.machine_profile, p.collision, chain.SkinParams(face_sample=300, max_iter=4))
+                     p.machine_profile, p.collision, chain.SkinParams(max_iter=4))
 
 
 def test_zone_statuses_partition_the_surface(heat):
     p, _md, tm, _om, field, layers = heat
-    z = sz.compute(tm, field, np.unique([l.isovalue for l in layers]), p.machine_profile, p.collision, sampling=sz.ZoneSampling(face_sample=200))
+    z = sz.compute(tm, field, np.unique([l.isovalue for l in layers]), p.machine_profile, p.collision, sampling=sz.ZoneSampling())
     skin = sz.partition(z)
     st = skin["status"]
     assert set(np.unique(st)) <= set(sz.STATUS_NAMES)
     assert abs(skin["areas"].sum() - z.areas.sum()) < 1e-6 * z.areas.sum()      # la coupe ne perd aucune aire
     retained = skin["zone"] >= 0
     assert retained.any() and (st[retained] == sz.STATUS_RETAINED).all()
+    # seul le toit incline est en escalier : les zones sont sur lui (normale a 18 degres de la verticale)
+    tilt = np.degrees(np.arccos(np.clip(skin["normals"][retained][:, 2], -1, 1)))
+    assert np.all(np.abs(tilt - 18.43) < 1.0)
+    walls = np.abs(skin["normals"][:, 2]) < 0.1
+    assert (st[walls] == sz.STATUS_NO_STEPS).all()
     # zones accessibles a leur moment (invariant de P2) : dernier moment accessible >= moment de la zone
     for zid, moment in enumerate(skin["zone_moment"]):
         assert (skin["last_access"][skin["zone"] == zid] >= moment).all()
@@ -108,3 +128,22 @@ def test_inject_places_each_zone_after_its_supporting_layer_and_remaps_indices(r
     first_skin = skin_idx[0]
     layer_of_prev = new.layer_ids[first_skin - 1]
     assert layer_of_prev != -1 and layer_of_prev in {l.id for l in layers}
+
+
+def test_a_head_contact_moves_the_faces_to_an_earlier_band_instead_of_removing_them(heat):
+    """P5 signale que la tete touche la piece en lissant un point d'une zone imprimee au moment M : les faces voisines
+    passent dans une bande plus precoce (dernier moment accessible ramene sous M), elles ne sont pas retirees."""
+    p, _md, tm, _om, field, layers = heat
+    z = sz.compute(tm, field, np.unique([l.isovalue for l in layers]), p.machine_profile, p.collision)
+    base = sz.partition(z)
+    zid = int(np.argmax(np.bincount(base["zone"][base["zone"] >= 0])))
+    at = int(base["zone_moment"][zid])
+    faces = np.flatnonzero(base["zone"] == zid)
+    tri = base["vertices"][base["faces"][faces]].mean(axis=1)
+    hit = tri[np.argmin(base["moment"][faces])][None, :]          # la face la plus basse de la zone
+    after = sz.partition(z, retime=[(hit, at)], trim_radius=2.0)
+    centres = after["vertices"][after["faces"]].mean(axis=1)
+    near = np.linalg.norm(centres - hit, axis=1) < 1.0
+    moved = near & (after["zone"] >= 0)
+    assert moved.any()
+    assert (after["zone_moment"][after["zone"][moved]] < at).all()

@@ -69,11 +69,14 @@ struct GcodeExportStats {
 // `skin` n (0/1), `slow` n-1 (facteur feed_plan). `zlow_grid`/`zlow_values`
 // : table de head_zlow (vides = pas de table). Rend le CORPS (lignes separees
 // par '\n', sans '\n' final) et remplit `stats`.
+// `types` (optionnel, n) : type de ligne de chaque point (core/line_types.py : 0 inconnu, 1 WALL-OUTER, 2 WALL-INNER,
+// 3 FILL, 4 BRIDGE, 5 SKIN). Une etiquette `;TYPE:X` precede le premier mouvement imprime de chaque changement de
+// type. nullptr = aucune etiquette (texte inchange).
 std::string export_gcode_body(const double* positions, const double* angles, const double* extrusion,
                               const std::uint8_t* skin, const double* slow, std::int64_t n,
                               const std::vector<double>& zlow_grid, const std::vector<double>& zlow_values,
                               const GcodeExportParams& params, GcodeExportStats& stats,
-                              const TravelCheck* travel = nullptr);
+                              const TravelCheck* travel = nullptr, const std::uint8_t* types = nullptr);
 
 // `feed_plan` (meme fichier Python) : plafonds de vitesse angulaire par passes
 // avant puis arriere, remise a zero a chaque changement de signe (np.sign).

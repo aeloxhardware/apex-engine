@@ -51,7 +51,7 @@ inline double norm4(double a, double b, double c, double d) { return std::sqrt(a
 std::string export_gcode_body(const double* pos, const double* ang, const double* ext, const std::uint8_t* skin,
                               const double* slow, std::int64_t n, const std::vector<double>& zgrid,
                               const std::vector<double>& zvals, const GcodeExportParams& P,
-                              GcodeExportStats& st, const TravelCheck* travel) {
+                              GcodeExportStats& st, const TravelCheck* travel, const std::uint8_t* types) {
     std::string out;
     out.reserve(static_cast<std::size_t>(n) * 60);
     const double inf = std::numeric_limits<double>::infinity();
@@ -263,6 +263,7 @@ std::string export_gcode_body(const double* pos, const double* ang, const double
     auto axis_name = [](char a) { return a == 'Z' ? std::string("Z") : a == 'R' ? std::string("R") : std::string("none"); };
 
     int last_kind = -1;
+    int last_type = -1;       // dernier type de ligne etiquete
     std::array<double, 3> up{}, up0{}, up1{};
     for (std::int64_t i = 0; i < n; ++i) {
         const double* p = pos + i * 3;
@@ -308,6 +309,13 @@ std::string export_gcode_body(const double* pos, const double* ang, const double
                 move(p, b, P.travel_speed, 0.0, "");
             }
             continue;
+        }
+        if (types != nullptr && types[i] != last_type) {      // etiquette `;TYPE:` (file_io/gcode_export.py, python_loop)
+            static const char* const kLabels[] = {"CUSTOM", "WALL-OUTER", "WALL-INNER", "FILL", "BRIDGE", "SKIN"};
+            out += ";TYPE:";
+            out += types[i] < 6 ? kLabels[types[i]] : "CUSTOM";
+            out += '\n';
+            last_type = types[i];
         }
         const double* q = pos + (i - 1) * 3;
         const double seg = norm3(p[0] - q[0], p[1] - q[1], p[2] - q[2]);

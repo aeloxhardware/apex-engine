@@ -223,6 +223,10 @@ class Layer:
     # de réduction des purges. `color_id` (une seule couleur par couche) ne
     # suffit pas : une couche traverse en général plusieurs zones peintes.
     segment_colors: Optional[list[Optional[int]]] = None
+    # Un type de ligne par polyligne de `toolpath_2d` (même indexation, même longueur) : `core/line_types.py`
+    # (paroi extérieure, paroi intérieure, remplissage, pont). Rempli par l'étape 6, ré-indexé par l'étape 7 quand
+    # elle redécoupe par couleur ; `None` = inconnu (couche construite hors étape 6).
+    toolpath_kinds: Optional[list[int]] = None
     # Score de non-monotonie locale du champ scalaire (CLAUDE.md limite
     # #47) : `None` sauf si `LayerParams.detect_junction_variance=True`.
     # Une valeur non-nulle signale que cette couche forme, avec une couche
@@ -394,6 +398,7 @@ class ToolpathPoint:
     feedrate: float
     color_id: Optional[int] = None
     is_skin: bool = False           # couche de lissage non-planaire (epaisseur propre a l'export, `skin_thickness`)
+    line_type: int = 0              # type du cordon qui ARRIVE a ce point (`core/line_types.py`), 0 = inconnu / trajet
 
 
 @dataclass

@@ -35,6 +35,11 @@ class SkinProjectionParams:
     crease_angle_deg: float = 8.0     # deux faces dont les normales different de plus : le point d'arete est insere
     crease_tolerance: float = 1e-4    # mm : le point d'arete doit etre a moins de cela de la surface
     batch: int = 200_000              # points par requete (memoire)
+    # Deplacement DANS LE PLAN de la couche (2026-11-19) : le point va jusqu'au plan tangent de la surface au point le
+    # plus proche, en restant a sa hauteur de couche. Le point le plus proche lui-meme sortait le contour de sa couche
+    # sur toute paroi en pente (couches planes d'un Benchy : +-0,2 mm sur le chanfrein du fond, premiere couche de
+    # z = 0 a 0,3 mm). Paroi verticale : meme resultat. Surface presque parallele a la couche : point laisse en place.
+    in_layer: bool = True
 
 
 @dataclass
@@ -103,7 +108,8 @@ class _Surface:
 
 
 def _crease_points(surface: _Surface, a: np.ndarray, b: np.ndarray, mid: np.ndarray,
-                   params: SkinProjectionParams) -> tuple[np.ndarray, np.ndarray]:
+                   params: SkinProjectionParams, layer_normals: Optional[np.ndarray] = None
+                   ) -> tuple[np.ndarray, np.ndarray]:
     """Pour les segments [a, b] dont les extremites sont sur deux faces d'orientations differentes : point de la
     droite d'intersection des deux plans le plus proche du milieu. `ok` : ce point est bien sur la surface (arete
     reelle, pas le prolongement d'un plan)."""
@@ -125,11 +131,44 @@ def _crease_points(surface: _Surface, a: np.ndarray, b: np.ndarray, mid: np.ndar
     base = (ha[:, None] * np.cross(nb, direction) + hb[:, None] * np.cross(direction, na)) / safe
     unit = direction / np.sqrt(safe)
     candidate = base + unit * np.einsum("ij,ij->i", mid - base, unit)[:, None]
+    if layer_normals is not None:
+        # point de l'arete dans le plan de la couche (par le milieu), si l'arete n'est pas parallele a la couche
+        along = np.einsum("ij,ij->i", unit, layer_normals)
+        cut = np.abs(along) > 0.2
+        s_cut = np.einsum("ij,ij->i", mid - base, layer_normals) / np.where(cut, along, 1.0)
+        candidate = np.where(cut[:, None], base + unit * s_cut[:, None], candidate)
     _c, dist, _f = surface.closest(candidate)
     near = np.linalg.norm(candidate - mid, axis=1) <= params.max_shift
     not_endpoint = (np.linalg.norm(candidate - a, axis=1) > 1e-6) & (np.linalg.norm(candidate - b, axis=1) > 1e-6)
     ok = creased & (dist <= params.crease_tolerance) & near & not_endpoint
+    if layer_normals is not None:
+        # une arete parallele a la couche (bord du fond, d'un dessus) ne la coupe pas : son point sortirait de la couche
+        ok &= np.abs(np.einsum("ij,ij->i", candidate - mid, layer_normals)) <= params.crease_tolerance
     return candidate, ok
+
+
+def _in_layer(points: np.ndarray, closest: np.ndarray, normals: np.ndarray, layer_normals: np.ndarray
+              ) -> tuple[np.ndarray, np.ndarray]:
+    """Points deplaces dans le plan de leur couche (normale `layer_normals`) jusqu'au plan tangent de la surface
+    (normale `normals`) au point le plus proche, et longueur du deplacement. Surface a moins de ~11 deg de la couche
+    (dessus, dessous) : point laisse en place, deplacement nul."""
+    n = normals / np.maximum(np.linalg.norm(normals, axis=1), 1e-12)[:, None]
+    g = layer_normals
+    m = n - np.einsum("ij,ij->i", n, g)[:, None] * g
+    denom = np.einsum("ij,ij->i", m, n)
+    ok = denom > 0.04
+    t = np.where(ok, np.einsum("ij,ij->i", closest - points, n) / np.where(ok, denom, 1.0), 0.0)
+    moved = points + t[:, None] * m
+    return moved, np.abs(t) * np.linalg.norm(m, axis=1)
+
+
+def _layer_normals(layers: list[Layer], owners, starts: np.ndarray, count: int) -> np.ndarray:
+    """Normale du repere local de la couche de chaque point (plan moyen de la couche)."""
+    per_loop = np.array([np.cross(np.asarray(layers[o[0]].local_frame[1], float), np.asarray(layers[o[0]].local_frame[2], float))
+                         for o in owners]).reshape(-1, 3)
+    per_loop /= np.maximum(np.linalg.norm(per_loop, axis=1), 1e-12)[:, None]
+    owner = np.searchsorted(starts, np.arange(count), side="right") - 1
+    return per_loop[owner]
 
 
 def _flatten(layers: list[Layer]) -> tuple[np.ndarray, np.ndarray, list[tuple[int, int, bool]]]:
@@ -149,8 +188,10 @@ def _flatten(layers: list[Layer]) -> tuple[np.ndarray, np.ndarray, list[tuple[in
 
 
 def _project_vertices(points: np.ndarray, surface: _Surface, params: SkinProjectionParams,
-                      report: SkinProjectionReport) -> np.ndarray:
-    closest, dist, _faces = surface.closest(points)
+                      report: SkinProjectionReport, layer_normals: Optional[np.ndarray] = None) -> np.ndarray:
+    closest, dist, faces = surface.closest(points, want_faces=layer_normals is not None)
+    if layer_normals is not None:
+        closest, dist = _in_layer(points, closest, surface.face_normals[faces], layer_normals)
     allowed = dist <= params.max_shift
     report.refused = int((~allowed).sum())
     report.moved = int((allowed & (dist > 1e-9)).sum())
@@ -160,7 +201,7 @@ def _project_vertices(points: np.ndarray, surface: _Surface, params: SkinProject
 
 
 def _refine_once(points: np.ndarray, starts: np.ndarray, closed: np.ndarray, surface: _Surface,
-                 params: SkinProjectionParams) -> tuple[np.ndarray, np.ndarray, int]:
+                 params: SkinProjectionParams, normals_of=None) -> tuple[np.ndarray, np.ndarray, int]:
     """Un tour : insere le point projete du milieu des segments qui s'ecartent de la surface."""
     n = len(points)
     ends = np.append(starts[1:], n)                       # fin (exclue) de chaque polyligne
@@ -172,14 +213,20 @@ def _refine_once(points: np.ndarray, starts: np.ndarray, closed: np.ndarray, sur
     has_segment = ~is_last | closed[owner]
     seg = index[has_segment]
     mid = 0.5 * (points[seg] + points[nxt[seg]])
-    closest, dist, _faces = surface.closest(mid)
-    insert = (dist > params.chord_tolerance) & (dist <= params.max_shift)
+    closest, dist, faces = surface.closest(mid, want_faces=normals_of is not None)
+    g = normals_of(seg) if normals_of is not None else None
+    gap = dist
+    if g is not None:
+        closest, moved = _in_layer(mid, closest, surface.face_normals[faces], g)
+        gap = np.where(moved > 0.0, moved, 0.0)
+    insert = (gap > params.chord_tolerance) & (gap <= params.max_shift)
     if not insert.any():
         return points, starts, 0
     where = seg[insert]
     inserted = closest[insert]
     # un segment qui relie deux faces d'orientations differentes coupe une arete : on y place le point d'arete
-    crease, ok = _crease_points(surface, points[where], points[nxt[where]], mid[insert], params)
+    crease, ok = _crease_points(surface, points[where], points[nxt[where]], mid[insert], params,
+                                g[insert] if g is not None else None)
     inserted = np.where(ok[:, None], crease, inserted)
     new_points = np.insert(points, where + 1, inserted, axis=0)
     added_before = np.zeros(n + 1, dtype=np.int64)
@@ -209,9 +256,14 @@ def run(layers: list[Layer], mesh_data: MeshData, params: SkinProjectionParams
         return layers, report
     closed = np.array([o[2] for o in owners], dtype=bool)
     surface = _Surface(mesh_data.vertices, mesh_data.faces, mesh_data.face_normals, params.batch)
-    points = _project_vertices(points, surface, params, report)
+    normals = _layer_normals(layers, owners, starts, len(points)) if params.in_layer else None
+    points = _project_vertices(points, surface, params, report, normals)
     for round_index in range(params.max_rounds):
-        points, starts, inserted = _refine_once(points, starts, closed, surface, params)
+        normals_of = None
+        if params.in_layer:
+            point_normals = _layer_normals(layers, owners, starts, len(points))
+            normals_of = point_normals.__getitem__
+        points, starts, inserted = _refine_once(points, starts, closed, surface, params, normals_of)
         if inserted == 0:
             break
         report.rounds_used = round_index + 1

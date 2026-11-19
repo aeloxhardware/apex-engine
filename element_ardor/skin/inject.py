@@ -14,6 +14,7 @@ from typing import Optional
 
 import numpy as np
 
+from core import line_types
 from core.mesh_types import Layer, ToolpathMachine, ToolpathPoint
 
 
@@ -60,7 +61,8 @@ def inject(toolpath: ToolpathMachine, layers: list[Layer], passes: list[dict], f
                 angles = np.asarray(angles, dtype=float).reshape(len(path), -1)
                 for j in range(len(path)):
                     points.append(ToolpathPoint(position=path[j], axis_angles=[float(a) for a in angles[j]],
-                                                extrusion=0.0 if j == 0 else 1.0, feedrate=feedrate, is_skin=True))
+                                                extrusion=0.0 if j == 0 else 1.0, feedrate=feedrate, is_skin=True,
+                                                line_type=line_types.SKIN))
                     new_ids.append(-1)
 
     if -1 in insert_after:

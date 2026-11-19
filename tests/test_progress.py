@@ -82,13 +82,16 @@ def test_native_step6_chunks_match_a_single_call(monkeypatch):
     calls = []
 
     class FakeModule:
+        FILL_LAYERS_KINDS = True         # capacite : le noyau rend (polylignes, types de ligne) par couche
+
         @staticmethod
         def fill_layers(*args):          # signature du noyau natif : frames, loop_begin, point_begin, points, sweep, ...
             frames, loop_begin, point_begin, points, sweep = args[:5]
             calls.append(len(frames))
             assert loop_begin[0] == 0 and point_begin[0] == 0
             assert loop_begin[-1] == len(point_begin) - 1 and point_begin[-1] == len(points)
-            return [[np.array([[sweep[i], float(points[point_begin[loop_begin[i]], 2]), 0.0]])] for i in range(len(frames))]
+            return [([np.array([[sweep[i], float(points[point_begin[loop_begin[i]], 2]), 0.0]])],
+                     np.array([1], dtype=np.uint8)) for i in range(len(frames))]
 
     monkeypatch.setattr(s6, "_native_fill_module", lambda params: FakeModule)
     mesh_data = type("M", (), {"kdtree": type("K", (), {"_native": object()})()})()
@@ -98,6 +101,7 @@ def test_native_step6_chunks_match_a_single_call(monkeypatch):
     out = s6._fill_layers_native(layers, mesh_data, overhang, params, rank)
     assert sum(calls) == 70 and len(calls) > 1 and all(c >= s6._NATIVE_MIN_CHUNK or c == calls[-1] for c in calls)
     assert [float(l.toolpath_2d[0][0, 1]) for l in out] == [pytest.approx(float(k) + k * 0.01) for k in range(70)]
+    assert all(l.toolpath_kinds == [1] for l in out)                       # les types suivent les polylignes
 
 
 def test_failed_slice_leaves_no_stage_open(tmp_path, capsys):

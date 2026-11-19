@@ -58,6 +58,7 @@ from typing import Callable, Optional
 
 import numpy as np
 
+from core import line_types
 from core import progress as _progress
 from file_io.gcode_axes import axes_words
 from file_io import kinematics_description as _kin
@@ -160,7 +161,9 @@ def toolpath_arrays(toolpath) -> dict:
     return {"position": np.array([p.position for p in pts], dtype=float),
             "axis_angles": np.array([p.axis_angles for p in pts], dtype=float),
             "extrusion": np.array([p.extrusion for p in pts], dtype=float),
-            "is_skin": np.array([bool(getattr(p, "is_skin", False)) for p in pts], dtype=bool)}
+            "is_skin": np.array([bool(getattr(p, "is_skin", False)) for p in pts], dtype=bool),
+            # type de ligne par point (core/line_types.py) : etiquettes `;TYPE:` pour colorer l'apercu
+            "line_type": np.array([int(getattr(p, "line_type", 0)) for p in pts], dtype=np.uint8)}
 
 
 def head_body_direction_rz(b_deg):
@@ -475,8 +478,9 @@ def _native_body_options(params: GcodeParams, fil_area: float) -> dict:
 class _GcodeWriter:
     """Etat et mouvements de l'ecriture du G-code (chemin Python et recueil des resultats natifs)."""
 
-    def __init__(self, params: GcodeParams, machine, head_zlow, rep: GcodeReport, out: list):
+    def __init__(self, params: GcodeParams, machine, head_zlow, rep: GcodeReport, out: list, types=None):
         self.params, self.machine, self.head_zlow, self.rep, self.out = params, machine, head_zlow, rep, out
+        self.types = types      # (n,) uint8, types de ligne par point ; None = aucune etiquette `;TYPE:`
         self.L = params.pivot_to_tip
         self.state = {"fw": None, "e": 0.0, "retracted": False}
         self.guard = {"x": [], "y": [], "z": []}
@@ -497,6 +501,9 @@ class _GcodeWriter:
         head_zlow = self.head_zlow
         table = getattr(head_zlow, "table", None) if head_zlow is not None else (np.zeros(0), np.zeros(0))
         travel_native = getattr(travel_check, "native", None) if travel_check is not None else None
+        # un module natif sans `EXPORT_LINE_TYPES` n'ecrit pas les etiquettes : le chemin Python, identique, s'applique
+        if self.types is not None and _cpp.enabled() and not getattr(_cpp.module(), "EXPORT_LINE_TYPES", False):
+            return n
         if not (_cpp.enabled() and hasattr(_cpp.module(), "export_gcode_body")
                 and (travel_check is None
                      or (travel_native is not None and getattr(_cpp.module(), "EXPORT_TRAVEL_CHECK", False)))
@@ -507,7 +514,8 @@ class _GcodeWriter:
             np.ascontiguousarray(skin, dtype=np.uint8), np.ascontiguousarray(slow, dtype=float),
             np.ascontiguousarray(table[0], dtype=float), np.ascontiguousarray(table[1], dtype=float),
             _native_body_options(params, fil_area),
-            *(() if travel_native is None else (travel_native,)))
+            *(() if travel_native is None else (travel_native,)),
+            **({} if self.types is None else {"types": np.ascontiguousarray(self.types, dtype=np.uint8)}))
         _z_offset(1.0, params.z_reference)   # meme erreur que le chemin Python si z_reference est inconnu
         if "subdivided_moves" not in st:
             # Module natif PERIME (anterieur au decoupage `max_tip_deviation`) : son resultat est ecarte et
@@ -629,7 +637,7 @@ class _GcodeWriter:
         """Chemin Python : ecrit les `n_loop` points (0 si le natif a deja tout ecrit)."""
         pos, ang, ext, skin, slow = arrays
         params, rep = self.params, self.rep
-        L, last_kind = self.L, None
+        L, last_kind, last_type = self.L, None, None
         for i in range(n_loop):
             _progress.report(i, n_loop, span=(0.4, 1.0))   # R-017 : points ecrits
             kind = "lissage" if skin[i] else "corps"
@@ -654,6 +662,9 @@ class _GcodeWriter:
                 rep.travels += 1
                 self.travel(i, pos, ang, travel_check)
                 continue
+            if self.types is not None and int(self.types[i]) != last_type:     # etiquette `;TYPE:` au changement de type
+                last_type = int(self.types[i])
+                self.out.append(f";TYPE:{line_types.LABELS.get(last_type, 'CUSTOM')}")
             seg = float(np.linalg.norm(pos[i] - pos[i - 1]))
             h = params.skin_thickness if skin[i] else params.layer_height
             e_add = seg * h * params.line_width * params.flow / fil_area
@@ -712,10 +723,12 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
     amax = float(np.degrees(getattr(machine, "max_angular_acceleration", 0.0) or 0.0))
     _, _, slow = feed_plan(pos, ang, vmax, amax, coupled, params.print_speed) if n > 1 else (0, 0, np.ones(0))
     arrays = (pos, ang, ext, skin, slow)
+    types = toolpath.get("line_type")          # facultatif : sans lui, aucune etiquette `;TYPE:` (texte inchange)
+    types = None if types is None else np.asarray(types, dtype=np.uint8)
 
     rep = GcodeReport()
     out = _header_lines(params, machine, params.pivot_to_tip)
-    writer = _GcodeWriter(params, machine, head_zlow, rep, out)
+    writer = _GcodeWriter(params, machine, head_zlow, rep, out, types)
     n_loop = writer.native_body(arrays, travel_check, fil_area)
     writer.python_loop(arrays, n_loop, travel_check, fil_area)
     if _cpp.enabled() and hasattr(_cpp.module(), "gcode_footer"):

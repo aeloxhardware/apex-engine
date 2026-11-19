@@ -4,6 +4,27 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 5 (2026-11-19, publie avec alpha-0.2.3.1.8.0.3.221) : INCOMPATIBLE, le numero passe de 4 a 5 dans le commit qui publie ces defauts
+Element Ardor imprime comme un trancheur classique partout ou l'impression multi-axes n'est pas necessaire (limite #88) :
+- `field_solver.planar` (`PlanarParams`) ACTIF par defaut : couches planes loin des surplombs non imprimables a plat,
+  direction lissee (20 iterations) dans la zone inclinee ;
+- `toolpath2d.solid_top_layers` = 4 et `solid_bottom_layers` = 3 par defaut : couches pleines sous les dessus et sur les
+  dessous (avant : aucune) ;
+- `skin_projection.in_layer` = vrai : les contours sont ramenes sur le STL dans le plan de leur couche.
+- `planar_sections` (`PlanarSectionParams`, etape 5d, ajoute le 2026-11-19, limite #89) ACTIF par defaut : chaque
+  boucle plane loin de toute matiere inclinee est recoupee exactement dans le STL (simplifiee a 0,01 mm) ;
+- zone pleine etroite en anneau (2A/P < 4 cordons) : anneaux concentriques au lieu du zigzag ;
+- `skin` (lissage non planaire) reste `null` par defaut ; nouveaux champs de `SkinParams` : `stair_min_deg`,
+  `stair_max_deg`, `proxy_loop`, `latest_band`.
+- **Ce qui change pour un meme modele** : Benchy droit entierement plan, premiere couche plane et pleine ; matiere sans
+  appui death 3,23 -> 1,20 %, turkish 0,36 -> 0,08 %, l_shape 6,39 -> 6,58 %, l-triple 6,25 -> 6,41 % ; filament +5 % (Benchy) a +34 % (turkish) ; 0 collision restante
+  sur les quatre modeles. Detail : `docs/limites/088.md`.
+- **Ce que le consommateur doit faire** : passer `APEX_CONTRACT_VERSION` a 5, recopier `config/params.schema.json`
+  (nouveaux champs `planar`, `solid_top_layers`, `solid_bottom_layers`, `in_layer`, `planar_sections`, champs de
+  `skin`), envoyer `"contract": 5`. Pour retrouver l'ancien G-code : `"field_solver": {"planar": null}`,
+  `"toolpath2d": {"solid_top_layers": 0, "solid_bottom_layers": 0}`, `"skin_projection": {"in_layer": false}`,
+  `"planar_sections": null` (les anneaux concentriques n'ont pas d'interrupteur). Lissage : `"skin": {}`.
+
 ## Contrat 4 (2026-11-17) : INCOMPATIBLE, le numero passe de 3 a 4
 `PipelineParams.skin_projection` (etape 5c : contours ramenes sur la surface d'origine) est ACTIF par defaut
 (`SkinProjectionParams()` au lieu de `null`). C'etait annonce dans l'ajout du 2026-11-07 ci-dessous : un defaut qui

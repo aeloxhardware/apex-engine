@@ -38,7 +38,15 @@ class SkinParams:
     plate_radius: Optional[float] = None   # defaut : rayon du plateau de la machine, sinon 150 mm
     face_sample: Optional[int] = None      # n'evaluer qu'un echantillon de faces (mesure) ; None = toutes
     head_sample_spacing: float = 5.0       # echantillonnage de la tete pour l'accessibilite P2 (mm) ; P5 verifie tout apres
-    workers: Optional[int] = None          # processus du calcul d'accessibilite (None = coeurs, 8 au plus)
+    workers: Optional[int] = None          # sans effet depuis le 2026-11-19 (accessibilite sur grille)
+    # faces lissees : celles que les couches decoupent en escalier (zones.SkinZoneParams.stair_min_deg)
+    stair_min_deg: Optional[float] = 2.0
+    stair_max_deg: Optional[float] = 80.0
+    # boucle de rognage sur un substitut des trajectoires (paths.proxy) tant qu'il reste des contacts : P4 n'est trace
+    # qu'une fois (Benchy : 163 s de P4 sur 5 tours). False : trace complet a chaque tour (avant le 2026-11-19).
+    proxy_loop: bool = True
+    # bande de chaque face : la plus tardive encore accessible (True) ou la plus precoce (False, voie Bird)
+    latest_band: bool = False
 
 
 @dataclass
@@ -98,6 +106,43 @@ class _SkinRun:
         if self.log:
             print(f"[skin] {msg}", flush=True)
 
+    def trim_loop(self, z, body_uncarved, machine, loop_sim, plate_r):
+        """Boucle de rognage : partition (P2), trajectoires, controle de la tete un point tous les `loop_sampling` mm
+        (P5) ; les contacts avec la piece avancent les faces voisines dans une bande plus precoce, les autres les
+        rognent, jusqu'a zero contact. Tant que `proxy_loop`, P5 controle le substitut de P4 (`paths.proxy`) ; une fois
+        propre, les vraies trajectoires sont tracees et controlees, et la boucle continue sur elles s'il le faut.
+        Rend `(skin, traced, p5, clean, tours)`."""
+        params = self.params
+        trim, retime, cache = [], [], {}
+        use_proxy = params.proxy_loop
+        skin = traced = p5 = None
+        options = print_order.CheckOptions(tolerance=params.head_tolerance_deg, plate_r=plate_r)
+        for it in range(1, params.max_iter + 1):
+            skin = self.timed("P2 partition", zones.partition, z, trim_points=trim, trim_radius=params.trim_radius,
+                              retime=retime, latest_band=params.latest_band)
+            for real in ((False, True) if use_proxy else (True,)):
+                traced = (self.timed("P4 trajectoires", skin_paths.trace, skin,
+                                     skin_paths.TraceOptions(pattern=params.pattern, thickness=params.thickness),
+                                     cache=cache) if real
+                          else self.timed("P4 substitut", skin_paths.proxy, skin, params.thickness))
+                p5 = self.timed("P5 controle (boucle)", print_order.order_and_check, body_uncarved, skin, traced,
+                                machine, loop_sim, np.zeros(3), options)
+                new = p5["collision_points"]
+                self.say(f"tour {it}{'' if real else ' (substitut)'} : {len(new)} point(s) de collision, "
+                         f"{len(p5['excluded'])} zone(s) en contact")
+                if new:
+                    break
+                use_proxy = False
+            if not new:
+                return skin, traced, p5, True, it
+            new_retime, new_trim = _split_hits(p5)
+            retime.extend(new_retime)
+            trim.extend(new_trim)
+        if use_proxy:            # jamais propre sur le substitut : les vraies trajectoires pour la suite
+            traced = self.timed("P4 trajectoires", skin_paths.trace, skin,
+                                skin_paths.TraceOptions(pattern=params.pattern, thickness=params.thickness), cache=cache)
+        return skin, traced, p5, False, params.max_iter
+
     def carved_body(self, skin, excluded=()):
         params = self.params
         cp = carve.CarveParams(thickness=params.thickness)
@@ -108,6 +153,18 @@ class _SkinRun:
         filled_c = self.timed("remplissage du corps creuse (etape 6)", s6.run, carved, self.mesh_data,
                               self.overhang_map, self.toolpath2d_params)
         return filled_c, body_from_layers(filled_c)
+
+
+def _split_hits(p5: dict) -> tuple[list, list]:
+    """Contacts d'un tour de P5 : `(re-calages, rognage)`. Contact avec la piece : la zone etait imprimee trop tard
+    (bande calee sur sa face la plus haute), ses faces proches passent a une bande plus precoce (`zones.partition`,
+    `retime`). Plateau et tolerance tete / normale : rognage, comme avant le 2026-11-19."""
+    retime, hit_obj = [], set()
+    for r in p5["report"].values():
+        if r.get("object_points"):
+            retime.append((np.asarray(r["object_points"]), r["moment"]))
+            hit_obj.update(map(tuple, r["object_points"]))
+    return retime, [q for q in p5["collision_points"] if tuple(q) not in hit_obj]
 
 
 def run(
@@ -132,29 +189,13 @@ def run(
     isovalues = np.sort(np.unique([l.isovalue for l in layers]))
     z = timed("P2 accessibilite", zones.compute, tet_mesh, scalar_field, isovalues, machine, sim,
               zones.SkinZoneParams(head_tolerance_deg=params.head_tolerance_deg,
-                                   head_sample_spacing=params.head_sample_spacing),
+                                   head_sample_spacing=params.head_sample_spacing,
+                                   stair_min_deg=params.stair_min_deg, stair_max_deg=params.stair_max_deg),
               zones.ZoneSampling(face_sample=params.face_sample, surface=(mesh_data.vertices, mesh_data.faces),
                                  workers=params.workers))
     loop_sim = replace(sim, path_sampling_step=params.loop_sampling)
     full_sim = replace(sim, path_sampling_step=0.0)
-    trim: list = []
-    trace_cache: dict = {}
-    clean, it = False, 0
-    skin = traced = p5 = None
-    for it in range(1, params.max_iter + 1):
-        skin = timed("P2 partition", zones.partition, z, trim_points=trim, trim_radius=params.trim_radius)
-        traced = timed("P4 trajectoires", skin_paths.trace, skin,
-                       skin_paths.TraceOptions(pattern=params.pattern, thickness=params.thickness),
-                       cache=trace_cache)
-        p5 = timed("P5 controle (boucle)", print_order.order_and_check, body_uncarved, skin, traced, machine, loop_sim,
-                   offset,
-                   print_order.CheckOptions(tolerance=params.head_tolerance_deg, plate_r=plate_r))
-        new = p5["collision_points"]
-        say(f"tour {it} : {len(new)} point(s) de collision, {len(p5['excluded'])} zone(s) en contact")
-        if not new:
-            clean = True
-            break
-        trim.extend(new)
+    skin, traced, p5, clean, it = ctx.trim_loop(z, body_uncarved, machine, loop_sim, plate_r)
 
     excluded: set[int] = set()
     if clean:
