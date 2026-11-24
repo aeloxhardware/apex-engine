@@ -107,3 +107,18 @@ def test_narrow_ring_is_filled_with_concentric_rings():
     radii = sorted({round(float(np.hypot(*np.asarray(q)[0])), 1) for q in lines})
     assert radii[0] >= 2.4 + 0.15 and radii[-1] <= 4.0 - 0.15
     assert not _narrow_ring(box(0, 0, 20, 1.6), 0.4)
+
+
+def test_fill_pieces_shorter_than_the_minimum_are_dropped_walls_are_kept():
+    """Bouts de remplissage de quelques dixiemes de millimetre (bandes etroites des dessus en pente) : retires ; une
+    paroi courte reste (2026-11-24, pates sur le bastingage du Benchy)."""
+    from element_ardor.step6_solid import _drop_short_fill
+    layer = _stack([5.0])[0]
+    paths = [np.array([[0.0, 0.0], [0.3, 0.0]]), np.array([[0.0, 1.0], [2.0, 1.0]]), np.array([[0.0, 2.0], [0.3, 2.0]])]
+    kinds = [line_types.INFILL, line_types.INFILL, line_types.WALL_INNER]
+    from dataclasses import replace
+    layer = replace(layer, toolpath_2d=paths, toolpath_kinds=kinds)
+    out = _drop_short_fill(layer, 0.8)
+    assert out.toolpath_kinds == [line_types.INFILL, line_types.WALL_INNER]
+    assert np.allclose(out.toolpath_2d[0], paths[1])
+    assert _drop_short_fill(layer, 0.0) is layer

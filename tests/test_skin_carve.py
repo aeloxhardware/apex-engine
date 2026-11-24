@@ -143,3 +143,30 @@ def test_cut_line_follows_the_exact_distance_on_a_small_zone(box):
             errors.append(trimesh.proximity.closest_point(zmesh, cut)[1] - 0.2)
     errors = np.abs(np.concatenate(errors))
     assert len(errors) > 20 and np.percentile(errors, 95) < 0.02 and errors.max() < 0.08
+
+
+def test_carved_layer_keeps_its_projected_contour_away_from_the_removed_material():
+    """Couche recalculee depuis l'isosurface (a 0,15 mm du contour projete, comme TetraNet) : loin de la matiere
+    retiree, le contour d'origine (projete sur le STL) est garde au point pres ; pres d'elle, l'encoche est creusee
+    (2026-11-24, bandes rugueuses sur les parois du Benchy lisse)."""
+    from core.mesh_types import Layer
+    from element_ardor.skin.carve import _carve_projected
+    frame = (np.array([0.0, 0.0, 1.0]), np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
+
+    def loop(xy):
+        xy = np.asarray(xy, float)
+        return np.column_stack([np.vstack([xy, xy[:1]]), np.ones(len(xy) + 1)])
+
+    projected = loop([[0, 0], [10, 0], [10, 10], [0, 10]])
+    full = loop([[0.15, 0.15], [9.85, 0.15], [9.85, 9.85], [0.15, 9.85]])          # isosurface du maillage, en retrait
+    carved = loop([[0.15, 0.15], [9.85, 0.15], [9.85, 9.85], [6, 9.85], [6, 9.6], [4, 9.6], [4, 9.85], [0.15, 9.85]])
+    layer = Layer(id=0, contour_3d=[projected], region_ids=[0], local_frame=frame, isovalue=1.0)
+    out = _carve_projected(layer, [carved], [full], 0.6)
+    import shapely
+    from shapely.geometry import Polygon
+    poly = shapely.unary_union([Polygon(c[:, :2]) for c in out])
+    assert poly.covers(shapely.Point(0.01, 5.0)) and poly.covers(shapely.Point(5.0, 0.01))   # bord d'origine garde
+    assert not poly.covers(shapely.Point(5.0, 9.7))                                           # encoche creusee
+    assert np.allclose(np.concatenate(out)[:, 2], 1.0)
+    untouched = _carve_projected(layer, [full], [full], 0.6)                                 # rien de retire
+    assert len(untouched) == 1 and np.array_equal(untouched[0], projected)

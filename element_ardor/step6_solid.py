@@ -68,8 +68,27 @@ class _Piece:
 
 
 def apply(layers: list[Layer], params: Step6Params, isovalue_rank: dict) -> list[Layer]:
-    """Couches avec leurs zones pleines remplies a 100 %. Sans effet si `solid_top_layers` et `solid_bottom_layers`
-    sont nuls, ou sans isovaleurs."""
+    """Couches avec leurs zones pleines remplies a 100 % (sans effet si `solid_top_layers` et `solid_bottom_layers`
+    sont nuls, ou sans isovaleurs), puis sans cordon de remplissage plus court que `min_fill_length`."""
+    return [_drop_short_fill(layer, params.min_fill_length) for layer in _apply_solid(layers, params, isovalue_rank)]
+
+
+def _drop_short_fill(layer: Layer, min_length: float) -> Layer:
+    """Retire les cordons de remplissage (clairseme, plein, pont) plus courts que `min_length` mm (bouts de
+    quelques dixiemes de millimetre entre deux parois, anneaux concentriques minuscules) : un trancheur classique ne
+    les depose pas, la buse y laisse un pate. Les parois ne sont pas touchees."""
+    if min_length <= 0 or not layer.toolpath_2d or layer.toolpath_kinds is None:
+        return layer
+    fill = (line_types.INFILL, line_types.BRIDGE)
+    keep = [k not in fill or len(p) < 2 or float(np.hypot(*np.diff(np.asarray(p)[:, :2], axis=0).T).sum()) >= min_length
+            for p, k in zip(layer.toolpath_2d, layer.toolpath_kinds)]
+    if all(keep):
+        return layer
+    return replace(layer, toolpath_2d=[p for p, ok in zip(layer.toolpath_2d, keep) if ok],
+                   toolpath_kinds=[k for k, ok in zip(layer.toolpath_kinds, keep) if ok])
+
+
+def _apply_solid(layers: list[Layer], params: Step6Params, isovalue_rank: dict) -> list[Layer]:
     n_top, n_bottom = int(params.solid_top_layers), int(params.solid_bottom_layers)
     if (n_top <= 0 and n_bottom <= 0) or not layers:
         return layers

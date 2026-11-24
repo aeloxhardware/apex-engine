@@ -124,6 +124,10 @@ class Step6Params:
     # aucune (historique : remplissage clairseme a nu sur toute surface du dessus, Benchy).
     solid_top_layers: int = 0
     solid_bottom_layers: int = 0
+    # Longueur minimale d'un cordon de remplissage (clairseme, plein ou pont), en mm ; 0 = aucun filtre (2026-11-24).
+    # Un bout plus court ne se depose pas : la buse y laisse un pate (« perles » sur le bastingage du Benchy : 181
+    # bouts de moins de 0,5 mm et 30 anneaux minuscules dans les bandes etroites des dessus en pente).
+    min_fill_length: float = 0.0
 
     # --- OSCILLATING_SPIRAL (opt-in) --------------------------------------
     # Point de l'axe du plateau (x, y, z, repere machine) : centre de la

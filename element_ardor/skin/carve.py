@@ -38,6 +38,10 @@ class CarveParams:
     band: float = 8.0               # au-dela de cette distance a la peau retenue, psi n'est plus calcule (mm)
     refine_edge: float = 0.25       # arete visee des triangles autour de la ligne de coupe (mm)
     max_levels: int = 4             # subdivisions successives au plus (1,5 mm -> 0,1 mm)
+    # garder le contour d'origine (projete sur le STL) loin de la matiere retiree (2026-11-24) ; False = toute couche
+    # touchee est recalculee depuis l'isosurface du maillage (historique)
+    keep_projected: bool = True
+    keep_projected_reach: float = 0.6   # mm autour de la matiere retiree ou le contour creuse remplace l'origine
     weld_tolerance_factor: float = 1e-6
 
 
@@ -204,6 +208,68 @@ def clip_patch(vertices: np.ndarray, faces: np.ndarray, psi: np.ndarray):
     return np.concatenate(new_vertices), np.concatenate(out_faces).astype(np.int64), np.concatenate(out_source)
 
 
+def _refine(w_vertices, w_faces, w_source, psi, zone: ZoneDistance, params: CarveParams):
+    """Subdivision conforme du patch autour de la ligne psi = 0 jusqu'a `refine_edge`, psi exact aux nouveaux sommets."""
+    red = np.ones(len(w_faces), bool)
+    for _level in range(params.max_levels):
+        tri = w_vertices[w_faces]
+        edge = np.linalg.norm(tri - np.roll(tri, 1, axis=1), axis=2).max(axis=1)
+        pf = psi[w_faces]
+        # 1-Lipschitz : psi ne peut s'annuler dans le triangle que si min(psi) <= arete et max(psi) >= -arete
+        mark = red & (edge > params.refine_edge) & (pf.min(axis=1) <= edge) & (pf.max(axis=1) >= -edge)
+        if not mark.any():
+            break
+        n_before = len(w_vertices)
+        w_vertices, w_faces, new_parent, new_red = refine_patch(w_vertices, w_faces, mark)
+        w_source = w_source[new_parent]
+        psi = np.concatenate([psi, np.full(len(w_vertices) - n_before, params.band - params.thickness)])
+        fresh = np.arange(n_before, len(w_vertices))
+        psi[fresh] = zone.psi(w_vertices[fresh])
+        red = new_red & np.isin(new_parent, np.flatnonzero(mark)) | (new_red & red[new_parent] & ~mark[new_parent])
+    return w_vertices, w_faces, w_source, psi
+
+
+def _carve_projected(layer: Layer, carved: list, full: list, reach: float):
+    """Contours 3D de la couche creusee qui GARDENT les contours de la couche d'origine (projetes sur le STL par les
+    etapes 5c et 5d) partout sauf pres de la matiere retiree. Recalculer toute la couche depuis l'isosurface du
+    maillage tetraedrique la ramenait, sur tout son tour, a +-0,2 mm du STL : bandes rugueuses sur des parois sans
+    lissage (porte, ecubier, proue du Benchy, 2026-11-24).
+
+    Dans le repere de la couche d'origine : M = isosurface entiere - isosurface creusee (matiere retiree) ; resultat
+    = (origine - M elargie de `reach`) U (origine ∩ creusee ∩ M elargie). Rend [] si tout est retire, None si la
+    geometrie echoue (l'appelant garde alors la couche recalculee)."""
+    from element_ardor.step6_geometry import _lift_to_3d, _out_of_plane_offset, _project_to_local_2d
+    from element_ardor.step6_solid import _region, _valid
+    frame = layer.local_frame
+    try:
+        r0 = _region(layer.contour_3d, frame)
+        rc = _region(carved, frame)
+        removed = _valid(_region(full, frame).difference(rc)).buffer(-1e-3).buffer(1e-3)
+        if removed.is_empty:
+            return list(layer.contour_3d)
+        near = removed.buffer(reach)
+        result = _valid(r0.difference(near).union(r0.intersection(rc).intersection(near)).buffer(0))
+    except Exception:                          # GEOS : geometrie degeneree, on garde la couche recalculee
+        return None
+    if result.is_empty:
+        return []
+    src = [np.asarray(c, dtype=float).reshape(-1, 3) for c in list(layer.contour_3d) + list(carved)]
+    src = np.concatenate(src)
+    tree = cKDTree(_project_to_local_2d(src, frame))
+    off_src = _out_of_plane_offset(src, frame)
+    loops = []
+    for poly in getattr(result, "geoms", [result]):
+        if poly.geom_type != "Polygon":
+            continue
+        for ring in [poly.exterior, *poly.interiors]:
+            uv = np.asarray(ring.coords)[:, :2]
+            if len(uv) < 4:
+                continue
+            off = off_src[tree.query(uv)[1]]
+            loops.append(_lift_to_3d(np.column_stack([uv, off]), frame))
+    return loops
+
+
 def carve_layers(
     layers: list[Layer],
     tet_mesh: TetMesh,
@@ -254,29 +320,22 @@ def carve_layers(
         psi = np.full(len(w_vertices), params.band - params.thickness)
         used = np.unique(w_faces[near_face])
         psi[used] = zone.psi(w_vertices[used])
-        parent = np.arange(len(w_faces))
-        red = np.ones(len(w_faces), bool)
-        for _level in range(params.max_levels):
-            tri = w_vertices[w_faces]
-            edge = np.linalg.norm(tri - np.roll(tri, 1, axis=1), axis=2).max(axis=1)
-            pf = psi[w_faces]
-            # 1-Lipschitz : psi ne peut s'annuler dans le triangle que si min(psi) <= arete et max(psi) >= -arete
-            mark = red & (edge > params.refine_edge) & (pf.min(axis=1) <= edge) & (pf.max(axis=1) >= -edge)
-            if not mark.any():
-                break
-            n_before = len(w_vertices)
-            w_vertices, w_faces, new_parent, new_red = refine_patch(w_vertices, w_faces, mark)
-            w_source = w_source[new_parent]
-            psi = np.concatenate([psi, np.full(len(w_vertices) - n_before, params.band - params.thickness)])
-            fresh = np.arange(n_before, len(w_vertices))
-            psi[fresh] = zone.psi(w_vertices[fresh])
-            red = new_red & np.isin(new_parent, np.flatnonzero(mark)) | (new_red & red[new_parent] & ~mark[new_parent])
+        w_vertices, w_faces, w_source, psi = _refine(w_vertices, w_faces, w_source, psi, zone, params)
         c_vertices, c_faces, c_source = clip_patch(w_vertices, w_faces, psi)
         c_vertices, c_faces = s5._weld_vertices(c_vertices, c_faces, weld)
         contours = s5._extract_closed_contours(c_vertices, c_faces) if len(c_faces) else []
         if not contours:
             report.dropped_layers += 1
             continue
+        if params.keep_projected and layer.local_frame is not None and layer.contour_3d:
+            full = s5._extract_closed_contours(w_vertices, w_faces)
+            kept = _carve_projected(layer, contours, full, params.keep_projected_reach)
+            if kept is not None:
+                if kept:
+                    out.append(replace(layer, contour_3d=kept))
+                else:
+                    report.dropped_layers += 1
+                continue
         used_tets = np.unique(w_source[c_source])
         frame = s5._compute_local_frame(contours, scalar_field.gradient[used_tets], volumes[used_tets])
         out.append(replace(layer, contour_3d=contours, local_frame=frame))

@@ -6,6 +6,12 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 **Tests : 505/505 dans les positions `APEX_USE_CPP=0`, `=1` et `=1` + `APEX_USE_GPU=1`** (2026-10-13 soir, suite complète).
 
 
+## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
+- [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).
+- [x] Bouts de remplissage de moins de 0,8 mm retirés (`min_fill_length`) ; contrat 6.
+- [ ] Toit du Benchy : couture entre bandes, bords non lissés, pied de cheminée → couches conformes (ROADMAP),
+  condition de la bêta : qualité d'Aeolis (décision de l'utilisateur, 2026-11-24).
+
 ## 2026-11-18/19 — Element Ardor : trancheur classique hors des vrais surplombs, puis lissage non planaire (limites #88, #89)
 - 🟢 **Couches planes par défaut** (#88) : inclinaison gardée autour des seuls surplombs non imprimables à plat, rampe
   douce, direction lissée ; Benchy droit : 240 couches planes. Couches pleines (4 dessus, 3 dessous).

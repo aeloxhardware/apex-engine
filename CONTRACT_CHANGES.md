@@ -4,6 +4,14 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 6 (2026-11-24) : INCOMPATIBLE, le numero passe de 5 a 6
+- `toolpath2d.min_fill_length` = 0,8 mm par defaut dans le pipeline (`Step6Params`, 0 = aucun filtre) : les cordons de
+  remplissage (clairseme, plein, pont) plus courts sont retires (pates sur les dessus etroits en pente ; limite #90).
+- Lissage (facultatif, ne change rien par defaut) : `skin` creuse sans recalculer toute la couche
+  (`CarveParams.keep_projected`, interne, hors schema).
+- Ce que l'interface doit faire : `APEX_CONTRACT_VERSION = 6`, `pnpm schema:sync`. Ancien G-code :
+  `"toolpath2d": {"min_fill_length": 0}`.
+
 ## Contrat 5 (2026-11-19, publie avec alpha-0.2.3.1.8.0.3.221) : INCOMPATIBLE, le numero passe de 4 a 5 dans le commit qui publie ces defauts
 Element Ardor imprime comme un trancheur classique partout ou l'impression multi-axes n'est pas necessaire (limite #88) :
 - `field_solver.planar` (`PlanarParams`) ACTIF par defaut : couches planes loin des surplombs non imprimables a plat,

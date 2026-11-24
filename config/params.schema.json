@@ -1068,6 +1068,7 @@
       "degenerate_area_ratio": 1e-06,
       "infill_density": 0.2,
       "infill_pattern": "crossed_zigzag",
+      "min_fill_length": 0.8,
       "native_fill": true,
       "native_layer": true,
       "nozzle_width": 0.4,
@@ -1551,6 +1552,10 @@
      ],
      "type": "string"
     },
+    "min_fill_length": {
+     "default": 0.0,
+     "type": "number"
+    },
     "native_fill": {
      "default": true,
      "type": "boolean"
@@ -1875,5 +1880,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 5
+ "x-apex-contract": 6
 }

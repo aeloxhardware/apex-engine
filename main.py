@@ -236,6 +236,8 @@ class PipelineParams:
             # Couches pleines (`element_ardor/step6_solid.py`, 2026-11-18) : 4 sous chaque dessus, 3 sur chaque
             # dessous. Sans elles, le remplissage a 20 % etait a nu sur toute surface (pont, toit, fond du Benchy).
             solid_top_layers=4, solid_bottom_layers=3,
+            # Cordons de remplissage de moins de 2 buses retires (pates sur le bastingage du Benchy, 2026-11-24).
+            min_fill_length=0.8,
         )
     )
     scheduling: Step7Params = field(default_factory=Step7Params)
