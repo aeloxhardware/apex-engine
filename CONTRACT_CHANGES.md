@@ -4,6 +4,14 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 7 (2026-11-25, alpha-0.2.3.1.8.0.7.221) : INCOMPATIBLE, le numero passe de 6 a 7
+- Etape 5d (`planar_sections`) : une boucle plane prend la section du STL la plus proche, acceptee sous `match_tol`
+  (0,5 mm) comme avant, ou sous `loose_match_tol` (1,0 mm, nouveau) si la suivante est au moins `ambiguity_ratio`
+  (2,5, nouveau) fois plus loin. Benchy : dessus de la cheminee en anneaux au lieu d'un labyrinthe, 27 boucles de plus
+  recoupees exactement (limite #91).
+- Ce que l'interface doit faire : `APEX_CONTRACT_VERSION = 7`, `pnpm schema:sync`. Ancien G-code :
+  `"planar_sections": {"loose_match_tol": 0.5}` (a tres peu pres : la plus proche est prise au lieu de la premiere).
+
 ## Contrat 6 (2026-11-24) : INCOMPATIBLE, le numero passe de 5 a 6
 - `toolpath2d.min_fill_length` = 0,8 mm par defaut dans le pipeline (`Step6Params`, 0 = aucun filtre) : les cordons de
   remplissage (clairseme, plein, pont) plus courts sont retires (pates sur les dessus etroits en pente ; limite #90).

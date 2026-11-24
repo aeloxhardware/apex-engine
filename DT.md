@@ -6,6 +6,10 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 **Tests : 505/505 dans les positions `APEX_USE_CPP=0`, `=1` et `=1` + `APEX_USE_GPU=1`** (2026-10-13 soir, suite complète).
 
 
+## 2026-11-25 — Element Ardor vers la qualité d'Aeolis (nuit de travail autonome)
+- [x] Dessus de la cheminée en labyrinthe : étape 5d, section du STL acceptée jusqu'à 1 mm si sans rivale (limite #91) ; contrat 7.
+- [ ] Couches conformes (toit, pont) avec contours pris sur le STL (ligne de niveau de φ) : prototype en cours.
+
 ## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
 - [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).
 - [x] Bouts de remplissage de moins de 0,8 mm retirés (`min_fill_length`) ; contrat 6.

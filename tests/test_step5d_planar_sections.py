@@ -95,3 +95,30 @@ def test_only_the_loops_far_from_tilted_material_are_resliced(tmp_path):
         for u, v in zip(before.contour_3d, after.contour_3d):
             if np.asarray(u)[:, 0].mean() < 10.0:
                 assert u is v                                  # cote incline : isosurface gardee
+
+
+def _circle(r, cx=0.0, n=128, wobble=0.0):
+    t = np.linspace(0, 2 * np.pi, n)
+    rr = r + wobble * np.sign(np.sin(9 * t))                    # creneaux de +/- wobble
+    return np.column_stack([cx + rr * np.cos(t), rr * np.sin(t), np.full(n, 47.9)])
+
+
+def _match(loop, candidates):
+    p = s5d.PlanarSectionParams()
+    dense = [s5d._densify(c, p.sample_step) for c in candidates]
+    trees = [s5d.cKDTree(d[:, :2]) for d in dense]
+    return s5d._match(loop, candidates, dense, trees, p)
+
+
+def test_a_crenellated_loop_near_a_top_is_matched_to_its_unrivalled_section():
+    """Derniere couche sous un dessus (cheminee du Benchy) : l'isosurface crenele a +/- 0,6 mm ; la section voisine la
+    plus proche est a 2 mm. Avant, p99 > 0,5 mm suffisait a garder le contour crenele (« labyrinthe »)."""
+    ring, other = _circle(3.5), _circle(1.5)
+    assert _match(_circle(3.5, wobble=0.6), [other, ring]) is ring
+
+
+def test_an_ambiguous_loose_match_is_refused():
+    """Deux sections a peu pres aussi proches : aucune n'est sure, la boucle de l'isosurface est gardee."""
+    a, b = _circle(3.5), _circle(4.3)
+    assert _match(_circle(3.9, wobble=0.1), [a, b]) is None
+    assert _match(_circle(3.5, wobble=0.1), [a, b]) is a            # sous match_tol : la plus proche, sans condition

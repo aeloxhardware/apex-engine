@@ -33,6 +33,10 @@ class PlanarSectionParams:
     angle_tol_deg: float = 0.5      # gradient de phi vertical a cet angle pres, dans tous les tetraedres traverses
     flat_tol: float = 0.05          # etendue en z maximale du contour d'une couche plane (mm)
     match_tol: float = 0.5          # p99 des distances, dans les deux sens, entre une boucle et sa section (mm)
+    # Pres d'un dessus, l'isosurface crenele (mailles coupees de biais) : Benchy, derniere couche de la cheminee, p99
+    # 0,53 et 0,69 mm, boucle suivante a plus de 1,9 mm. Une correspondante sans rivale est acceptee jusqu'a ceci (mm).
+    loose_match_tol: float = 1.0
+    ambiguity_ratio: float = 2.5    # la deuxieme boucle la plus proche doit etre au moins ce multiple plus loin
     close_tol: float = 1e-3         # une section dont les extremites sont plus loin que ceci est ouverte (mm)
     sample_step: float = 0.05       # pas d'echantillonnage des boucles pour la comparaison (mm)
     # simplification (Douglas-Peucker) des boucles recoupees : le STL du Benchy (225 000 faces) donnait des contours
@@ -119,15 +123,24 @@ def _simplify(loop: np.ndarray, tol: float) -> np.ndarray:
 
 
 def _match(loop: np.ndarray, candidates: list[np.ndarray], dense: list[np.ndarray], trees: list, params):
-    """Boucle de la section qui correspond a `loop` dans les deux sens, ou None."""
+    """Boucle de la section qui correspond a `loop` dans les deux sens, ou None : la plus proche (p99 des distances,
+    pire des deux sens), acceptee sous `match_tol`, ou sous `loose_match_tol` si elle est sans rivale (la suivante au
+    moins `ambiguity_ratio` fois plus loin)."""
     own = _densify(np.asarray(loop, dtype=float), params.sample_step)
     own_tree = cKDTree(own[:, :2])
-    for cand, pts, tree in zip(candidates, dense, trees):
-        if np.percentile(tree.query(own[:, :2])[0], 99) > params.match_tol:
-            continue
-        if np.percentile(own_tree.query(pts[:, :2])[0], 99) > params.match_tol:
-            continue
-        return cand
+    scores = []
+    for pts, tree in zip(dense, trees):
+        score = np.percentile(tree.query(own[:, :2])[0], 99)
+        if score <= params.loose_match_tol:
+            score = max(score, np.percentile(own_tree.query(pts[:, :2])[0], 99))
+        scores.append(float(score))
+    if not scores:
+        return None
+    order = np.argsort(scores)
+    best = scores[order[0]]
+    second = scores[order[1]] if len(order) > 1 else np.inf
+    if best <= params.match_tol or (best <= params.loose_match_tol and second >= params.ambiguity_ratio * best):
+        return candidates[order[0]]
     return None
 
 

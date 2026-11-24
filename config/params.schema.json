@@ -947,9 +947,11 @@
       }
      ],
      "default": {
+      "ambiguity_ratio": 2.5,
       "angle_tol_deg": 0.5,
       "close_tol": 0.001,
       "flat_tol": 0.05,
+      "loose_match_tol": 1.0,
       "match_tol": 0.5,
       "neighbourhood": 2.0,
       "sample_step": 0.05,
@@ -1150,8 +1152,12 @@
   },
   "PlanarSectionParams": {
    "additionalProperties": false,
-   "description": "PlanarSectionParams(angle_tol_deg: 'float' = 0.5, flat_tol: 'float' = 0.05, match_tol: 'float' = 0.5, close_tol: 'float' = 0.001, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, neighbourhood: 'float' = 2.0)",
+   "description": "PlanarSectionParams(angle_tol_deg: 'float' = 0.5, flat_tol: 'float' = 0.05, match_tol: 'float' = 0.5, loose_match_tol: 'float' = 1.0, ambiguity_ratio: 'float' = 2.5, close_tol: 'float' = 0.001, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, neighbourhood: 'float' = 2.0)",
    "properties": {
+    "ambiguity_ratio": {
+     "default": 2.5,
+     "type": "number"
+    },
     "angle_tol_deg": {
      "default": 0.5,
      "type": "number"
@@ -1162,6 +1168,10 @@
     },
     "flat_tol": {
      "default": 0.05,
+     "type": "number"
+    },
+    "loose_match_tol": {
+     "default": 1.0,
      "type": "number"
     },
     "match_tol": {
@@ -1880,5 +1890,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 6
+ "x-apex-contract": 7
 }

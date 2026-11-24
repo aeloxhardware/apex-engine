@@ -250,6 +250,8 @@ struct PlanarSectionParams {
     double angle_tol_deg{0.5};
     double flat_tol{0.05};
     double match_tol{0.5};
+    double loose_match_tol{1.0};
+    double ambiguity_ratio{2.5};
     double close_tol{0.001};
     double sample_step{0.05};
     double simplify_tol{0.01};
@@ -298,7 +300,7 @@ struct PipelineParams {
     bool reachable_tilt_from_machine{true};
     std::optional<SkinParams> skin{std::nullopt};
     std::optional<SkinProjectionParams> skin_projection{SkinProjectionParams{.chord_tolerance = 0.02, .max_rounds = 3, .max_shift = 1.5, .crease_angle_deg = 8.0, .crease_tolerance = 0.0001, .batch = 200000, .in_layer = true}};
-    std::optional<PlanarSectionParams> planar_sections{PlanarSectionParams{.angle_tol_deg = 0.5, .flat_tol = 0.05, .match_tol = 0.5, .close_tol = 0.001, .sample_step = 0.05, .simplify_tol = 0.01, .neighbourhood = 2.0}};
+    std::optional<PlanarSectionParams> planar_sections{PlanarSectionParams{.angle_tol_deg = 0.5, .flat_tol = 0.05, .match_tol = 0.5, .loose_match_tol = 1.0, .ambiguity_ratio = 2.5, .close_tol = 0.001, .sample_step = 0.05, .simplify_tol = 0.01, .neighbourhood = 2.0}};
     RuntimeOptions runtime{RuntimeOptions{.native = false, .gpu = false, .grid_mode = "stamped", .tetgen_worker = true, .tetgen_log = std::nullopt, .speculative_tetgen = true, .step6_threads = std::nullopt}};
 };
 
