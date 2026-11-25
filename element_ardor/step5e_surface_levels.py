@@ -102,12 +102,16 @@ def surface_gradient(vertices: np.ndarray, faces: np.ndarray, phi: np.ndarray) -
     return np.linalg.norm(g, axis=1)
 
 
-def level_segments(vertices: np.ndarray, faces: np.ndarray, phi: np.ndarray, c: float):
-    """(segments (S,2,3), faces coupees (S,)) de la ligne de niveau phi = c, interpolee sur les aretes."""
-    pf = phi[faces] - c
+def level_segments(vertices: np.ndarray, faces: np.ndarray, phi: np.ndarray, c: float,
+                   candidates: np.ndarray | None = None):
+    """(segments (S,2,3), faces coupees (S,)) de la ligne de niveau phi = c, interpolee sur les aretes. `candidates` :
+    faces a examiner (`faces_by_level`) ; None = toutes."""
+    sub = np.arange(len(faces)) if candidates is None else np.asarray(candidates)
+    pf = phi[faces[sub]] - c
     above = pf >= 0.0                      # un sommet pile sur c compte au-dessus : 0 ou 2 aretes coupees par face
-    hit = np.flatnonzero(above.any(1) & ~above.all(1))
-    f, p, a = faces[hit], pf[hit], above[hit]
+    keep = np.flatnonzero(above.any(1) & ~above.all(1))
+    hit = sub[keep]
+    f, p, a = faces[hit], pf[keep], above[keep]
     pts = np.zeros((len(hit), 2, 3))
     count = np.zeros(len(hit), dtype=int)
     for i, j in ((0, 1), (1, 2), (2, 0)):
@@ -117,6 +121,20 @@ def level_segments(vertices: np.ndarray, faces: np.ndarray, phi: np.ndarray, c: 
         count[s] += 1
     ok = count == 2
     return pts[ok], hit[ok]
+
+
+def faces_by_level(faces: np.ndarray, phi: np.ndarray, levels: np.ndarray) -> list[np.ndarray]:
+    """Pour chaque niveau (trie), les faces que sa ligne peut couper (min phi < c <= max phi) : une passe sur les faces au
+    lieu d'une par couche (Benchy : 720 000 faces x 187 couches)."""
+    pf = phi[faces]
+    lo = np.searchsorted(levels, pf.min(1), side="right")
+    hi = np.searchsorted(levels, pf.max(1), side="right")
+    span = hi - lo
+    face = np.repeat(np.arange(len(faces)), span)
+    level = np.repeat(lo, span) + (np.arange(span.sum()) - np.repeat(np.cumsum(span) - span, span))
+    order = np.argsort(level, kind="stable")
+    bounds = np.searchsorted(level[order], np.arange(len(levels) + 1))
+    return [face[order[bounds[i]:bounds[i + 1]]] for i in range(len(levels))]
 
 
 def closed_loops(segments: np.ndarray, close_tol: float) -> list[np.ndarray]:
@@ -236,8 +254,12 @@ def run(layers: list[Layer], mesh_data, tet_mesh: TetMesh, scalar_field: ScalarF
     phi = phi_at(vertices, tet_mesh, scalar_field, params.neighbours)
     tangent_face = surface_gradient(vertices, faces, phi) < params.tangent_gradient
     out = list(layers)
+    levels = np.array([layers[k].isovalue for k in todo], dtype=float)
+    order = np.argsort(levels)
+    by_level = faces_by_level(faces, phi, levels[order])
+    near = {k: by_level[r] for r, k in zip(np.argsort(order), todo)}
     for k, js in todo.items():
-        segments, hit = level_segments(vertices, faces, phi, layers[k].isovalue)
+        segments, hit = level_segments(vertices, faces, phi, layers[k].isovalue, near[k])
         cand = _candidates(segments, hit, tangent_face, params)
         contours = list(layers[k].contour_3d)
         scores = {j: _scores(contours[j], cand, params) for j in js}

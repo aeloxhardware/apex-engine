@@ -108,3 +108,15 @@ def test_only_curved_loops_are_redensified():
     bent[:, 2] += 0.5 * np.cos(t)
     assert len(s5e._finish(flat, frame, params)) == 9                     # plane : pas de point ajoute
     assert len(s5e._finish(bent, frame, params)) > 100                    # courbe : redecoupee a 0,3 mm
+
+
+def test_faces_by_level_gives_the_same_lines_as_a_full_scan(cylinder):
+    md, tm, field = cylinder
+    v, f = np.asarray(md.vertices, dtype=float), np.asarray(md.faces)
+    phi = v[:, 2] + SLOPE * v[:, 0]
+    levels = np.array([1.0, 3.3, 3.3, 7.25, 9.0])
+    near = s5e.faces_by_level(f, phi, levels)
+    for c, cand in zip(levels, near):
+        full, hit_full = s5e.level_segments(v, f, phi, c)
+        fast, hit_fast = s5e.level_segments(v, f, phi, c, cand)
+        assert np.array_equal(np.sort(hit_full), np.sort(hit_fast))
