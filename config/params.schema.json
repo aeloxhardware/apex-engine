@@ -294,6 +294,45 @@
    ],
    "type": "object"
   },
+  "ConformParams": {
+   "additionalProperties": false,
+   "description": "ConformParams(depth: 'float' = 10.0, tilt_min_deg: 'float' = 2.0, tilt_max_deg: 'float' = 45.0, min_width: 'float' = 5.0, ratio: 'float' = 0.5, surface_reach: 'float' = 0.75, sample_spacing: 'float' = 0.4, ceiling_tilt_deg: 'float' = 135.0)",
+   "properties": {
+    "ceiling_tilt_deg": {
+     "default": 135.0,
+     "type": "number"
+    },
+    "depth": {
+     "default": 10.0,
+     "type": "number"
+    },
+    "min_width": {
+     "default": 5.0,
+     "type": "number"
+    },
+    "ratio": {
+     "default": 0.5,
+     "type": "number"
+    },
+    "sample_spacing": {
+     "default": 0.4,
+     "type": "number"
+    },
+    "surface_reach": {
+     "default": 0.75,
+     "type": "number"
+    },
+    "tilt_max_deg": {
+     "default": 45.0,
+     "type": "number"
+    },
+    "tilt_min_deg": {
+     "default": 2.0,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
   "FieldSolverParams": {
    "additionalProperties": false,
    "description": "FieldSolverParams(resolution: 'float' = 1.5, max_solver_iterations: 'int' = 2000, convergence_tolerance: 'float' = 1e-08, direct_solve_node_threshold: 'int' = 30000, use_ilu_preconditioner: 'bool' = False, platform_anchor_weight: 'float' = 1000000.0, up_vector: 'Optional[np.ndarray]' = None, heat_method_time_factor: 'float' = 100.0, radial_tilt_origin: 'Optional[np.ndarray]' = None, heat_project_reachable: 'bool' = True, planar: 'Optional[PlanarParams]' = None)",
@@ -780,6 +819,16 @@
       "planar": {
        "bridge_span": 25.0,
        "ceiling_deg": 80.0,
+       "conform": {
+        "ceiling_tilt_deg": 135.0,
+        "depth": 10.0,
+        "min_width": 5.0,
+        "ratio": 0.5,
+        "sample_spacing": 0.4,
+        "surface_reach": 0.75,
+        "tilt_max_deg": 45.0,
+        "tilt_min_deg": 2.0
+       },
        "core": 2.0,
        "flat_height": 0.6,
        "lip": 1.5,
@@ -955,7 +1004,22 @@
       "match_tol": 0.5,
       "neighbourhood": 2.0,
       "sample_step": 0.05,
-      "simplify_tol": 0.01
+      "simplify_tol": 0.01,
+      "surface_levels": {
+       "ambiguity_ratio": 2.5,
+       "close_tol": 0.001,
+       "far_match_tol": 3.0,
+       "far_ratio": 5.0,
+       "loose_match_tol": 1.0,
+       "match_tol": 0.5,
+       "max_segment": 0.3,
+       "neighbours": 8,
+       "rival_tangent_fraction": 0.3,
+       "sample_step": 0.05,
+       "simplify_tol": 0.01,
+       "subdivide": 1.0,
+       "tangent_gradient": 0.17
+      }
      }
     },
     "reachable_tilt_from_machine": {
@@ -1076,6 +1140,7 @@
       "nozzle_width": 0.4,
       "out_of_plane_interpolation_power": 2.0,
       "run_split_min_amplitude": 0.05,
+      "run_split_min_slope_deg": 20.0,
       "solid_bottom_layers": 3,
       "solid_top_layers": 4,
       "spiral_alternation_threshold": null,
@@ -1105,7 +1170,7 @@
   },
   "PlanarParams": {
    "additionalProperties": false,
-   "description": "PlanarParams(overhang_deg: 'float' = 60.0, ceiling_deg: 'float' = 80.0, lip: 'float' = 1.5, slope_reach: 'float' = 2.0, bridge_span: 'float' = 25.0, min_patch_area: 'float' = 4.0, core: 'float' = 2.0, ramp: 'float' = 8.0, flat_height: 'float' = 0.6, smooth_iterations: 'int' = 20)",
+   "description": "PlanarParams(overhang_deg: 'float' = 60.0, ceiling_deg: 'float' = 80.0, lip: 'float' = 1.5, slope_reach: 'float' = 2.0, bridge_span: 'float' = 25.0, min_patch_area: 'float' = 4.0, core: 'float' = 2.0, ramp: 'float' = 8.0, flat_height: 'float' = 0.6, smooth_iterations: 'int' = 20, conform: 'Optional[ConformParams]' = <factory>)",
    "properties": {
     "bridge_span": {
      "default": 25.0,
@@ -1114,6 +1179,26 @@
     "ceiling_deg": {
      "default": 80.0,
      "type": "number"
+    },
+    "conform": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/ConformParams"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": {
+      "ceiling_tilt_deg": 135.0,
+      "depth": 10.0,
+      "min_width": 5.0,
+      "ratio": 0.5,
+      "sample_spacing": 0.4,
+      "surface_reach": 0.75,
+      "tilt_max_deg": 45.0,
+      "tilt_min_deg": 2.0
+     }
     },
     "core": {
      "default": 2.0,
@@ -1152,7 +1237,7 @@
   },
   "PlanarSectionParams": {
    "additionalProperties": false,
-   "description": "PlanarSectionParams(angle_tol_deg: 'float' = 0.5, flat_tol: 'float' = 0.05, match_tol: 'float' = 0.5, loose_match_tol: 'float' = 1.0, ambiguity_ratio: 'float' = 2.5, close_tol: 'float' = 0.001, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, neighbourhood: 'float' = 2.0)",
+   "description": "PlanarSectionParams(angle_tol_deg: 'float' = 0.5, flat_tol: 'float' = 0.05, match_tol: 'float' = 0.5, loose_match_tol: 'float' = 1.0, ambiguity_ratio: 'float' = 2.5, close_tol: 'float' = 0.001, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, neighbourhood: 'float' = 2.0, surface_levels: 'Optional[SurfaceLevelParams]' = <factory>)",
    "properties": {
     "ambiguity_ratio": {
      "default": 2.5,
@@ -1189,6 +1274,31 @@
     "simplify_tol": {
      "default": 0.01,
      "type": "number"
+    },
+    "surface_levels": {
+     "anyOf": [
+      {
+       "$ref": "#/$defs/SurfaceLevelParams"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": {
+      "ambiguity_ratio": 2.5,
+      "close_tol": 0.001,
+      "far_match_tol": 3.0,
+      "far_ratio": 5.0,
+      "loose_match_tol": 1.0,
+      "match_tol": 0.5,
+      "max_segment": 0.3,
+      "neighbours": 8,
+      "rival_tangent_fraction": 0.3,
+      "sample_step": 0.05,
+      "simplify_tol": 0.01,
+      "subdivide": 1.0,
+      "tangent_gradient": 0.17
+     }
     }
    },
    "type": "object"
@@ -1593,6 +1703,10 @@
      "default": 1e-12,
      "type": "number"
     },
+    "run_split_min_slope_deg": {
+     "default": 0.0,
+     "type": "number"
+    },
     "solid_bottom_layers": {
      "default": 0,
      "type": "integer"
@@ -1811,6 +1925,65 @@
    },
    "type": "object"
   },
+  "SurfaceLevelParams": {
+   "additionalProperties": false,
+   "description": "SurfaceLevelParams(subdivide: 'float' = 1.0, match_tol: 'float' = 0.5, loose_match_tol: 'float' = 1.0, ambiguity_ratio: 'float' = 2.5, far_match_tol: 'float' = 3.0, far_ratio: 'float' = 5.0, tangent_gradient: 'float' = 0.17, rival_tangent_fraction: 'float' = 0.3, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, max_segment: 'float' = 0.3, close_tol: 'float' = 0.001, neighbours: 'int' = 8)",
+   "properties": {
+    "ambiguity_ratio": {
+     "default": 2.5,
+     "type": "number"
+    },
+    "close_tol": {
+     "default": 0.001,
+     "type": "number"
+    },
+    "far_match_tol": {
+     "default": 3.0,
+     "type": "number"
+    },
+    "far_ratio": {
+     "default": 5.0,
+     "type": "number"
+    },
+    "loose_match_tol": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "match_tol": {
+     "default": 0.5,
+     "type": "number"
+    },
+    "max_segment": {
+     "default": 0.3,
+     "type": "number"
+    },
+    "neighbours": {
+     "default": 8,
+     "type": "integer"
+    },
+    "rival_tangent_fraction": {
+     "default": 0.3,
+     "type": "number"
+    },
+    "sample_step": {
+     "default": 0.05,
+     "type": "number"
+    },
+    "simplify_tol": {
+     "default": 0.01,
+     "type": "number"
+    },
+    "subdivide": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "tangent_gradient": {
+     "default": 0.17,
+     "type": "number"
+    }
+   },
+   "type": "object"
+  },
   "ToolpathParams": {
    "additionalProperties": false,
    "description": "ToolpathParams(line_width: 'float' = 0.4, wall_count: 'int' = 2, infill_density: 'float' = 0.2, solid_bottom_mm: 'float' = 0.6, solid_top_mm: 'float' = 0.8, max_segment: 'float' = 0.5)",
@@ -1890,5 +2063,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 7
+ "x-apex-contract": 8
 }

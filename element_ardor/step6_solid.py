@@ -353,5 +353,6 @@ def _fill_solid(layer: Layer, solid, params: Step6Params, isovalue_rank: dict, f
     if params.split_rings_into_runs and dense:
         dense, dense_kinds = _split_rings_with_kinds(
             dense, dense_kinds, include_open_polylines=params.split_open_polylines,
-            share_vertices=params.continuous_rings, min_amplitude=params.run_split_min_amplitude)
+            share_vertices=params.continuous_rings, min_amplitude=params.run_split_min_amplitude,
+            min_slope_deg=params.run_split_min_slope_deg)
     return replace(layer, toolpath_2d=list(dense) + kept, toolpath_kinds=list(dense_kinds) + kept_kinds)

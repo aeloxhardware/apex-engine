@@ -342,15 +342,38 @@ def _split_rings_with_kinds(
     include_open_polylines: bool = False,
     share_vertices: bool = False,
     min_amplitude: float = 1e-12,
+    min_slope_deg: float = 0.0,
 ) -> tuple[list[np.ndarray], list[int]]:
-    """`_split_rings_in_toolpath` qui porte en plus le type de ligne : chaque troncon garde celui de son anneau."""
+    """`_split_rings_in_toolpath` qui porte en plus le type de ligne : chaque troncon garde celui de son anneau.
+    `min_slope_deg` > 0 : une polyligne dont la pente maximale (`_max_slope`) reste sous ce seuil n'est pas decoupee."""
     result: list[np.ndarray] = []
     result_kinds: list[int] = []
+    slope = np.tan(np.radians(min_slope_deg)) if min_slope_deg > 0 else 0.0
     for poly, kind in zip(toolpath, kinds):
-        if _is_closed_ring(poly) or include_open_polylines:
+        if (_is_closed_ring(poly) or include_open_polylines) and (slope <= 0 or _max_slope(poly) >= slope):
             pieces = _split_ring_into_runs(poly, share_vertices, min_amplitude)
         else:
             pieces = [poly]
         result.extend(pieces)
         result_kinds.extend([kind] * len(pieces))
     return result, result_kinds
+
+
+def _max_slope(poly: np.ndarray, window: float = 1.0) -> float:
+    """Pente maximale |d offset| / d(longueur dans le plan) d'une polyligne (u, v, offset), mesuree sur des fenetres
+    d'au moins `window` mm (une oscillation sur un seul segment n'est pas une pente). 0 pour une polyligne plus courte.
+
+    Sert a ne decouper en troncons montants que les anneaux vraiment inclines (2026-11-25, limite #92) : sur une couche
+    conforme a pente douce (Benchy : 90 % des anneaux sous 10,8 deg), le decoupage ne protege aucun appui (chaque
+    couche repose sur la precedente) et multipliait les trajets a vide (rétractions x 2,4)."""
+    poly = np.asarray(poly, dtype=float)
+    if len(poly) < 2:
+        return 0.0
+    arc = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(poly[:, :2], axis=0), axis=1))])
+    end = np.searchsorted(arc, arc + window)
+    ok = end < len(poly)
+    if not ok.any():
+        return float(np.ptp(poly[:, 2]) / max(arc[-1], window))
+    start = np.flatnonzero(ok)
+    rise = np.abs(poly[end[ok], 2] - poly[start, 2])
+    return float((rise / np.maximum(arc[end[ok]] - arc[start], 1e-12)).max())

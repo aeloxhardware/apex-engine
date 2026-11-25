@@ -29,7 +29,7 @@ Desactive (None) dans `FieldSolverParams.planar`.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -38,6 +38,7 @@ from scipy.sparse.csgraph import connected_components
 from scipy.spatial import cKDTree
 
 from core.mesh_types import MeshData, TetMesh
+from element_ardor.step4_conform import ConformParams
 
 
 @dataclass
@@ -52,6 +53,9 @@ class PlanarParams:
     ramp: float = 8.0                # mm : largeur de la transition chaleur -> plan
     flat_height: float = 0.6         # mm au-dessus du plateau : couches toujours planes (plus une rampe de meme hauteur)
     smooth_iterations: int = 20      # lissages de la direction (moyenne aux noeuds puis aux tetraedres) dans la zone inclinee
+    # couches conformes sous les grandes surfaces en pente (`element_ardor/step4_conform.py`, 2026-11-25, limite #92) ;
+    # None = aucune (couches planes jusqu'au dessus : toit du Benchy en escalier)
+    conform: Optional[ConformParams] = field(default_factory=ConformParams)
 
 
 @dataclass(frozen=True)
@@ -293,6 +297,9 @@ def blend(inputs: FieldInputs, values: np.ndarray, params: PlanarParams, solver_
     anchor[pn] = solver_params.platform_anchor_weight
     A = (L + sp.diags(anchor, format="csr")).tocsr()
     phi = _solve(A, rhs + anchor * target, solver_params, values)
+    if params.conform is not None:
+        from element_ardor import step4_conform
+        phi = step4_conform.offset(inputs, phi, params.conform, solver_params, up)
     return _keep_heat_where_unanchored(tm, pn, phi, values)
 
 

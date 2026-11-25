@@ -233,6 +233,9 @@ class PipelineParams:
         default_factory=lambda: Step6Params(
             out_of_plane_interpolation_power=2.0, split_rings_into_runs=True, continuous_rings=True,
             run_split_min_amplitude=0.05,
+            # Seuls les anneaux de plus de 20 deg sont decoupes en troncons montants (2026-11-25, limite #92) : death,
+            # rétractions 10 439 -> 7 134, longueur deposee sans appui 2 097 -> 2 110 mm.
+            run_split_min_slope_deg=20.0,
             # Couches pleines (`element_ardor/step6_solid.py`, 2026-11-18) : 4 sous chaque dessus, 3 sur chaque
             # dessous. Sans elles, le remplissage a 20 % etait a nu sur toute surface (pont, toit, fond du Benchy).
             solid_top_layers=4, solid_bottom_layers=3,

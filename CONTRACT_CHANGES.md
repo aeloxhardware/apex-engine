@@ -4,6 +4,20 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 8 (2026-11-25, alpha-0.2.3.1.9.0.0.221) : INCOMPATIBLE, le numero passe de 7 a 8
+Element Ardor, vers la qualite de surface d'Aeolis (limite #92) :
+- `field_solver.planar.conform` (`ConformParams`, nouveau, ACTIF) : couches conformes sous les grandes surfaces en pente
+  (2 a 45 deg, largeur 2A/P >= 5 mm) ; le toit et le pont du Benchy deviennent une surface continue.
+- `planar_sections.surface_levels` (`SurfaceLevelParams`, nouveau, ACTIF ; etape 5e) : contour des couches courbes pris
+  sur le STL (ligne de niveau du champ), redecoupe a 0,3 mm.
+- `toolpath2d.run_split_min_slope_deg` = 20 (nouveau ; 0 = historique) : seuls les anneaux de plus de 20 deg sont
+  decoupes en troncons montants (death : retractions -29 %).
+- Ce qui change pour un meme modele : longueur deposee sans appui egale ou plus faible sur les quatre modeles ; G-code du
+  Benchy plus long (~ +88 % de lignes) ; tranchage plus long (Benchy 30 -> ~57 s).
+- Ce que l'interface doit faire : `APEX_CONTRACT_VERSION = 8`, `pnpm schema:sync`. Ancien G-code :
+  `"field_solver": {"planar": {"conform": null}}, "planar_sections": {"surface_levels": null},
+  "toolpath2d": {"run_split_min_slope_deg": 0}`.
+
 ## Contrat 7 (2026-11-25, alpha-0.2.3.1.8.0.7.221) : INCOMPATIBLE, le numero passe de 6 a 7
 - Etape 5d (`planar_sections`) : une boucle plane prend la section du STL la plus proche, acceptee sous `match_tol`
   (0,5 mm) comme avant, ou sous `loose_match_tol` (1,0 mm, nouveau) si la suivante est au moins `ambiguity_ratio`

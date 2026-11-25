@@ -118,6 +118,11 @@ class Step6Params:
     # amplitude est du bruit du marching tetrahedra, bien en dessous de
     # l'epaisseur d'un cordon : elle ne cree aucun appui manquant.
     run_split_min_amplitude: float = 1e-12
+    # Pente minimale (deg, fenetres de 1 mm) d'un anneau pour le DECOUPER en troncons montants ; 0 = tous (historique).
+    # Une couche conforme a pente douce repose sur la precedente : le decoupage n'y protege rien et multiplie les
+    # trajets a vide (Benchy conforme : rétractions 2 563 -> 6 473 ; limite #92). Le noyau natif ne decoupe plus quand
+    # ce seuil est actif : le decoupage est fait ensuite en Python, dans les deux positions du commutateur.
+    run_split_min_slope_deg: float = 0.0
 
     # Couches PLEINES (2026-11-18, `element_ardor/step6_solid.py`) : nombre de couches remplies a 100 % sous
     # chaque dessus et au-dessus de chaque dessous (sur des couches courbes : voisines par rang d'isovaleur). 0 =

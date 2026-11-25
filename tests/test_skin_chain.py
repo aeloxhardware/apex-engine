@@ -33,6 +33,9 @@ def _ramp_stl(directory) -> str:
 def heat(tmp_path_factory):
     STL = _ramp_stl(tmp_path_factory.mktemp("skin"))
     p = M.PipelineParams()
+    # le lissage se teste sur un toit en ESCALIER : couches planes jusqu'au dessus (les couches conformes, limite #92,
+    # feraient du toit une couche entiere, sans rien a lisser)
+    p.field_solver = dataclasses.replace(p.field_solver, planar=dataclasses.replace(p.field_solver.planar, conform=None))
     md, tm, rep = s1.run(STL, resolution=p.resolution, near_platform_resolution=p.near_platform_resolution,
                          near_platform_margin=p.near_platform_margin, place_on_platform=True)
     om = s2.run(md, p.overhang)

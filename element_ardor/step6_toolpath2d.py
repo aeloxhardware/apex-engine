@@ -266,7 +266,7 @@ def _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank):
         "bridge_contour_ratio_threshold": params.bridge_contour_ratio_threshold,
         "bridge_anchor_extra_walls": params.bridge_anchor_extra_walls,
         "power": params.out_of_plane_interpolation_power, "continuous_rings": params.continuous_rings,
-        "split_rings_into_runs": params.split_rings_into_runs,
+        "split_rings_into_runs": params.split_rings_into_runs and params.run_split_min_slope_deg <= 0,
         "split_open_polylines": params.split_open_polylines,
         "run_split_min_amplitude": params.run_split_min_amplitude,
     }
@@ -288,8 +288,13 @@ def _fill_layers_native(layers, mesh_data, overhang_map, params, isovalue_rank):
             np.ascontiguousarray(sweep[lo:hi]), config, kdtree, is_bridge, span, int(threads), True))
         _progress.report(hi, n)
     # le noyau rend, par couche, (polylignes, types) : `with_kinds=True`
-    return [replace(layer, toolpath_2d=list(polys), toolpath_kinds=[int(k) for k in kinds])
-            for layer, (polys, kinds) in zip(layers, result)]
+    out = [replace(layer, toolpath_2d=list(polys), toolpath_kinds=[int(k) for k in kinds])
+           for layer, (polys, kinds) in zip(layers, result)]
+    if params.split_rings_into_runs and params.run_split_min_slope_deg > 0:      # decoupage seuille, en Python
+        out = [replace(layer, **dict(zip(("toolpath_2d", "toolpath_kinds"), _split_rings_with_kinds(
+            layer.toolpath_2d, layer.toolpath_kinds, params.split_open_polylines, params.continuous_rings,
+            params.run_split_min_amplitude, params.run_split_min_slope_deg)))) for layer in out]
+    return out
 
 
 def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, params: Step6Params,
@@ -333,7 +338,7 @@ def _fill_layer(layer: Layer, mesh_data: MeshData, overhang_map: OverhangMap, pa
         toolpath, kinds = _split_rings_with_kinds(
             toolpath, kinds, include_open_polylines=params.split_open_polylines,
             share_vertices=params.continuous_rings,
-            min_amplitude=params.run_split_min_amplitude,
+            min_amplitude=params.run_split_min_amplitude, min_slope_deg=params.run_split_min_slope_deg,
         )
 
     return replace(layer, toolpath_2d=toolpath, toolpath_kinds=kinds)

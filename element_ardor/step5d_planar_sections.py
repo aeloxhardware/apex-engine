@@ -17,13 +17,16 @@ Le repere local et l'isovaleur ne changent pas.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
+from typing import Optional
 
 import numpy as np
 import trimesh
 from scipy.spatial import cKDTree
 
 from core.mesh_types import Layer, ScalarField, TetMesh
+from element_ardor import step5e_surface_levels as s5e
+from element_ardor.step5e_surface_levels import SurfaceLevelParams
 
 _UP = np.array([0.0, 0.0, 1.0])
 
@@ -43,6 +46,9 @@ class PlanarSectionParams:
     # a un sommet tous les quelques microns (+28 % de points de trajectoire) ; ecart au STL borne par cette valeur (mm)
     simplify_tol: float = 0.01
     neighbourhood: float = 2.0      # rayon autour d'une boucle ou tous les tetraedres traverses doivent etre verticaux (mm)
+    # Etape 5e (2026-11-25, limite #92) : les AUTRES boucles (couches courbes, ou planes pres d'une matiere inclinee)
+    # prises sur le STL comme ligne de niveau de phi. None = contours de l'isosurface (et de l'etape 5c).
+    surface_levels: Optional[SurfaceLevelParams] = field(default_factory=SurfaceLevelParams)
 
 
 @dataclass
@@ -50,6 +56,8 @@ class PlanarSectionReport:
     planar_layers: int = 0          # couches ayant au moins une boucle plane
     replaced_loops: int = 0
     kept_loops: int = 0
+    surface_loops: int = 0          # etape 5e : boucles examinees, puis remplacees par leur ligne de niveau sur le STL
+    surface_replaced: int = 0
 
 
 def _densify(loop: np.ndarray, step: float) -> np.ndarray:
@@ -60,18 +68,18 @@ def _densify(loop: np.ndarray, step: float) -> np.ndarray:
     return np.vstack([loop[:-1][i] + seg[i] * t[:, None], loop[-1:]])
 
 
-def _planar_loops(layers: list[Layer], tet_mesh: TetMesh, field: ScalarField, params: PlanarSectionParams) -> dict:
+def _planar_loops(layers: list[Layer], tet_mesh: TetMesh, scalar: ScalarField, params: PlanarSectionParams) -> dict:
     """{(couche, boucle): hauteur} des boucles PLANES : etendue en z < `flat_tol` et gradient de phi vertical dans les
     tetraedres que la couche traverse a moins de `neighbourhood` de la boucle. Une couche peut etre plane d'un cote et
     inclinee de l'autre (Benchy incline : coque plane, cabine inclinee)."""
-    if field.gradient is None:
+    if scalar.gradient is None:
         return {}
     tets = tet_mesh.tet_vertices[tet_mesh.tetrahedra]
     centres = tets.mean(axis=1)
     radius = np.linalg.norm(tets - centres[:, None, :], axis=2).max(axis=1)     # un tetraedre touche a radius de son centre
-    phi = field.values[tet_mesh.tetrahedra]
+    phi = scalar.values[tet_mesh.tetrahedra]
     lo, hi = phi.min(axis=1), phi.max(axis=1)
-    g = field.gradient / np.maximum(np.linalg.norm(field.gradient, axis=1), 1e-12)[:, None]
+    g = scalar.gradient / np.maximum(np.linalg.norm(scalar.gradient, axis=1), 1e-12)[:, None]
     vertical = g @ _UP > np.cos(np.radians(params.angle_tol_deg))
     out = {}
     for k, layer in enumerate(layers):
@@ -147,10 +155,20 @@ def _match(loop: np.ndarray, candidates: list[np.ndarray], dense: list[np.ndarra
 def run(layers: list[Layer], mesh_data, tet_mesh: TetMesh, scalar_field: ScalarField,
         params: PlanarSectionParams = PlanarSectionParams()) -> tuple[list[Layer], PlanarSectionReport]:
     report = PlanarSectionReport()
+    layers, replaced = _run_planar(layers, mesh_data, tet_mesh, scalar_field, params, report)
+    if params.surface_levels is not None:
+        layers, surface = s5e.run(layers, mesh_data, tet_mesh, scalar_field, replaced, params.surface_levels)
+        report.surface_loops, report.surface_replaced = surface.loops, surface.replaced
+    return layers, report
+
+
+def _run_planar(layers, mesh_data, tet_mesh, scalar_field, params, report) -> tuple[list[Layer], set]:
+    """Etape 5d proprement dite : (couches, boucles (k, j) remplacees par leur section plane)."""
     planar = _planar_loops(layers, tet_mesh, scalar_field, params)
     report.planar_layers = len({k for k, _j in planar})
+    replaced = set()
     if not planar:
-        return layers, report
+        return layers, replaced
     mesh = trimesh.Trimesh(np.asarray(mesh_data.vertices), np.asarray(mesh_data.faces), process=False)
     key = {kj: round(z, 4) for kj, z in planar.items()}
     heights = sorted(set(key.values()))
@@ -173,5 +191,6 @@ def run(layers: list[Layer], mesh_data, tet_mesh: TetMesh, scalar_field: ScalarF
             else:
                 contours[j] = _simplify(found, params.simplify_tol)
                 report.replaced_loops += 1
+                replaced.add((k, j))
         out[k] = replace(layers[k], contour_3d=contours)
-    return out, report
+    return out, replaced

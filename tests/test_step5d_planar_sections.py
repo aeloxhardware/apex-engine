@@ -66,7 +66,7 @@ def test_a_loop_without_a_closed_section_is_kept(cylinder):
 def test_tilted_layers_are_left_alone(cylinder):
     md, tm, field, layers = cylinder
     tilted = dataclasses.replace(field, gradient=np.tile([0.3, 0.0, 1.0], (len(field.gradient), 1)))
-    out, report = s5d.run(layers, md, tm, tilted)
+    out, report = s5d.run(layers, md, tm, tilted, s5d.PlanarSectionParams(surface_levels=None))
     assert report.planar_layers == 0 and all(a is b for a, b in zip(layers, out))
 
 
@@ -89,7 +89,8 @@ def test_only_the_loops_far_from_tilted_material_are_resliced(tmp_path):
     centres = tm.tet_vertices[tm.tetrahedra].mean(axis=1)
     grad = field.gradient.copy()
     grad[centres[:, 0] < 10.0] = [0.3, 0.0, 1.0]
-    out, report = s5d.run(layers, md, tm, dataclasses.replace(field, gradient=grad))
+    out, report = s5d.run(layers, md, tm, dataclasses.replace(field, gradient=grad),
+                          s5d.PlanarSectionParams(surface_levels=None))      # etape 5d seule (sans 5e)
     assert report.replaced_loops > 0 and report.planar_layers > 0
     for before, after in zip(layers, out):
         for u, v in zip(before.contour_3d, after.contour_3d):

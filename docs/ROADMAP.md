@@ -2,7 +2,14 @@
 
 _Extrait de l'ancien CLAUDE.md (R-030 point 7)._
 
-## Piste ouverte : couches conformes dans Ardor (question de l'utilisateur, 2026-11-19)
+## Couches conformes dans Ardor : FAITES le 2026-11-25 (limite #92), actives par défaut
+
+Prototype (b) ci-dessous mis en production (`element_ardor/step4_conform.py`), avec les contours des couches courbes
+pris sur le STL (étape 5e) et le découpage en tronçons réservé aux anneaux inclinés. Restent : le dessus étroit du
+bastingage (peau locale sur parois planes, comme Aeolis, limite #87), une densification adaptative (taille du G-code),
+le temps de l'étape 5e en natif.
+
+### Historique de la piste (question de l'utilisateur, 2026-11-19)
 
 « Faire que les couches soient nativement parallèles aux surfaces plutôt que de lisser après coup. » Le lissage de la
 limite #89 est déjà une couche conforme, mais une seule (0,2 mm), creusée dans un corps resté plan. La version native :

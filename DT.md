@@ -8,7 +8,11 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 
 ## 2026-11-25 — Element Ardor vers la qualité d'Aeolis (nuit de travail autonome)
 - [x] Dessus de la cheminée en labyrinthe : étape 5d, section du STL acceptée jusqu'à 1 mm si sans rivale (limite #91) ; contrat 7.
-- [ ] Couches conformes (toit, pont) avec contours pris sur le STL (ligne de niveau de φ) : prototype en cours.
+- [x] Couches conformes (toit, pont), contours des couches courbes pris sur le STL (étape 5e), découpage en tronçons
+  réservé aux anneaux de plus de 20° : actifs par défaut (limite #92) ; contrat 8. Longueur sans appui égale ou plus
+  faible sur les quatre modèles (death −11 %), rétractions −29 % (death).
+- [ ] Dessus du bastingage : encore en escalier (Aeolis : peau locale sur parois planes, limite #87).
+- [ ] Densification adaptative de l'étape 5e (G-code du Benchy +88 % de lignes) ; étape 5e en natif (temps).
 
 ## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
 - [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).
