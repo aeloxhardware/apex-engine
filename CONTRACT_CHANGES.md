@@ -4,6 +4,14 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 9 (2026-11-25, alpha-0.2.3.1.9.0.1.221) : INCOMPATIBLE, le numero passe de 8 a 9
+- Etape 5e (`planar_sections.surface_levels`) : le redecoupage a 0,3 mm n'est plus fait que sur les boucles courbes dans
+  le repere de leur couche (`curved_tol`, nouveau, 0,05 mm) ; une isovaleur qui tombe pile sur des sommets du STL donne
+  une ligne fermee (avant : ligne trouee, boucle gardee de l'isosurface). Benchy : G-code 376 000 -> 358 000 lignes,
+  longueur deposee sans appui 30,2 -> 22,5 mm ; quatre modeles inchanges (limite #92).
+- Ce que l'interface doit faire : `APEX_CONTRACT_VERSION = 9`, `pnpm schema:sync`. Ancien G-code :
+  `"planar_sections": {"surface_levels": {"curved_tol": 0}}` (a la ligne de niveau trouee pres).
+
 ## Contrat 8 (2026-11-25, alpha-0.2.3.1.9.0.0.221) : INCOMPATIBLE, le numero passe de 7 a 8
 Element Ardor, vers la qualite de surface d'Aeolis (limite #92) :
 - `field_solver.planar.conform` (`ConformParams`, nouveau, ACTIF) : couches conformes sous les grandes surfaces en pente

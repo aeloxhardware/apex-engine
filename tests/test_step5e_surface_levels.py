@@ -85,3 +85,26 @@ def test_simplify_keeps_corners_and_drops_collinear_points():
     loop = np.vstack([a + t * (b - a), b + t[1:] * (c - b), c + t[1:] * (a - c)])
     out = s5e.simplify(loop, 0.01)
     assert len(out) == 4 and np.allclose(out[[0, -1]], [a, a])
+
+
+def test_a_level_through_vertices_still_closes():
+    """Isovaleur pile sur des sommets du STL (phi = z, sommets a z = 5 apres subdivision) : la ligne reste fermee.
+    Avant, une face dont un sommet valait exactement c n'etait pas coupee : ligne trouee, aucune boucle."""
+    box = trimesh.creation.box(extents=[8.0, 8.0, 10.0])
+    box.apply_translation([0.0, 0.0, 5.0])
+    v, f = trimesh.remesh.subdivide_to_size(np.asarray(box.vertices), np.asarray(box.faces), 1.0)
+    assert np.isclose(v[:, 2], 5.0).any()
+    seg, _hit = s5e.level_segments(v, f, v[:, 2].copy(), 5.0)
+    loops = s5e.closed_loops(seg, 1e-3)
+    assert len(loops) == 1 and np.allclose(loops[0][:, 2], 5.0)
+
+
+def test_only_curved_loops_are_redensified():
+    params = s5e.SurfaceLevelParams()
+    frame = (np.zeros(3), np.array([1.0, 0, 0]), np.array([0, 1.0, 0]))
+    t = np.linspace(0, 2 * np.pi, 9)
+    flat = np.column_stack([10 * np.cos(t), 10 * np.sin(t), np.full(9, 2.0)])
+    bent = flat.copy()
+    bent[:, 2] += 0.5 * np.cos(t)
+    assert len(s5e._finish(flat, frame, params)) == 9                     # plane : pas de point ajoute
+    assert len(s5e._finish(bent, frame, params)) > 100                    # courbe : redecoupee a 0,3 mm

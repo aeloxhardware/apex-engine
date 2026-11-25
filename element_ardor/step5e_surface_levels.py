@@ -49,6 +49,9 @@ class SurfaceLevelParams:
     # 2 076 mm, 0,5 mm 1 949 mm, 0,3 mm 1 862 mm ; G-code du Benchy +19 %, +47 %, +88 % de lignes. 0,3 : aucun des
     # quatre modeles en recul (l_shape 338 -> 337 mm, l-triple 672 -> 672 mm) ; 0,5 : l_shape +2,3 %, l-triple +2,9 %.
     max_segment: float = 0.3
+    # ... seulement si la boucle s'ecarte du plan de sa couche de plus de ceci (mm) : une boucle plane (meme inclinee) a un
+    # decalage hors plan constant, que les parois interieures interpolent exactement sans points de plus.
+    curved_tol: float = 0.05
     close_tol: float = 1e-3            # une ligne dont les extremites sont plus loin que ceci est ouverte (mm)
     neighbours: int = 8                # tetraedres essayes par sommet du STL
 
@@ -102,12 +105,13 @@ def surface_gradient(vertices: np.ndarray, faces: np.ndarray, phi: np.ndarray) -
 def level_segments(vertices: np.ndarray, faces: np.ndarray, phi: np.ndarray, c: float):
     """(segments (S,2,3), faces coupees (S,)) de la ligne de niveau phi = c, interpolee sur les aretes."""
     pf = phi[faces] - c
-    hit = np.flatnonzero((pf.min(1) < 0) & (pf.max(1) > 0))
-    f, p = faces[hit], pf[hit]
+    above = pf >= 0.0                      # un sommet pile sur c compte au-dessus : 0 ou 2 aretes coupees par face
+    hit = np.flatnonzero(above.any(1) & ~above.all(1))
+    f, p, a = faces[hit], pf[hit], above[hit]
     pts = np.zeros((len(hit), 2, 3))
     count = np.zeros(len(hit), dtype=int)
     for i, j in ((0, 1), (1, 2), (2, 0)):
-        s = np.flatnonzero((p[:, i] > 0) != (p[:, j] > 0))
+        s = np.flatnonzero(a[:, i] != a[:, j])
         t = p[s, i] / (p[s, i] - p[s, j])
         pts[s, count[s]] = vertices[f[s, i]] + (vertices[f[s, j]] - vertices[f[s, i]]) * t[:, None]
         count[s] += 1
@@ -156,6 +160,20 @@ def _densify(loop: np.ndarray, step: float) -> np.ndarray:
     i = np.repeat(np.arange(len(seg)), n)
     t = (np.arange(n.sum()) - np.repeat(np.cumsum(n) - n, n)) / np.repeat(n, n)
     return np.vstack([loop[:-1][i] + seg[i] * t[:, None], loop[-1:]])
+
+
+def _finish(loop: np.ndarray, frame, params: SurfaceLevelParams) -> np.ndarray:
+    """Boucle retenue : simplifiee, puis redecoupee a `max_segment` si elle est courbe dans le repere de sa couche."""
+    loop = simplify(loop, params.simplify_tol)
+    if params.max_segment <= 0:
+        return loop
+    if frame is not None and params.curved_tol > 0:
+        origin, u, v = (np.asarray(f, dtype=float) for f in frame)
+        n = np.cross(u, v)
+        offset = (loop - origin) @ (n / max(np.linalg.norm(n), 1e-12))
+        if np.ptp(offset) < params.curved_tol:
+            return loop
+    return _densify(loop, params.max_segment)
 
 
 @dataclass
@@ -228,8 +246,7 @@ def run(layers: list[Layer], mesh_data, tet_mesh: TetMesh, scalar_field: ScalarF
         for j in js:
             i = _accepted(scores[j], j, taken, cand, params)
             if i is not None:
-                loop = simplify(cand.loops[i], params.simplify_tol)
-                contours[j] = _densify(loop, params.max_segment) if params.max_segment > 0 else loop
+                contours[j] = _finish(cand.loops[i], layers[k].local_frame, params)
                 report.replaced += 1
         out[k] = replace(layers[k], contour_3d=contours)
     return out, report

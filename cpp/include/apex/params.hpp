@@ -271,6 +271,7 @@ struct SurfaceLevelParams {
     double sample_step{0.05};
     double simplify_tol{0.01};
     double max_segment{0.3};
+    double curved_tol{0.05};
     double close_tol{0.001};
     int neighbours{8};
 };
@@ -285,7 +286,7 @@ struct PlanarSectionParams {
     double sample_step{0.05};
     double simplify_tol{0.01};
     double neighbourhood{2.0};
-    std::optional<SurfaceLevelParams> surface_levels{SurfaceLevelParams{.subdivide = 1.0, .match_tol = 0.5, .loose_match_tol = 1.0, .ambiguity_ratio = 2.5, .far_match_tol = 3.0, .far_ratio = 5.0, .tangent_gradient = 0.17, .rival_tangent_fraction = 0.3, .sample_step = 0.05, .simplify_tol = 0.01, .max_segment = 0.3, .close_tol = 0.001, .neighbours = 8}};
+    std::optional<SurfaceLevelParams> surface_levels{SurfaceLevelParams{.subdivide = 1.0, .match_tol = 0.5, .loose_match_tol = 1.0, .ambiguity_ratio = 2.5, .far_match_tol = 3.0, .far_ratio = 5.0, .tangent_gradient = 0.17, .rival_tangent_fraction = 0.3, .sample_step = 0.05, .simplify_tol = 0.01, .max_segment = 0.3, .curved_tol = 0.05, .close_tol = 0.001, .neighbours = 8}};
 };
 
 struct RuntimeOptions {
@@ -330,7 +331,7 @@ struct PipelineParams {
     bool reachable_tilt_from_machine{true};
     std::optional<SkinParams> skin{std::nullopt};
     std::optional<SkinProjectionParams> skin_projection{SkinProjectionParams{.chord_tolerance = 0.02, .max_rounds = 3, .max_shift = 1.5, .crease_angle_deg = 8.0, .crease_tolerance = 0.0001, .batch = 200000, .in_layer = true}};
-    std::optional<PlanarSectionParams> planar_sections{PlanarSectionParams{.angle_tol_deg = 0.5, .flat_tol = 0.05, .match_tol = 0.5, .loose_match_tol = 1.0, .ambiguity_ratio = 2.5, .close_tol = 0.001, .sample_step = 0.05, .simplify_tol = 0.01, .neighbourhood = 2.0, .surface_levels = SurfaceLevelParams{.subdivide = 1.0, .match_tol = 0.5, .loose_match_tol = 1.0, .ambiguity_ratio = 2.5, .far_match_tol = 3.0, .far_ratio = 5.0, .tangent_gradient = 0.17, .rival_tangent_fraction = 0.3, .sample_step = 0.05, .simplify_tol = 0.01, .max_segment = 0.3, .close_tol = 0.001, .neighbours = 8}}};
+    std::optional<PlanarSectionParams> planar_sections{PlanarSectionParams{.angle_tol_deg = 0.5, .flat_tol = 0.05, .match_tol = 0.5, .loose_match_tol = 1.0, .ambiguity_ratio = 2.5, .close_tol = 0.001, .sample_step = 0.05, .simplify_tol = 0.01, .neighbourhood = 2.0, .surface_levels = SurfaceLevelParams{.subdivide = 1.0, .match_tol = 0.5, .loose_match_tol = 1.0, .ambiguity_ratio = 2.5, .far_match_tol = 3.0, .far_ratio = 5.0, .tangent_gradient = 0.17, .rival_tangent_fraction = 0.3, .sample_step = 0.05, .simplify_tol = 0.01, .max_segment = 0.3, .curved_tol = 0.05, .close_tol = 0.001, .neighbours = 8}}};
     RuntimeOptions runtime{RuntimeOptions{.native = false, .gpu = false, .grid_mode = "stamped", .tetgen_worker = true, .tetgen_log = std::nullopt, .speculative_tetgen = true, .step6_threads = std::nullopt}};
 };
 

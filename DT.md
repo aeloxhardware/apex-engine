@@ -12,7 +12,10 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
   réservé aux anneaux de plus de 20° : actifs par défaut (limite #92) ; contrat 8. Longueur sans appui égale ou plus
   faible sur les quatre modèles (death −11 %), rétractions −29 % (death).
 - [ ] Dessus du bastingage : encore en escalier (Aeolis : peau locale sur parois planes, limite #87).
-- [ ] Densification adaptative de l'étape 5e (G-code du Benchy +88 % de lignes) ; étape 5e en natif (temps).
+- [x] Densification adaptative de l'étape 5e (boucles courbes seules) et ligne de niveau robuste ; contrat 9.
+- [ ] Étape 5e en natif (temps) ; G-code du Benchy encore +79 % de lignes.
+- [ ] Porte-canne du Benchy (paroi plus fine que la maille) : complétion par le STL essayée et retirée (pont arrière
+  abîmé) ; à reprendre sur les seules couches planes (limite #92).
 
 ## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
 - [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).

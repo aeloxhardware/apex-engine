@@ -1008,6 +1008,7 @@
       "surface_levels": {
        "ambiguity_ratio": 2.5,
        "close_tol": 0.001,
+       "curved_tol": 0.05,
        "far_match_tol": 3.0,
        "far_ratio": 5.0,
        "loose_match_tol": 1.0,
@@ -1287,6 +1288,7 @@
      "default": {
       "ambiguity_ratio": 2.5,
       "close_tol": 0.001,
+      "curved_tol": 0.05,
       "far_match_tol": 3.0,
       "far_ratio": 5.0,
       "loose_match_tol": 1.0,
@@ -1927,7 +1929,7 @@
   },
   "SurfaceLevelParams": {
    "additionalProperties": false,
-   "description": "SurfaceLevelParams(subdivide: 'float' = 1.0, match_tol: 'float' = 0.5, loose_match_tol: 'float' = 1.0, ambiguity_ratio: 'float' = 2.5, far_match_tol: 'float' = 3.0, far_ratio: 'float' = 5.0, tangent_gradient: 'float' = 0.17, rival_tangent_fraction: 'float' = 0.3, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, max_segment: 'float' = 0.3, close_tol: 'float' = 0.001, neighbours: 'int' = 8)",
+   "description": "SurfaceLevelParams(subdivide: 'float' = 1.0, match_tol: 'float' = 0.5, loose_match_tol: 'float' = 1.0, ambiguity_ratio: 'float' = 2.5, far_match_tol: 'float' = 3.0, far_ratio: 'float' = 5.0, tangent_gradient: 'float' = 0.17, rival_tangent_fraction: 'float' = 0.3, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, max_segment: 'float' = 0.3, curved_tol: 'float' = 0.05, close_tol: 'float' = 0.001, neighbours: 'int' = 8)",
    "properties": {
     "ambiguity_ratio": {
      "default": 2.5,
@@ -1935,6 +1937,10 @@
     },
     "close_tol": {
      "default": 0.001,
+     "type": "number"
+    },
+    "curved_tol": {
+     "default": 0.05,
      "type": "number"
     },
     "far_match_tol": {
@@ -2063,5 +2069,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 8
+ "x-apex-contract": 9
 }
