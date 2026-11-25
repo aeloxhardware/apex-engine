@@ -850,7 +850,7 @@
      }
     },
     "height_clamp": {
-     "default": false,
+     "default": true,
      "type": "boolean"
     },
     "junction_refinement_angle_deg": {
@@ -2073,5 +2073,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 10
+ "x-apex-contract": 11
 }

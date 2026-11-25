@@ -561,3 +561,19 @@ def test_printed_part_margin_defaults_to_safety_margin_and_can_be_negative():
     assert printed_margin_of(base) == 1.0
     tolerant = CollisionSimParams(path_sampling_step=2.0, safety_margin=1.0, printed_part_margin=-0.15)
     assert printed_margin_of(tolerant) == -0.15 and tolerant.safety_margin == 1.0
+
+
+
+def test_the_plate_is_infinite_nothing_passes_below():
+    """Decision de l'utilisateur (2026-11-25) : plateau infini. Un point de la tete sous le plan du plateau est une
+    collision partout, au-dela du rayon du profil (150 mm) et bien au-dessous de son epaisseur (1 mm)."""
+    from core.mesh_types import MachineProfile
+    from element_ardor.step9_collision_sim import _check_platform_disc, platform_disc
+    machine = MachineProfile(rotation_axes=[], platform_origin=np.zeros(3), nozzle_diameter=0.4)
+    machine.platform_radius, machine.platform_thickness = 150.0, 1.0
+    disc = platform_disc(machine)
+    origin = np.zeros(3)
+    assert _check_platform_disc(np.array([[500.0, 0.0, -27.0]]), origin, 1.0, disc) == pytest.approx(1.0)
+    assert _check_platform_disc(np.array([[10.0, 0.0, -30.0]]), origin, 1.0, disc) == pytest.approx(1.0)
+    assert _check_platform_disc(np.array([[500.0, 0.0, 0.9]]), origin, 1.0, disc) == pytest.approx(0.1, abs=1e-6)
+    assert _check_platform_disc(np.array([[500.0, 0.0, 1.1]]), origin, 1.0, disc) is None

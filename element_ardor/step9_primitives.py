@@ -486,20 +486,29 @@ def _check_static_obstacle(
     return safety_margin - min_distance
 
 
-def platform_disc(machine_profile) -> Optional[tuple[float, float, float]]:
-    """(rayon, demi-epaisseur, decalage z du centre) du plateau decrit par le PROFIL MACHINE (donnees :
-    res/machines/<id>.json), ou None s'il ne le decrit pas : le test plateau est alors saute, jamais un disque
-    invente (R-030 point 4).
+# Plateau INFINI pour les collisions (decision de l'utilisateur, 2026-11-25 : « partons du principe qu'il est infini,
+# rien ne doit passer en dessous ») : un demi-espace sous sa surface. Le disque du profil (150 mm de rayon, 1 mm
+# d'epaisseur) laissait passer la tete au-dela de son bord ET au-dessous de son epaisseur : death, 1 413 points de la
+# tete jusqu'a 27 mm sous le plan du plateau, a 500 mm de l'axe, sans aucun evenement. Le rayon et l'epaisseur ci-dessous
+# ne sont pas des dimensions de machine : ce sont les valeurs qui font du test point-cylindre (Python et natif) un test
+# de demi-espace, a la precision du double pres (ecart < 1e-9 mm pour un point a moins d'un metre).
+PLATE_AS_HALF_SPACE_RADIUS = 1e9
+PLATE_AS_HALF_SPACE_HALF_DEPTH = 1e6
 
-    La SURFACE du plateau est a z = platform_origin.z (corrige le 2026-10-06, limite #70) : les pieces posent a
-    z = platform_z et l'export G-code compte le plateau en z = 0 ; le centre du disque est donc a
-    origine - demi-epaisseur."""
+
+def platform_disc(machine_profile) -> Optional[tuple[float, float, float]]:
+    """(rayon, demi-epaisseur, decalage z du centre) du plateau pour le test de collision, ou None si le PROFIL MACHINE
+    (res/machines/<id>.json) ne decrit pas de plateau : le test est alors saute, jamais un plateau invente (R-030
+    point 4).
+
+    La SURFACE du plateau est a z = platform_origin.z (limite #70). Depuis le 2026-11-25, le plateau est un demi-espace
+    sous cette surface (`PLATE_AS_HALF_SPACE_*`), quel que soit le rayon du profil, qui reste celui de l'affichage."""
     radius = getattr(machine_profile, "platform_radius", None)
     thickness = getattr(machine_profile, "platform_thickness", None)
     if radius is None or thickness is None:
         return None
-    half = float(thickness) / 2.0
-    return float(radius), half, -half
+    half = PLATE_AS_HALF_SPACE_HALF_DEPTH
+    return PLATE_AS_HALF_SPACE_RADIUS, half, -half
 
 
 def _check_platform_disc(

@@ -4,6 +4,13 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 11 (2026-11-25, alpha-0.2.3.1.9.1.5.221) : INCOMPATIBLE, le numero passe de 10 a 11
+- `height_clamp` = vrai par defaut (decision de l'utilisateur : plateau infini, rien ne passe dessous) : l'angle de la
+  tete est borne point par point pour la garder au-dessus du plan du plateau ; l'etape 9 traite le plateau comme un
+  demi-espace. death : tete au plus bas -27,5 -> 0,96 mm ; Benchy et turkish inchanges (limite #93).
+- Ce que l'interface doit faire : `APEX_CONTRACT_VERSION = 11`, `pnpm schema:sync`. Ancien G-code : `"height_clamp": false`
+  (le plateau en demi-espace reste).
+
 ## Contrat 10 (2026-11-25, alpha-0.2.3.1.9.1.2.221) : INCOMPATIBLE, le numero passe de 9 a 10
 - Element Ardor : sous les couches conformes, l'axe de la tete suit la direction du champ d'AVANT le decalage conforme
   (`ScalarField.direction`, interne) au lieu du gradient : la forme des couches suit la surface, la tete reste verticale

@@ -18,10 +18,13 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 - [x] Tête verticale sous les couches conformes (direction d'impression du champ d'avant le décalage) : Benchy, tête
   sous la marge 91 → 0, 0 ajustement, tranchage ~46 s ; contrat 10.
 - [ ] G-code du Benchy encore +75 % de lignes (redécoupage de l'étape 5e).
-- [ ] **death : l'export compte la tête jusqu'à 27 mm sous le plan du plateau (1 730 mouvements, AVANT cette nuit
-  déjà)** ; l'étape 9 n'y voit aucune collision. Les points sont à 496-542 mm de l'axe, tête inclinée de 103 à 137° :
-  hors du disque de 150 mm de l'étape 9, sous le plan infini de l'export. **Question à l'utilisateur** : qu'y a-t-il
-  sous le plan du plateau au-delà de son bord (chariot, bâti) ? La réponse dit lequel des deux contrôles corriger.
+- [x] Plateau infini (décision de l'utilisateur) : la tête ne passe plus sous le plan du plateau (limite #93) ;
+  death −27,5 → 0,96 mm ; contrat 11.
+- [ ] **Points « support de secours » de l'étape 10 non comptés comme non résolus** (death 2 988, turkish 157,
+  l-triple 125, l_shape 60 ; Benchy 0) : rapport trompeur, collisions avec la matière restantes (limite #93).
+- [ ] **En attente du feu vert de l'utilisateur** (capture du 2026-11-25) : zones encore inacceptables sur le Benchy
+  (pied de la cheminée, trou de la porte, poupe, porte-canne, bastingage) et trajectoires du toit droites au lieu
+  d'inclinées comme chez Aeolis.
 - [x] Lissage par défaut : mesuré et écarté (death +15 % sans appui, tranchage ×5) ; reste facultatif.
 - [ ] Porte-canne du Benchy (paroi plus fine que la maille) : complétion par le STL essayée et retirée (pont arrière
   abîmé) ; à reprendre sur les seules couches planes (limite #92).

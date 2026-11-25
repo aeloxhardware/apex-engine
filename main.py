@@ -259,9 +259,10 @@ class PipelineParams:
     )
     adjustment: Step10Params = field(default_factory=Step10Params)
     # Borne de l'angle de tete selon la hauteur au-dessus du plateau, AVANT
-    # step9 (CLAUDE.md limite #62, step10.clamp_head_height). Opt-in, non
-    # mesure sur les quatre modeles de res/test_models/.
-    height_clamp: bool = False
+    # step9 (CLAUDE.md limite #62, step10.clamp_head_height). ACTIVE (2026-11-25, limite #93, decision de
+    # l'utilisateur : plateau infini, rien ne passe dessous) : death, tete au plus bas -27,5 -> 0,96 mm, l_shape et
+    # l-triple au-dessus de 0,95 mm ; matiere sans appui et temps d'impression inchanges sur les quatre modeles.
+    height_clamp: bool = True
     # Reorientation par paliers des points en contact, machine a axe couple
     # (limite #62, step10.reorient_coupled_tiers), APRES step9 et avant
     # step10.run ; step9 est rejoue apres chaque tour. Opt-in (None).
