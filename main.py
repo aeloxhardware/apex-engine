@@ -483,7 +483,8 @@ def _toolpath2d_stage(params: PipelineParams, tet_mesh, scalar_field, layers, me
         # ici, l'etape 6 y est jouee sur les couches creusees ; les passes de lissage sont inserees apres l'etape 8
         skin_result = skin_chain.run(
             skin_chain.SkinInputs(tet_mesh, scalar_field, layers, mesh_data, overhang_map,
-                                  _effective_toolpath2d_params(params)),
+                                  _effective_toolpath2d_params(params),
+                                  params.field_solver.planar.conform if params.field_solver.planar else None),
             params.machine_profile, params.collision, params.skin)
         layers = skin_result.layers
         print(f"[main]   lissage non-planaire : {len([z for z in skin_result.paths if z not in skin_result.excluded_zones])}"

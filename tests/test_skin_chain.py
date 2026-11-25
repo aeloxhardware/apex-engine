@@ -150,3 +150,23 @@ def test_a_head_contact_moves_the_faces_to_an_earlier_band_instead_of_removing_t
     moved = near & (after["zone"] >= 0)
     assert moved.any()
     assert (after["zone_moment"][after["zone"][moved]] < at).all()
+
+
+def test_faces_near_conformal_surfaces_are_never_smoothed(heat):
+    """`ZoneSampling.clear_of` : aucune face retenue a moins du rayon des points donnes (grandes surfaces deja rendues
+    conformes, `step4_conform.wide_patch_points`) ; le toit incline de la rampe en est une."""
+    from element_ardor.step4_conform import ConformParams, wide_patch_points
+    p, md, tm, _om, field, layers = heat
+    pts = wide_patch_points(md, np.array([0.0, 0.0, 1.0]), ConformParams())
+    assert len(pts) > 0
+    iso = np.unique([l.isovalue for l in layers])
+    free = sz.compute(tm, field, iso, p.machine_profile, p.collision, sampling=sz.ZoneSampling())
+    clear = sz.compute(tm, field, iso, p.machine_profile, p.collision, sampling=sz.ZoneSampling(clear_of=(pts, 1.5)))
+    before = free.status == sz.STATUS_RETAINED
+    after = clear.status == sz.STATUS_RETAINED
+    assert before.any() and not (after & ~before).any()
+    from scipy.spatial import cKDTree
+    centers = clear.vertices[clear.faces].mean(axis=1)
+    d, _i = cKDTree(pts).query(centers)
+    assert not (after & (d < 1.5)).any()
+    assert after.sum() < before.sum()

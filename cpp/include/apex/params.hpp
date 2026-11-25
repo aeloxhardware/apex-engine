@@ -247,6 +247,7 @@ struct SkinParams {
     std::optional<double> stair_max_deg{80.0};
     bool proxy_loop{true};
     bool latest_band{false};
+    double conform_clearance{1.5};
 };
 
 struct SkinProjectionParams {

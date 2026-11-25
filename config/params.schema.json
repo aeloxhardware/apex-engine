@@ -1467,8 +1467,12 @@
   },
   "SkinParams": {
    "additionalProperties": false,
-   "description": "SkinParams(thickness: 'float' = 0.2, pattern: 'str' = 'rectilinear', head_tolerance_deg: 'float' = 45.0, trim_radius: 'float' = 2.0, max_iter: 'int' = 8, loop_sampling: 'float' = 2.0, exclusion_rounds: 'int' = 3, plate_radius: 'Optional[float]' = None, face_sample: 'Optional[int]' = None, head_sample_spacing: 'float' = 5.0, workers: 'Optional[int]' = None, stair_min_deg: 'Optional[float]' = 2.0, stair_max_deg: 'Optional[float]' = 80.0, proxy_loop: 'bool' = True, latest_band: 'bool' = False)",
+   "description": "SkinParams(thickness: 'float' = 0.2, pattern: 'str' = 'rectilinear', head_tolerance_deg: 'float' = 45.0, trim_radius: 'float' = 2.0, max_iter: 'int' = 8, loop_sampling: 'float' = 2.0, exclusion_rounds: 'int' = 3, plate_radius: 'Optional[float]' = None, face_sample: 'Optional[int]' = None, head_sample_spacing: 'float' = 5.0, workers: 'Optional[int]' = None, stair_min_deg: 'Optional[float]' = 2.0, stair_max_deg: 'Optional[float]' = 80.0, proxy_loop: 'bool' = True, latest_band: 'bool' = False, conf",
    "properties": {
+    "conform_clearance": {
+     "default": 1.5,
+     "type": "number"
+    },
     "exclusion_rounds": {
      "default": 3,
      "type": "integer"

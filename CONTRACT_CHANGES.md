@@ -4,6 +4,12 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajout compatible (2026-11-25, alpha-0.2.3.1.9.1.0.221) : le numero du contrat NE CHANGE PAS (reste 9)
+- `skin.conform_clearance` (nouveau, 1,5 mm) : le lissage non planaire (facultatif, `skin`) evite les faces proches
+  d'une grande surface deja conforme (`field_solver.planar.conform`). Sans effet si `skin` est `null` (defaut) : le G-code
+  par defaut ne change pas (limite #92).
+- Ce que l'interface peut faire : `pnpm schema:sync` (nouveau champ facultatif).
+
 ## Contrat 9 (2026-11-25, alpha-0.2.3.1.9.0.1.221) : INCOMPATIBLE, le numero passe de 8 a 9
 - Etape 5e (`planar_sections.surface_levels`) : le redecoupage a 0,3 mm n'est plus fait que sur les boucles courbes dans
   le repere de leur couche (`curved_tol`, nouveau, 0,05 mm) ; une isovaleur qui tombe pile sur des sommets du STL donne

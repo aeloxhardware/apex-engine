@@ -47,6 +47,9 @@ class SkinParams:
     proxy_loop: bool = True
     # bande de chaque face : la plus tardive encore accessible (True) ou la plus precoce (False, voie Bird)
     latest_band: bool = False
+    # Faces a moins de ceci (mm) d'une grande surface deja conforme (`SkinInputs.conform`) : jamais lissees. Le toit du
+    # Benchy en couches conformes recevait sinon un liseré de peau irregulier sur son bord arrondi (2026-11-25).
+    conform_clearance: float = 1.5
 
 
 @dataclass
@@ -81,6 +84,7 @@ class SkinInputs:
     mesh_data: object
     overhang_map: object
     toolpath2d_params: s6.Step6Params
+    conform: Optional[object] = None       # `ConformParams` des couches conformes du champ (None : aucune)
 
 
 class _SkinRun:
@@ -167,6 +171,14 @@ def _split_hits(p5: dict) -> tuple[list, list]:
     return retime, [q for q in p5["collision_points"] if tuple(q) not in hit_obj]
 
 
+def _conform_clearance(inputs: SkinInputs, params: SkinParams):
+    """(points des grandes surfaces conformes, rayon) que le lissage evite, ou None."""
+    if inputs.conform is None or params.conform_clearance <= 0:
+        return None
+    from element_ardor.step4_conform import wide_patch_points
+    return wide_patch_points(inputs.mesh_data, np.array([0.0, 0.0, 1.0]), inputs.conform), params.conform_clearance
+
+
 def run(
     inputs: SkinInputs,
     machine: MachineProfile,
@@ -192,7 +204,7 @@ def run(
                                    head_sample_spacing=params.head_sample_spacing,
                                    stair_min_deg=params.stair_min_deg, stair_max_deg=params.stair_max_deg),
               zones.ZoneSampling(face_sample=params.face_sample, surface=(mesh_data.vertices, mesh_data.faces),
-                                 workers=params.workers))
+                                 workers=params.workers, clear_of=_conform_clearance(inputs, params)))
     loop_sim = replace(sim, path_sampling_step=params.loop_sampling)
     full_sim = replace(sim, path_sampling_step=0.0)
     skin, traced, p5, clean, it = ctx.trim_loop(z, body_uncarved, machine, loop_sim, plate_r)

@@ -61,6 +61,9 @@ class ZoneSampling:
     seed: int = 0
     surface: object = None
     workers: Optional[int] = None    # sans effet depuis le 2026-11-19 (accessibilite sur grille, un processus)
+    # (points (N, 3), rayon) : faces jamais lissees a moins du rayon de ces points (grandes surfaces deja conformes,
+    # `element_ardor/step4_conform.py`, et leur bord). None : aucune.
+    clear_of: object = None
 
 
 @dataclass
@@ -248,6 +251,9 @@ def compute(
 
     candidates = np.flatnonzero(free)
     stairs = _stair_faces(tet_mesh, scalar_field, centers, normals, params)
+    if sampling.clear_of is not None and len(sampling.clear_of[0]):
+        dist, _i = cKDTree(sampling.clear_of[0]).query(centers, distance_upper_bound=sampling.clear_of[1], workers=-1)
+        stairs &= ~np.isfinite(dist)
     status[free & ~stairs] = STATUS_NO_STEPS
     candidates = candidates[stairs[candidates]]
     if face_sample is not None and face_sample < len(candidates):

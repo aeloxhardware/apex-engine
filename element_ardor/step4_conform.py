@@ -109,6 +109,16 @@ def _near_ceilings(md, nodes: np.ndarray, up: np.ndarray, params: ConformParams)
     return np.isfinite(dist)
 
 
+def wide_patch_points(mesh_data, up: np.ndarray, params: ConformParams) -> np.ndarray:
+    """Points (echantillonnes a `sample_spacing`) des surfaces que les couches conformes rendent paralleles."""
+    from element_ardor.step4_planar import _sample_faces
+    vertices, faces = np.asarray(mesh_data.vertices, dtype=float), np.asarray(mesh_data.faces)
+    idx, _label = _face_patches(vertices, faces, np.asarray(mesh_data.face_normals, dtype=float), None, up, params)
+    if not len(idx):
+        return np.zeros((0, 3))
+    return _sample_faces(vertices, faces[idx], params.sample_spacing)[0]
+
+
 def offset(inputs, phi: np.ndarray, params: ConformParams, solver_params, up: np.ndarray) -> np.ndarray:
     """phi + u (voir le module) ; phi inchange s'il n'y a aucune surface retenue."""
     from element_ardor import step4_field_solver as s4

@@ -11,7 +11,8 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 - [x] Couches conformes (toit, pont), contours des couches courbes pris sur le STL (étape 5e), découpage en tronçons
   réservé aux anneaux de plus de 20° : actifs par défaut (limite #92) ; contrat 8. Longueur sans appui égale ou plus
   faible sur les quatre modèles (death −11 %), rétractions −29 % (death).
-- [ ] Dessus du bastingage : encore en escalier (Aeolis : peau locale sur parois planes, limite #87).
+- [~] Dessus du bastingage : en escalier par défaut ; avec le lissage (facultatif), bande de peau sur tout le tour comme
+  Aeolis, le bord des surfaces conformes étant exclu (`skin.conform_clearance`). Reste : le lissage par défaut (temps).
 - [x] Densification adaptative de l'étape 5e (boucles courbes seules) et ligne de niveau robuste ; contrat 9.
 - [ ] Étape 5e en natif (temps) ; G-code du Benchy encore +79 % de lignes.
 - [ ] Porte-canne du Benchy (paroi plus fine que la maille) : complétion par le STL essayée et retirée (pont arrière
