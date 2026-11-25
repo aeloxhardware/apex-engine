@@ -237,6 +237,20 @@ def _sources(layer: Layer):
     return src2, off
 
 
+_FLAT_OFFSET_TOL = 0.05    # mm : ecart hors-plan des contours sous lequel une couche est plane (rien a redecouper)
+
+
+def _resample(line: np.ndarray, step: float) -> np.ndarray:
+    """Polyligne 2D dont aucun segment ne depasse `step` (sommets d'origine gardes) ; inchangee si `step` <= 0."""
+    if step <= 0 or len(line) < 2:
+        return line
+    seg = line[1:] - line[:-1]
+    n = np.maximum(1, np.ceil(np.hypot(seg[:, 0], seg[:, 1]) / step).astype(int))
+    t = np.concatenate([np.arange(k) / k for k in n])
+    start = np.repeat(np.arange(len(seg)), n)
+    return np.vstack([line[start] + t[:, None] * seg[start], line[-1:]])
+
+
 def _clip_outside(poly: np.ndarray, solid) -> list:
     """Morceaux d'une polyligne (K,3) hors de `solid` ; l'ecart hors-plan est interpole le long de la polyligne."""
     line = LineString(poly[:, :2])
@@ -343,9 +357,10 @@ def _fill_solid(layer: Layer, solid, params: Step6Params, isovalue_rank: dict, f
     src2, src_off = _sources(layer)
     power = params.out_of_plane_interpolation_power
     dense = []
+    step = params.solid_line_resample if src_off is not None and np.ptp(src_off) > _FLAT_OFFSET_TOL else 0.0
     for piece in _polygon_pieces(_valid(solid.buffer(0))):
         for line in _dense_lines(piece, params.nozzle_width, _piece_angle(piece, angle)):
-            line = np.asarray(line, dtype=float)
+            line = _resample(np.asarray(line, dtype=float), step)
             off = (_interpolate_out_of_plane(line, src2, src_off, power)
                    if power is not None and src2 is not None else None)
             dense.append(_to_toolpath_3col(line, off))

@@ -122,3 +122,33 @@ def test_fill_pieces_shorter_than_the_minimum_are_dropped_walls_are_kept():
     assert out.toolpath_kinds == [line_types.INFILL, line_types.WALL_INNER]
     assert np.allclose(out.toolpath_2d[0], paths[1])
     assert _drop_short_fill(layer, 0.0) is layer
+
+
+def _tilted_stack(count: int, slope: float) -> list:
+    """Couches carrees de 10 mm dont le contour monte de `slope` mm par mm selon x (repere local horizontal)."""
+    out = []
+    for k in range(count):
+        z = 0.2 * k
+        loop = _square(5.0, z)
+        loop[:, 2] += slope * loop[:, 0]
+        frame = (np.array([0.0, 0.0, z]), np.array([1.0, 0.0, 0.0]), np.array([0.0, 1.0, 0.0]))
+        out.append(Layer(id=k, contour_3d=[loop], region_ids=[0], local_frame=frame, isovalue=z))
+    return out
+
+
+def _solid_segments(layer: Layer) -> np.ndarray:
+    return np.concatenate([np.hypot(*np.diff(np.asarray(p)[:, :2], axis=0).T)
+                           for p, k in zip(layer.toolpath_2d, layer.toolpath_kinds) if k == line_types.INFILL and len(p) >= 2])
+
+
+@pytest.mark.parametrize("slope, resampled", [(0.1, True), (0.0, False)])
+def test_solid_lines_of_a_curved_layer_are_resampled(slope, resampled):
+    """Une ligne pleine n'a de sommets qu'a ses bouts : sur une couche courbe, elle suivait la corde (couture du toit
+    du Benchy). Redecoupee a `solid_line_resample`, son ecart hors-plan est interpole tous les millimetres ; une couche
+    plane garde ses lignes telles quelles."""
+    params = Step6Params(solid_top_layers=2, solid_bottom_layers=0, native_layer=False, native_fill=False,
+                         out_of_plane_interpolation_power=2.0, solid_line_resample=1.0)
+    with runtime.use(runtime.RuntimeOptions(native=False)):
+        top = s6.run(_tilted_stack(6, slope), _Mesh(), _Map(), params)[-1]
+    longest = _solid_segments(top).max()
+    assert (longest <= 1.0 + 1e-9) == resampled, longest

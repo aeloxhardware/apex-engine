@@ -87,3 +87,18 @@ def test_first_layers_stay_flat_and_weight_is_smooth():
     c = tm.tet_vertices[tm.tetrahedra].mean(axis=1)
     assert np.all(w[c[:, 2] < P.PlanarParams().flat_height] == 0.0)
     assert w.max() > 0.99 and 0.0 <= w.min()
+
+
+def test_a_detached_piece_is_placed_at_its_height():
+    """Eclat du maillage sans noeud du plateau (haut du porte-canne d'un Benchy TetraNet) : il prend la valeur du noeud
+    ancre le plus proche plus l'ecart de hauteur. Avant, il gardait le champ de la chaleur, 0 la ou elle n'arrive pas :
+    l'eclat tombait dans la premiere couche."""
+    from core.mesh_types import TetMesh
+    from element_ardor.step4_planar import _place_unanchored
+    base = np.array([[0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=float)
+    chip = base * 0.5 + [0.0, 0.0, 3.0]
+    tm = TetMesh(tet_vertices=np.vstack([base, chip]), tetrahedra=np.array([[0, 1, 2, 3], [4, 5, 6, 7]]))
+    phi = np.array([0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0])          # la chaleur n'atteint pas l'eclat
+    out = _place_unanchored(tm, np.array([0, 1, 2]), phi, np.array([0.0, 0.0, 1.0]))
+    assert np.allclose(out[:4], phi[:4])
+    assert np.allclose(out[4:], tm.tet_vertices[4:, 2])               # 1 + (z - 1) : la hauteur

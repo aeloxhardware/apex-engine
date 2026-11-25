@@ -75,8 +75,49 @@ def test_a_loop_far_from_any_level_line_is_kept(cylinder):
     md, tm, field = cylinder
     far = _true_level(5.0)
     far[:, :2] *= 0.4                                 # a 3 mm de la surface : aucune correspondante
-    out, report = s5e.run([_layer(far, 5.0)], md, tm, field, set())
+    out, report = s5e.run([_layer(far, 5.0)], md, tm, field, set(), s5e.SurfaceLevelParams(complete=False))
     assert report.replaced == 0 and out[0].contour_3d[0] is far
+
+
+def test_a_missing_loop_is_added_and_the_fragment_it_covers_dropped(cylinder):
+    """Completion : la couche n'a qu'un fragment (element plus fin que la maille) ; la boucle de la ligne de niveau,
+    plane et loin de toute boucle sure, est ajoutee, et le fragment qu'elle recouvre retire."""
+    md, tm, field = cylinder
+    fragment = _true_level(5.0)
+    fragment[:, :2] *= 0.4
+    wide = s5e.SurfaceLevelParams(added_max_width=10.0)            # cylindre de 5 mm de rayon : 2A/P = 5 mm
+    out, report = s5e.run([_layer(fragment, 5.0)], md, tm, field, set(), wide)
+    assert report.added == 1 and report.dropped == 1
+    (loop,) = out[0].contour_3d
+    assert np.abs(np.hypot(loop[:, 0], loop[:, 1]) - R).max() < 0.1
+    assert np.abs(loop[:, 2] + SLOPE * loop[:, 0] - 5.0).max() < 1e-6
+
+
+def test_only_narrow_loops_are_added(cylinder):
+    """Par defaut, la completion ne rend que les elements plus fins que la maille (2A/P <= 2 mm) : turkish, non
+    etanche, recevait sinon des pans entiers (filament +33 %)."""
+    md, tm, field = cylinder
+    fragment = _true_level(5.0)
+    fragment[:, :2] *= 0.4
+    layer = _layer(fragment, 5.0)
+    out, report = s5e.run([layer], md, tm, field, set())
+    assert report.added == 0 and out[0] is layer
+
+
+def test_a_loop_already_represented_is_not_added(cylinder):
+    md, tm, field = cylinder
+    layer = _layer(_true_level(5.0), 5.0)
+    out, report = s5e.run([layer], md, tm, field, {(0, 0)})
+    assert report.added == 0 and out[0] is layer
+
+
+def test_off_plane_distance():
+    t = np.linspace(0.0, 2 * np.pi, 50)
+    tilted = np.column_stack([np.cos(t), np.sin(t), 0.5 * np.cos(t)])
+    assert s5e._off_plane(tilted) < 1e-9                                 # inclinee mais plane : ajoutable
+    wavy = tilted.copy()
+    wavy[:, 2] += 0.2 * np.sin(3 * t)
+    assert s5e._off_plane(wavy) > 0.1
 
 
 def test_simplify_keeps_corners_and_drops_collinear_points():

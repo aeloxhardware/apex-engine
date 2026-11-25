@@ -62,3 +62,4 @@ Les numéros sont ceux cités partout dans le code (`limite #NN`). Mesures chiff
 | [91](091.md) | Étape 5d : section du STL acceptée jusqu'à 1 mm quand elle est sans rivale (dessus de la cheminée du Benchy en labyrinthe, 2026-11-25) |
 | [92](092.md) | Couches conformes sous les grandes surfaces en pente, contours des couches courbes pris sur le STL (étape 5e), découpage en tronçons réservé aux anneaux de plus de 20° (Benchy, 2026-11-25) |
 | [93](093.md) | Plateau infini : la tête ne passe jamais sous le plan du plateau (borne de hauteur active, plateau en demi-espace à l'étape 9) ; points « support de secours » non comptés (2026-11-25) |
+| [94](094.md) | Benchy : remplissage à 45°, couture du toit (lignes pleines redécoupées), éclat de maillage détaché du porte-canne, complétion de l'étape 5e (2026-11-25) |

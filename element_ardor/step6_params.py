@@ -133,6 +133,11 @@ class Step6Params:
     # Un bout plus court ne se depose pas : la buse y laisse un pate (« perles » sur le bastingage du Benchy : 181
     # bouts de moins de 0,5 mm et 30 anneaux minuscules dans les bandes etroites des dessus en pente).
     min_fill_length: float = 0.0
+    # Pas (mm) auquel les lignes PLEINES d'une couche courbe sont redecoupees avant l'interpolation de leur ecart
+    # hors-plan ; 0 = aucun (2026-11-25). Une ligne jointive n'a de sommets qu'a ses bouts : sur une couche courbe, elle
+    # suivait la corde. Derriere la cheminee du Benchy, les lignes arretees sur son contour et celles qui la longeaient
+    # donnaient des secteurs alternes d'une couche a l'autre (epaisseur entre couches 0,01 a 0,3 mm : couture du toit).
+    solid_line_resample: float = 0.0
 
     # --- OSCILLATING_SPIRAL (opt-in) --------------------------------------
     # Point de l'axe du plateau (x, y, z, repere machine) : centre de la

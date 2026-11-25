@@ -1006,20 +1006,29 @@
       "sample_step": 0.05,
       "simplify_tol": 0.01,
       "surface_levels": {
+       "added_flatness": 0.05,
+       "added_max_width": 2.0,
+       "added_min_width": 0.4,
+       "added_tangent_fraction": 0.02,
        "ambiguity_ratio": 2.5,
        "close_tol": 0.001,
+       "complete": true,
+       "cover_tol": 0.4,
        "curved_tol": 0.05,
        "far_match_tol": 3.0,
        "far_ratio": 5.0,
+       "fragment_fraction": 0.5,
        "loose_match_tol": 1.0,
        "match_tol": 0.5,
        "max_segment": 0.3,
+       "min_added_length": 2.0,
        "neighbours": 8,
        "rival_tangent_fraction": 0.3,
        "sample_step": 0.05,
        "simplify_tol": 0.01,
        "subdivide": 1.0,
-       "tangent_gradient": 0.17
+       "tangent_gradient": 0.17,
+       "uncovered_fraction": 0.95
       }
      }
     },
@@ -1143,6 +1152,7 @@
       "run_split_min_amplitude": 0.05,
       "run_split_min_slope_deg": 20.0,
       "solid_bottom_layers": 3,
+      "solid_line_resample": 1.0,
       "solid_top_layers": 4,
       "spiral_alternation_threshold": null,
       "spiral_axis_origin": null,
@@ -1286,20 +1296,29 @@
       }
      ],
      "default": {
+      "added_flatness": 0.05,
+      "added_max_width": 2.0,
+      "added_min_width": 0.4,
+      "added_tangent_fraction": 0.02,
       "ambiguity_ratio": 2.5,
       "close_tol": 0.001,
+      "complete": true,
+      "cover_tol": 0.4,
       "curved_tol": 0.05,
       "far_match_tol": 3.0,
       "far_ratio": 5.0,
+      "fragment_fraction": 0.5,
       "loose_match_tol": 1.0,
       "match_tol": 0.5,
       "max_segment": 0.3,
+      "min_added_length": 2.0,
       "neighbours": 8,
       "rival_tangent_fraction": 0.3,
       "sample_step": 0.05,
       "simplify_tol": 0.01,
       "subdivide": 1.0,
-      "tangent_gradient": 0.17
+      "tangent_gradient": 0.17,
+      "uncovered_fraction": 0.95
      }
     }
    },
@@ -1717,6 +1736,10 @@
      "default": 0,
      "type": "integer"
     },
+    "solid_line_resample": {
+     "default": 0.0,
+     "type": "number"
+    },
     "solid_top_layers": {
      "default": 0,
      "type": "integer"
@@ -1933,14 +1956,38 @@
   },
   "SurfaceLevelParams": {
    "additionalProperties": false,
-   "description": "SurfaceLevelParams(subdivide: 'float' = 1.0, match_tol: 'float' = 0.5, loose_match_tol: 'float' = 1.0, ambiguity_ratio: 'float' = 2.5, far_match_tol: 'float' = 3.0, far_ratio: 'float' = 5.0, tangent_gradient: 'float' = 0.17, rival_tangent_fraction: 'float' = 0.3, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, max_segment: 'float' = 0.3, curved_tol: 'float' = 0.05, close_tol: 'float' = 0.001, neighbours: 'int' = 8)",
+   "description": "SurfaceLevelParams(subdivide: 'float' = 1.0, match_tol: 'float' = 0.5, loose_match_tol: 'float' = 1.0, ambiguity_ratio: 'float' = 2.5, far_match_tol: 'float' = 3.0, far_ratio: 'float' = 5.0, tangent_gradient: 'float' = 0.17, rival_tangent_fraction: 'float' = 0.3, sample_step: 'float' = 0.05, simplify_tol: 'float' = 0.01, max_segment: 'float' = 0.3, curved_tol: 'float' = 0.05, close_tol: 'float' = 0.001, neighbours: 'int' = 8, complete: 'bool' = True, cover_tol: 'float' = 0.4, uncovered_fraction:",
    "properties": {
+    "added_flatness": {
+     "default": 0.05,
+     "type": "number"
+    },
+    "added_max_width": {
+     "default": 2.0,
+     "type": "number"
+    },
+    "added_min_width": {
+     "default": 0.4,
+     "type": "number"
+    },
+    "added_tangent_fraction": {
+     "default": 0.02,
+     "type": "number"
+    },
     "ambiguity_ratio": {
      "default": 2.5,
      "type": "number"
     },
     "close_tol": {
      "default": 0.001,
+     "type": "number"
+    },
+    "complete": {
+     "default": true,
+     "type": "boolean"
+    },
+    "cover_tol": {
+     "default": 0.4,
      "type": "number"
     },
     "curved_tol": {
@@ -1955,6 +2002,10 @@
      "default": 5.0,
      "type": "number"
     },
+    "fragment_fraction": {
+     "default": 0.5,
+     "type": "number"
+    },
     "loose_match_tol": {
      "default": 1.0,
      "type": "number"
@@ -1965,6 +2016,10 @@
     },
     "max_segment": {
      "default": 0.3,
+     "type": "number"
+    },
+    "min_added_length": {
+     "default": 2.0,
      "type": "number"
     },
     "neighbours": {
@@ -1989,6 +2044,10 @@
     },
     "tangent_gradient": {
      "default": 0.17,
+     "type": "number"
+    },
+    "uncovered_fraction": {
+     "default": 0.95,
      "type": "number"
     }
    },
@@ -2073,5 +2132,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 11
+ "x-apex-contract": 12
 }

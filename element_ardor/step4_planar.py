@@ -300,10 +300,10 @@ def blend(inputs: FieldInputs, values: np.ndarray, params: PlanarParams, solver_
     A = (L + sp.diags(anchor, format="csr")).tocsr()
     phi = _solve(A, rhs + anchor * target, solver_params, values)
     if params.conform is None:
-        return _keep_heat_where_unanchored(tm, pn, phi, values), None
+        return _place_unanchored(tm, pn, phi, up), None
     from element_ardor import step4_conform
     shaped = step4_conform.offset(inputs, phi, params.conform, solver_params, up)
-    return _keep_heat_where_unanchored(tm, pn, shaped, values), _keep_heat_where_unanchored(tm, pn, phi, values)
+    return _place_unanchored(tm, pn, shaped, up), _place_unanchored(tm, pn, phi, up)
 
 
 def _smooth_directions(tm: TetMesh, flow: np.ndarray, w: np.ndarray, volumes: np.ndarray, iterations: int):
@@ -343,9 +343,12 @@ def _solve(A: sp.csr_matrix, b: np.ndarray, solver_params, guess: np.ndarray) ->
     return s4._solve_linear_system(A, b, solver_params, initial_guess=guess)
 
 
-def _keep_heat_where_unanchored(tm: TetMesh, platform_nodes: np.ndarray, phi: np.ndarray, heat: np.ndarray):
-    """Un morceau du maillage sans noeud du plateau (eclat detache : 15 noeuds a z = 11,5 sur un Benchy TetraNet) n'a
-    pas d'ancrage, sa valeur est arbitraire et le placait dans la premiere couche : il garde le champ de la chaleur."""
+def _place_unanchored(tm: TetMesh, platform_nodes: np.ndarray, phi: np.ndarray, up: np.ndarray) -> np.ndarray:
+    """Un morceau du maillage sans noeud du plateau (eclat detache : 15 noeuds a z = 11,5 en haut du porte-canne d'un
+    Benchy TetraNet, element plus fin que la maille) n'a pas d'ancrage : sa valeur resolue est arbitraire. Il prend celle
+    du noeud ancre le plus proche plus l'ecart de hauteur (couches planes a travers l'eclat). Avant le 2026-11-25, il
+    gardait le champ de la chaleur, qui vaut 0 la ou elle n'arrive pas : l'eclat tombait dans la premiere couche et ses
+    lignes de niveau sur le STL (etape 5e) faisaient du porte-canne un emmelement de boucles."""
     rows = np.repeat(np.arange(len(tm.tetrahedra)), 4)
     inc = sp.csr_matrix((np.ones(len(rows)), (rows, tm.tetrahedra.ravel())), shape=(len(tm.tetrahedra), tm.node_count))
     count, label = connected_components(inc.T @ inc, directed=False)
@@ -353,7 +356,12 @@ def _keep_heat_where_unanchored(tm: TetMesh, platform_nodes: np.ndarray, phi: np
         return phi
     anchored = np.zeros(count, dtype=bool)
     anchored[np.unique(label[platform_nodes])] = True
-    loose = ~anchored[label]
+    fixed = anchored[label]
+    loose = np.flatnonzero(~fixed)
+    if not len(loose) or not fixed.any():
+        return phi
+    keep = np.flatnonzero(fixed)
+    _d, near = cKDTree(tm.tet_vertices[keep]).query(tm.tet_vertices[loose], workers=-1)
     out = phi.copy()
-    out[loose] = heat[loose]
+    out[loose] = phi[keep[near]] + (tm.tet_vertices[loose] - tm.tet_vertices[keep[near]]) @ up
     return out

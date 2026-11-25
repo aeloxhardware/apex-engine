@@ -22,12 +22,19 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
   death −27,5 → 0,96 mm ; contrat 11.
 - [ ] **Points « support de secours » de l'étape 10 non comptés comme non résolus** (death 2 988, turkish 157,
   l-triple 125, l_shape 60 ; Benchy 0) : rapport trompeur, collisions avec la matière restantes (limite #93).
-- [ ] **En attente du feu vert de l'utilisateur** (capture du 2026-11-25) : zones encore inacceptables sur le Benchy
-  (pied de la cheminée, trou de la porte, poupe, porte-canne, bastingage) et trajectoires du toit droites au lieu
-  d'inclinées comme chez Aeolis.
+- [x] **Feu vert de l'utilisateur** (capture du 2026-11-25, limite #94 ; contrat 12) : remplissage à 45° comme Aeolis ;
+  couture du toit supprimée (lignes pleines redécoupées) ; porte-canne en tube propre (éclat de maillage détaché placé
+  à sa hauteur, complétion de l'étape 5e) ; pied de la cheminée déjà net au contrat 11. death sans appui −23 % ;
+  turkish : pièces fines retrouvées (+3,6 % de filament).
+- [ ] Dessus du bastingage en marches : le lissage limité à 45° le couvre comme Aeolis, mais death +11 % sans appui et
+  tranchage ×2,7 ; décision de l'utilisateur.
+- [ ] Étape 9b : seuls les sommets des trajets sont contrôlés (une ligne de pont sans sommet intermédiaire échappe à la
+  mesure ; Benchy 18,4 → 64,2 mm avec le redécoupage, sans changement physique).
+- [ ] Restes mineurs du Benchy : dessus annulaire du porte-canne, arc sur le plancher derrière la porte, lèvre avant du
+  toit.
 - [x] Lissage par défaut : mesuré et écarté (death +15 % sans appui, tranchage ×5) ; reste facultatif.
-- [ ] Porte-canne du Benchy (paroi plus fine que la maille) : complétion par le STL essayée et retirée (pont arrière
-  abîmé) ; à reprendre sur les seules couches planes (limite #92).
+- [x] Porte-canne du Benchy (paroi plus fine que la maille) : complétion reprise avec conditions de planéité, de
+  tangence et de largeur (limite #94).
 
 ## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
 - [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).

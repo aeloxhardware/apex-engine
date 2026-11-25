@@ -58,6 +58,8 @@ class PlanarSectionReport:
     kept_loops: int = 0
     surface_loops: int = 0          # etape 5e : boucles examinees, puis remplacees par leur ligne de niveau sur le STL
     surface_replaced: int = 0
+    surface_added: int = 0          # etape 5e, completion : boucles du STL ajoutees, fragments de l'isosurface retires
+    surface_dropped: int = 0
 
 
 def _densify(loop: np.ndarray, step: float) -> np.ndarray:
@@ -159,6 +161,7 @@ def run(layers: list[Layer], mesh_data, tet_mesh: TetMesh, scalar_field: ScalarF
     if params.surface_levels is not None:
         layers, surface = s5e.run(layers, mesh_data, tet_mesh, scalar_field, replaced, params.surface_levels)
         report.surface_loops, report.surface_replaced = surface.loops, surface.replaced
+        report.surface_added, report.surface_dropped = surface.added, surface.dropped
     return layers, report
 
 

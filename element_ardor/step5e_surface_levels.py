@@ -19,6 +19,16 @@ phi = c est extraite triangle par triangle sur la surface. Pour une couche plane
   (gradient de phi le long de la face < `tangent_gradient`) : la ligne de niveau y est mal conditionnee (dessus d'une
   couche conforme, parallele au toit).
 - Une boucle sans correspondante garde le contour de l'isosurface. Le repere local et l'isovaleur ne changent pas.
+- COMPLETION (2026-11-25, `complete`) : un element plus fin que la maille (porte-canne du Benchy, paroi de 0,75 mm) n'a
+  aucune boucle dans l'isosurface. Toute boucle fermee de la ligne de niveau ETROITE (largeur 2A/P de `added_min_width`
+  a `added_max_width`), PLANE (a `added_flatness` de son plan moyen, meme inclinee), sans point sur une face tangente a la
+  couche (au plus `added_tangent_fraction`), et dont au moins `uncovered_fraction` des points sont a plus de `cover_tol`
+  de toute boucle sure (recoupee par 5d ou appariee ici) est ajoutee a la couche ; une boucle non appariee de
+  l'isosurface qu'elle recouvre (aire a `fragment_fraction`, ou copie approximative) est retiree. Une boucle a plus de
+  moitie dans la matiere deja decrite par les boucles sures (coque interieure d'un modele non etanche) n'est jamais
+  ajoutee. Une premiere version
+  sans les conditions de planeite et de tangence (retiree le 2026-11-25) couvrait le pont arriere conforme de bouts de
+  remplissage dresses : la couche y longe la surface, ses lignes de niveau y sont mal conditionnees.
 """
 from __future__ import annotations
 
@@ -54,12 +64,27 @@ class SurfaceLevelParams:
     curved_tol: float = 0.05
     close_tol: float = 1e-3            # une ligne dont les extremites sont plus loin que ceci est ouverte (mm)
     neighbours: int = 8                # tetraedres essayes par sommet du STL
+    complete: bool = True              # completion des elements plus fins que la maille (voir le module)
+    cover_tol: float = 0.4             # mm : un point de la ligne de niveau plus pres d'une boucle sure est couvert
+    uncovered_fraction: float = 0.95
+    fragment_fraction: float = 0.5
+    min_added_length: float = 2.0      # perimetre minimal d'une boucle ajoutee (mm)
+    added_flatness: float = 0.05       # ecart maximal d'une boucle ajoutee a son plan moyen (mm)
+    added_tangent_fraction: float = 0.02
+    # Largeur 2A/P maximale d'une boucle ajoutee (mm) : la completion ne rend que les elements plus fins que la maille.
+    # Sans borne, turkish (non etanche, 17 morceaux) recevait 1 219 boucles, jusqu'a 400 mm de tour : filament +33 %.
+    added_max_width: float = 2.0
+    # ... et minimale (mm) : une lame plus etroite qu'un cordon est l'interstice de deux coques presque confondues d'un
+    # modele non etanche (turkish : 629 lames de largeur mediane 0,28 mm, jusqu'a 345 mm de long), pas un element.
+    added_min_width: float = 0.4
 
 
 @dataclass
 class SurfaceLevelReport:
     loops: int = 0                     # boucles examinees (non recoupees par l'etape 5d)
     replaced: int = 0
+    added: int = 0                     # completion : boucles du STL ajoutees, fragments de l'isosurface retires
+    dropped: int = 0
 
 
 def phi_at(points: np.ndarray, tet_mesh: TetMesh, field: ScalarField, neighbours: int = 8,
@@ -241,11 +266,12 @@ def _accepted(scores: list, j: int, taken: dict, cand: _Candidates, params: Surf
 
 def run(layers: list[Layer], mesh_data, tet_mesh: TetMesh, scalar_field: ScalarField, skip: set,
         params: SurfaceLevelParams = SurfaceLevelParams()) -> tuple[list[Layer], SurfaceLevelReport]:
-    """Remplace chaque boucle (k, j) hors de `skip` (boucles deja recoupees par l'etape 5d) par sa ligne de niveau."""
+    """Remplace chaque boucle (k, j) hors de `skip` (boucles deja recoupees par l'etape 5d) par sa ligne de niveau, puis
+    complete chaque couche (`SurfaceLevelParams.complete`)."""
     report = SurfaceLevelReport()
     todo = {k: [j for j in range(len(L.contour_3d or [])) if (k, j) not in skip]
             for k, L in enumerate(layers) if L.contour_3d and L.isovalue is not None}
-    todo = {k: js for k, js in todo.items() if js}
+    todo = {k: js for k, js in todo.items() if js or (params.complete and layers[k].local_frame is not None)}
     if not todo:
         return layers, report
     vertices, faces = np.asarray(mesh_data.vertices, dtype=float), np.asarray(mesh_data.faces)
@@ -261,14 +287,94 @@ def run(layers: list[Layer], mesh_data, tet_mesh: TetMesh, scalar_field: ScalarF
     for k, js in todo.items():
         segments, hit = level_segments(vertices, faces, phi, layers[k].isovalue, near[k])
         cand = _candidates(segments, hit, tangent_face, params)
-        contours = list(layers[k].contour_3d)
-        scores = {j: _scores(contours[j], cand, params) for j in js}
-        taken = {s[0][1]: j for j, s in scores.items() if s and s[0][0] <= params.match_tol}
-        report.loops += len(js)
-        for j in js:
-            i = _accepted(scores[j], j, taken, cand, params)
-            if i is not None:
-                contours[j] = _finish(cand.loops[i], layers[k].local_frame, params)
-                report.replaced += 1
-        out[k] = replace(layers[k], contour_3d=contours)
+        out[k] = _layer(layers[k], js, cand, params, report)
     return out, report
+
+
+def _layer(layer: Layer, js: list, cand: _Candidates, params: SurfaceLevelParams, report: SurfaceLevelReport) -> Layer:
+    contours = list(layer.contour_3d)
+    scores = {j: _scores(contours[j], cand, params) for j in js}
+    taken = {s[0][1]: j for j, s in scores.items() if s and s[0][0] <= params.match_tol}
+    report.loops += len(js)
+    used, matched = set(), {j for j in range(len(contours)) if j not in js}
+    for j in js:
+        i = _accepted(scores[j], j, taken, cand, params)
+        if i is not None:
+            contours[j] = _finish(cand.loops[i], layer.local_frame, params)
+            used.add(i)
+            matched.add(j)
+            report.replaced += 1
+    if params.complete and layer.local_frame is not None and cand.loops:
+        contours = _complete(contours, matched, used, cand, layer.local_frame, params, report)
+    unchanged = len(contours) == len(layer.contour_3d) and all(a is b for a, b in zip(contours, layer.contour_3d))
+    return layer if unchanged else replace(layer, contour_3d=contours)
+
+
+def _addable(cand: _Candidates, used: set, tree, inside, params: SurfaceLevelParams) -> list[int]:
+    """Boucles de la ligne de niveau a ajouter : etroites, planes, hors faces tangentes, assez longues, non couvertes, hors
+    de la matiere deja decrite (`inside(points) -> bool[]`)."""
+    out = []
+    for i, (loop, dense) in enumerate(zip(cand.loops, cand.dense)):
+        if i in used or cand.tangent[i] > params.added_tangent_fraction or _off_plane(loop) > params.added_flatness:
+            continue
+        length = np.linalg.norm(np.diff(loop, axis=0), axis=1).sum()
+        width = 2.0 * _area(loop) / max(length, 1e-12)
+        if length < params.min_added_length or not params.added_min_width <= width <= params.added_max_width:
+            continue
+        far = np.ones(len(dense), dtype=bool) if tree is None else tree.query(dense)[0] > params.cover_tol
+        if far.mean() >= params.uncovered_fraction and inside(dense).mean() < 0.5:
+            out.append(i)
+    return out
+
+
+def _area(loop: np.ndarray) -> float:
+    """Aire d'une boucle 3D plane (norme de la moitie de la somme des produits vectoriels)."""
+    return 0.5 * float(np.linalg.norm(np.cross(loop[:-1], loop[1:]).sum(axis=0)))
+
+
+def _off_plane(loop: np.ndarray) -> float:
+    """Plus grand ecart d'une boucle 3D a son plan moyen (moindres carres)."""
+    centred = loop - loop.mean(axis=0)
+    normal = np.linalg.svd(centred, full_matrices=False)[2][-1]
+    return float(np.abs(centred @ normal).max())
+
+
+def _complete(contours: list, matched: set, used: set, cand: _Candidates, frame, params: SurfaceLevelParams,
+              report: SurfaceLevelReport) -> list:
+    """Ajoute les boucles du STL qu'aucune boucle SURE (recoupee ou appariee) ne represente ; retire les boucles non
+    appariees de l'isosurface qu'elles remplacent (fragment recouvert, ou copie approximative d'une boucle ajoutee)."""
+    import shapely
+    trusted = [np.asarray(contours[j], dtype=float) for j in sorted(matched)]
+    origin, u, v = (np.asarray(f, dtype=float) for f in frame)
+    flat = lambda p: np.column_stack([(p - origin) @ u, (p - origin) @ v])
+    # Une boucle dans la matiere deja decrite est une coque interieure (modele non etanche, turkish : lames de 0,3 mm
+    # entre deux coques presque confondues), pas un element manquant.
+    material = _even_odd([flat(c) for c in trusted]).buffer(-params.cover_tol)
+    inside = lambda pts: shapely.contains_xy(material, flat(pts))
+    added = _addable(cand, used, cKDTree(np.vstack(trusted)) if trusted else None, inside, params)
+    if not added:
+        return contours
+    cover = _even_odd([flat(cand.loops[i]) for i in added]).buffer(params.cover_tol)
+    near_added = cKDTree(np.vstack([cand.dense[i] for i in added]))
+    keep = []
+    for j, c in enumerate(contours):
+        c = np.asarray(c, dtype=float)
+        if j not in matched:
+            poly = shapely.make_valid(shapely.Polygon(flat(c))) if len(c) >= 4 else shapely.Polygon()
+            overlap = poly.intersection(cover).area / poly.area if poly.area > 0 else 0.0
+            if overlap >= params.fragment_fraction or np.median(near_added.query(c)[0]) < 2.5 * params.cover_tol:
+                report.dropped += 1
+                continue
+        keep.append(contours[j])
+    report.added += len(added)
+    return keep + [_finish(cand.loops[i], frame, params) for i in added]
+
+
+def _even_odd(loops: list):
+    """Region (pair-impair) delimitee par des boucles 2D."""
+    import shapely
+    region = shapely.Polygon()
+    for xy in loops:
+        if len(xy) >= 4:
+            region = region.symmetric_difference(shapely.make_valid(shapely.Polygon(xy)))
+    return region

@@ -62,7 +62,7 @@ def _generate_infill(
 
     sweep_angle_rad force l'orientation du balayage (ponts : traverser
     perpendiculairement a la portee, cf. Decision 2 du plan ; couches
-    normales en CROSSED_ZIGZAG : 0 ou pi/2 selon la couche).
+    normales en CROSSED_ZIGZAG : pi/4 ou 3 pi/4 selon la couche).
     """
     if boundary is None or boundary.is_empty or density <= 0:
         return []
@@ -405,8 +405,11 @@ def _generate_spiral_infill(
 def _infill_angle_for_layer(layer: Layer, isovalue_rank: dict) -> float:
     """
     Orientation du balayage d'une couche normale (hors pont) en
-    CROSSED_ZIGZAG : axe u du repere local (0) une couche sur deux, axe v
-    (pi/2) l'autre. La parite est prise sur le RANG de l'isovaleur, pas sur
+    CROSSED_ZIGZAG : a 45 deg de l'axe u du repere local une couche sur deux,
+    a 135 deg l'autre, comme Aeolis (`element_aeolis/toolpath.py`) et les
+    trancheurs classiques. A 0 / 90 deg (avant le 2026-11-25), les lignes du
+    toit du Benchy couraient parallelement a ses bords (remarque de
+    l'utilisateur : « les trajectoires sont droites, pas inclinees »). La parite est prise sur le RANG de l'isovaleur, pas sur
     la position dans la liste : l'ordre d'impression (step5, en arbre) fait
     se succeder des couches de branches differentes, alors que deux couches
     EMPILEES ont des isovaleurs consecutives - ce sont elles qui doivent se
@@ -417,7 +420,7 @@ def _infill_angle_for_layer(layer: Layer, isovalue_rank: dict) -> float:
         rank = isovalue_rank[layer.isovalue]
     else:
         rank = layer.id
-    return 0.0 if rank % 2 == 0 else np.pi / 2.0
+    return np.pi / 4.0 if rank % 2 == 0 else 3.0 * np.pi / 4.0
 
 
 @dataclass(frozen=True)

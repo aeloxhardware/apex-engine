@@ -4,6 +4,22 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 12 (2026-11-25, alpha-0.2.3.1.9.2.0.221) : INCOMPATIBLE, le numero passe de 11 a 12
+Element Ardor, zones du Benchy relevees par l'utilisateur (limite #94) :
+- Remplissage (clairseme et plein) a 45 / 135 deg du repere local au lieu de 0 / 90 deg, comme Aeolis.
+- `toolpath2d.solid_line_resample` (nouveau, 0 = aucun ; 1 mm dans le pipeline) : lignes pleines des couches courbes
+  redecoupees avant l'interpolation de leur altitude (couture du toit du Benchy).
+- Un morceau du maillage sans noeud du plateau prend la valeur du noeud ancre le plus proche plus l'ecart de hauteur
+  (avant : le champ de la chaleur, 0 la ou elle n'arrive pas ; porte-canne du Benchy emmele).
+- `planar_sections.surface_levels.complete` (nouveau, ACTIF) et ses bornes `cover_tol`, `uncovered_fraction`,
+  `fragment_fraction`, `min_added_length`, `added_flatness`, `added_tangent_fraction`, `added_min_width`,
+  `added_max_width` : completion des elements plus fins que la maille par la ligne de niveau du STL.
+- Mesures : death sans appui 1 862 -> 1 431 mm ; turkish 121 -> 139 mm (pieces fines retrouvees, filament +3,6 %) ;
+  l_shape et l-triple inchanges.
+- Ce que l'interface doit faire : `APEX_CONTRACT_VERSION = 12`, `pnpm schema:sync`. Ancien comportement, en partie :
+  `"toolpath2d": {"solid_line_resample": 0}`, `"planar_sections": {"surface_levels": {"complete": false}}` (l'angle du
+  remplissage et l'eclat detache ne sont pas reglables).
+
 ## Contrat 11 (2026-11-25, alpha-0.2.3.1.9.1.5.221) : INCOMPATIBLE, le numero passe de 10 a 11
 - `height_clamp` = vrai par defaut (decision de l'utilisateur : plateau infini, rien ne passe dessous) : l'angle de la
   tete est borne point par point pour la garder au-dessus du plan du plateau ; l'etape 9 traite le plateau comme un

@@ -432,10 +432,13 @@ def _flat_square_layer(layer_id, isovalue, side=20.0):
 
 
 def _zigzag_axis(layer):
-    """0 si le zigzag de la couche balaie selon u, 1 selon v."""
+    """0 si les lignes du zigzag courent a 45 deg de u, 1 a 135 deg (sens de leur plus long segment)."""
     chain = max((p for p in layer.toolpath_2d if not np.allclose(p[0], p[-1])), key=len)
-    seg = np.abs(_segments(chain))
-    return int(seg[:, 1].sum() > seg[:, 0].sum())
+    seg = _segments(chain)
+    d = seg[np.argmax(np.hypot(seg[:, 0], seg[:, 1]))]
+    angle = np.degrees(np.arctan2(d[1], d[0])) % 180.0
+    assert min(abs(angle - 45.0), abs(angle - 135.0)) < 1.0
+    return int(abs(angle - 135.0) < 1.0)
 
 
 def test_zigzag_alternates_between_stacked_layers(flat_box_layers):
