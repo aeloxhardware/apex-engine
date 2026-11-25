@@ -4,6 +4,14 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 10 (2026-11-25, alpha-0.2.3.1.9.1.2.221) : INCOMPATIBLE, le numero passe de 9 a 10
+- Element Ardor : sous les couches conformes, l'axe de la tete suit la direction du champ d'AVANT le decalage conforme
+  (`ScalarField.direction`, interne) au lieu du gradient : la forme des couches suit la surface, la tete reste verticale
+  hors des surplombs, comme la buse fixe d'Aeolis. Benchy : tete sous la marge du plateau 91 -> 0 mouvement (au plus bas
+  -3,1 -> 2,61 mm), orientations inatteignables 64 691 -> 0, impression 6 159 -> 5 894 s ; quatre modeles : longueur
+  deposee sans appui inchangee (limite #92). Aucun nouveau reglage.
+- Ce que l'interface doit faire : `APEX_CONTRACT_VERSION = 10`, `pnpm schema:sync`.
+
 ## Ajout compatible (2026-11-25, alpha-0.2.3.1.9.1.0.221) : le numero du contrat NE CHANGE PAS (reste 9)
 - `skin.conform_clearance` (nouveau, 1,5 mm) : le lissage non planaire (facultatif, `skin`) evite les faces proches
   d'une grande surface deja conforme (`field_solver.planar.conform`). Sans effet si `skin` est `null` (defaut) : le G-code

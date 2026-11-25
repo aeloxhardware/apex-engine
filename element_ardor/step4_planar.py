@@ -265,8 +265,10 @@ def tilt_weight(inputs: FieldInputs, params: PlanarParams, up: np.ndarray) -> np
     return w
 
 
-def blend(inputs: FieldInputs, values: np.ndarray, params: PlanarParams, solver_params) -> np.ndarray:
-    """Champ reintegre a partir de la direction melangee ; `values` est le champ de la chaleur (par noeud)."""
+def blend(inputs: FieldInputs, values: np.ndarray, params: PlanarParams, solver_params):
+    """(champ, champ d'impression) : champ reintegre a partir de la direction melangee, `values` etant le champ de la
+    chaleur (par noeud). Le champ d'impression est celui d'avant les couches conformes (il donne l'axe de la tete) ;
+    None sans couches conformes."""
     from element_ardor import step4_field_solver as s4
     up = np.asarray(solver_params.up_vector if solver_params.up_vector is not None else [0.0, 0.0, 1.0], float)
     up = up / np.linalg.norm(up)
@@ -297,10 +299,11 @@ def blend(inputs: FieldInputs, values: np.ndarray, params: PlanarParams, solver_
     anchor[pn] = solver_params.platform_anchor_weight
     A = (L + sp.diags(anchor, format="csr")).tocsr()
     phi = _solve(A, rhs + anchor * target, solver_params, values)
-    if params.conform is not None:
-        from element_ardor import step4_conform
-        phi = step4_conform.offset(inputs, phi, params.conform, solver_params, up)
-    return _keep_heat_where_unanchored(tm, pn, phi, values)
+    if params.conform is None:
+        return _keep_heat_where_unanchored(tm, pn, phi, values), None
+    from element_ardor import step4_conform
+    shaped = step4_conform.offset(inputs, phi, params.conform, solver_params, up)
+    return _keep_heat_where_unanchored(tm, pn, shaped, values), _keep_heat_where_unanchored(tm, pn, phi, values)
 
 
 def _smooth_directions(tm: TetMesh, flow: np.ndarray, w: np.ndarray, volumes: np.ndarray, iterations: int):

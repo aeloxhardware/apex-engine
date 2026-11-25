@@ -101,3 +101,36 @@ def test_a_ceiling_under_a_conformal_top_stays_flat(tmp_path):
     assert ceiling.sum() > 5 and top.sum() > 5
     assert np.ptp(phi[ceiling]) < 0.3                       # plafond : une couche
     assert np.ptp(phi[top]) < 0.25 * (SLOPE * 22.0)        # dessus : conforme
+
+
+def test_the_head_keeps_the_printing_direction_under_conformal_layers(tmp_path):
+    """Sous le dessus conforme, le gradient s'incline avec les couches, mais la direction d'impression
+    (`ScalarField.direction`, axe de la tete a l'etape 8) reste celle du champ plan : verticale. Avant, la tete
+    s'inclinait et passait sous le plateau (Benchy : 91 mouvements sous la marge)."""
+    path = os.path.join(str(tmp_path), "wedge.stl")
+    _wedge().export(path)
+    p = M.PipelineParams()
+    p.field_solver = dataclasses.replace(p.field_solver, planar=PlanarParams(conform=ConformParams(depth=6.0)))
+    with runtime.use(p.runtime):
+        stage = lambda *_a, **_k: None
+        md, tm, rep = M._ingest_stage(path, p, None, None, stage, [None])
+        _om, _graph, field = M._analysis_stages(p, md, tm, rep, stage)
+    assert field.direction is not None
+    centres = tm.tet_vertices[tm.tetrahedra].mean(axis=1)
+    top = (centres[:, 2] > 8.0 + SLOPE * centres[:, 0] - 1.0) & (centres[:, 0] > 2.0) & (centres[:, 0] < 22.0)
+    unit = lambda g: g / np.linalg.norm(g, axis=1)[:, None]
+    tilt = lambda g: np.degrees(np.arccos(np.clip(unit(g[top])[:, 2], -1.0, 1.0)))
+    assert np.median(tilt(field.gradient)) > 5.0          # les couches suivent la pente (11,3 deg)
+    assert np.median(tilt(field.direction)) < 1.0         # la tete reste verticale
+
+
+def test_without_conformal_layers_there_is_no_separate_direction(tmp_path):
+    path = os.path.join(str(tmp_path), "wedge.stl")
+    _wedge().export(path)
+    p = M.PipelineParams()
+    p.field_solver = dataclasses.replace(p.field_solver, planar=PlanarParams(conform=None))
+    with runtime.use(p.runtime):
+        stage = lambda *_a, **_k: None
+        md, tm, rep = M._ingest_stage(path, p, None, None, stage, [None])
+        _om, _graph, field = M._analysis_stages(p, md, tm, rep, stage)
+    assert field.direction is None                        # l'etape 8 suit alors le gradient, comme avant

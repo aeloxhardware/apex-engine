@@ -181,7 +181,9 @@ def gradient_direction_field(tet_mesh, scalar_field, nodal: bool = False):
     median de B (`free_axis_median_window`) lisse le reste."""
     from core.spatial import KDTree
     centroids = tet_mesh.tet_vertices[tet_mesh.tetrahedra].mean(axis=1)
-    grad = np.asarray(scalar_field.gradient, dtype=float)
+    # axe de la tete : direction d'impression si elle est donnee (couches conformes), sinon le gradient
+    source = scalar_field.direction if getattr(scalar_field, "direction", None) is not None else scalar_field.gradient
+    grad = np.asarray(source, dtype=float)
     norm = np.linalg.norm(grad, axis=1)
     unit = np.full_like(grad, np.nan)
     ok = norm > 1e-12

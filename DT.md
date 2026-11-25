@@ -15,8 +15,11 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
   Aeolis, le bord des surfaces conformes étant exclu (`skin.conform_clearance`). Reste : le lissage par défaut (temps).
 - [x] Densification adaptative de l'étape 5e (boucles courbes seules) et ligne de niveau robuste ; contrat 9.
 - [x] Étape 5e : faces examinées par niveau en une passe (Benchy 11,0 → 7,7 s, résultat identique).
-- [ ] Temps du tranchage conforme (Benchy ~50 s contre 29 s en plan) : étape 10, 64 700 ajustements de tête sur les
-  couches inclinées ; G-code du Benchy encore +79 % de lignes.
+- [x] Tête verticale sous les couches conformes (direction d'impression du champ d'avant le décalage) : Benchy, tête
+  sous la marge 91 → 0, 0 ajustement, tranchage ~46 s ; contrat 10.
+- [ ] G-code du Benchy encore +75 % de lignes (redécoupage de l'étape 5e).
+- [ ] **death : tête jusqu'à 27 mm sous le plateau (1 730 mouvements sous la marge) AVANT cette nuit déjà** — zones
+  inclinées par la chaleur au ras du plateau ; défaut de sécurité à traiter.
 - [ ] Porte-canne du Benchy (paroi plus fine que la maille) : complétion par le STL essayée et retirée (pont arrière
   abîmé) ; à reprendre sur les seules couches planes (limite #92).
 

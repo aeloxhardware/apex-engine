@@ -192,6 +192,11 @@ class ScalarField:
     # une approximation. C'est aussi directement ce dont l'étape 5 a besoin
     # (norme moyenne du gradient local par couche).
     gradient: Optional[np.ndarray] = None
+    # shape (T, 3) - direction d'impression (axe de la tete) par tetraedre quand elle differe du gradient : sous les
+    # couches conformes (`element_ardor/step4_conform.py`), la FORME des couches suit la surface mais la tete garde la
+    # direction du champ d'avant le decalage (verticale hors des surplombs), comme la buse fixe d'Aeolis. None = le
+    # gradient (limite #92).
+    direction: Optional[np.ndarray] = None
 
 
 # ---------------------------------------------------------------------------
