@@ -614,3 +614,31 @@ def test_march_tetrahedron_triangle_normals_point_toward_increasing_field():
 # meme methodologie que la verification faite pendant la conception
 # (7129 tetraedres synthetiques, 0 ecart), ici comme test permanent.
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Grille calee sur les surfaces paralleles aux couches (limite #95)
+# ---------------------------------------------------------------------------
+
+def test_isovalues_without_anchor_are_the_regular_grid():
+    from element_ardor.step5_layers import _aligned_isovalues
+    np.testing.assert_allclose(_aligned_isovalues(0.1, 0.2, 2.0, ()), 0.1 + 0.2 * np.arange(10))
+
+
+def test_an_anchor_falls_midway_between_two_isovalues():
+    """Le niveau 1,33 (toit) tombe a mi-chemin entre deux isovaleurs ; l'ecart se repartit en dessous."""
+    from element_ardor.step5_layers import _aligned_isovalues
+    iso = _aligned_isovalues(0.1, 0.2, 3.0, [1.33])
+    k = np.searchsorted(iso, 1.33)
+    assert iso[k - 1] == pytest.approx(1.23) and iso[k] == pytest.approx(1.43)
+    assert np.all(np.abs(np.diff(iso) - 0.2) < 0.2 / 6)
+    assert iso[0] == pytest.approx(0.1)
+
+
+def test_an_anchor_too_close_to_a_retained_one_is_ignored():
+    """Par priorite : 2,0 est retenu, 2,3 (a moins de trois pas) est ignore, 4,0 est retenu."""
+    from element_ardor.step5_layers import _aligned_isovalues
+    iso = _aligned_isovalues(0.1, 0.2, 6.0, [2.0, 2.3, 4.0])
+    mid = 0.5 * (iso[1:] + iso[:-1])
+    assert np.min(np.abs(mid - 2.0)) < 1e-9 and np.min(np.abs(mid - 4.0)) < 1e-9
+    assert np.min(np.abs(mid - 2.3)) > 1e-3

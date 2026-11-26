@@ -69,3 +69,9 @@ class LayerParams:
     # True (defaut) : le champ est la distance a travers la matiere. False =
     # tri (rang de region, isovaleur).
     isovalue_order: bool = True
+
+    # Grille des isovaleurs calee sur les surfaces rendues paralleles aux couches (`ScalarField.levels`, toit du
+    # Benchy en couches conformes) : chacune tombe a mi-chemin entre deux isovaleurs, l'ecart etant reparti sur les
+    # couches d'en dessous (2026-11-26, limite #95). Sans calage, une isovaleur pouvait frôler la surface et n'en
+    # couvrir qu'une partie, en dentelle. False = grille reguliere depuis le bas du champ (avant).
+    align_levels: bool = True

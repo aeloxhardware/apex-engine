@@ -296,7 +296,7 @@
   },
   "ConformParams": {
    "additionalProperties": false,
-   "description": "ConformParams(depth: 'float' = 10.0, tilt_min_deg: 'float' = 2.0, tilt_max_deg: 'float' = 45.0, min_width: 'float' = 5.0, ratio: 'float' = 0.5, surface_reach: 'float' = 0.75, sample_spacing: 'float' = 0.4, ceiling_tilt_deg: 'float' = 135.0)",
+   "description": "ConformParams(depth: 'float' = 10.0, tilt_min_deg: 'float' = 2.0, tilt_max_deg: 'float' = 45.0, min_width: 'float' = 5.0, ratio: 'float' = 0.5, surface_reach: 'float' = 0.75, sample_spacing: 'float' = 0.4, ceiling_tilt_deg: 'float' = 135.0, flat_min_width: 'float' = 1.0, level_spread: 'float' = 0.1)",
    "properties": {
     "ceiling_tilt_deg": {
      "default": 135.0,
@@ -304,6 +304,14 @@
     },
     "depth": {
      "default": 10.0,
+     "type": "number"
+    },
+    "flat_min_width": {
+     "default": 1.0,
+     "type": "number"
+    },
+    "level_spread": {
+     "default": 0.1,
      "type": "number"
     },
     "min_width": {
@@ -574,8 +582,12 @@
   },
   "LayerParams": {
    "additionalProperties": false,
-   "description": "LayerParams(layer_height_base: 'float' = 0.2, weld_tolerance_factor: 'float' = 1e-06, split_disjoint_clusters: 'Optional[float]' = None, isovalue_order: 'bool' = True)",
+   "description": "LayerParams(layer_height_base: 'float' = 0.2, weld_tolerance_factor: 'float' = 1e-06, split_disjoint_clusters: 'Optional[float]' = None, isovalue_order: 'bool' = True, align_levels: 'bool' = True)",
    "properties": {
+    "align_levels": {
+     "default": true,
+     "type": "boolean"
+    },
     "isovalue_order": {
      "default": true,
      "type": "boolean"
@@ -822,6 +834,8 @@
        "conform": {
         "ceiling_tilt_deg": 135.0,
         "depth": 10.0,
+        "flat_min_width": 1.0,
+        "level_spread": 0.1,
         "min_width": 5.0,
         "ratio": 0.5,
         "sample_spacing": 0.4,
@@ -875,6 +889,7 @@
     "layers": {
      "$ref": "#/$defs/LayerParams",
      "default": {
+      "align_levels": true,
       "isovalue_order": true,
       "layer_height_base": 0.2,
       "split_disjoint_clusters": null,
@@ -1203,6 +1218,8 @@
      "default": {
       "ceiling_tilt_deg": 135.0,
       "depth": 10.0,
+      "flat_min_width": 1.0,
+      "level_spread": 0.1,
       "min_width": 5.0,
       "ratio": 0.5,
       "sample_spacing": 0.4,
@@ -2132,5 +2149,5 @@
  },
  "title": "Apex engine parameters",
  "type": "object",
- "x-apex-contract": 12
+ "x-apex-contract": 13
 }

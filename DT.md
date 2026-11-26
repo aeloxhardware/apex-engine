@@ -35,6 +35,12 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 - [x] Lissage par défaut : mesuré et écarté (death +15 % sans appui, tranchage ×5) ; reste facultatif.
 - [x] Porte-canne du Benchy (paroi plus fine que la maille) : complétion reprise avec conditions de planéité, de
   tangence et de largeur (limite #94).
+- [x] **Capture du 2026-11-26** (toit en courbes de niveau) : l'interface tranche à la finesse 0,8, les mesures étaient
+  à 1,5. Grille des isovaleurs calée sur les surfaces parallèles aux couches (toit conforme, dessus plats) : toit et
+  sommet de la cheminée propres aux deux finesses (limite #95, contrat 13).
+- [ ] Contours qui serpentent sur le pont et avant du pont fragmenté de la capture du 2026-11-26 : non reproduits à
+  0,8 ni à 1,5 ; à revoir sur un tranchage de l'interface au contrat 13.
+- [ ] Mesurer aussi à la finesse 0,8 (celle que l'utilisateur a choisie) : toutes les mesures se font à 1,5.
 
 ## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
 - [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).

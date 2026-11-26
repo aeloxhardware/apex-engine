@@ -134,3 +134,33 @@ def test_without_conformal_layers_there_is_no_separate_direction(tmp_path):
         md, tm, rep = M._ingest_stage(path, p, None, None, stage, [None])
         _om, _graph, field = M._analysis_stages(p, md, tm, rep, stage)
     assert field.direction is None                        # l'etape 8 suit alors le gradient, comme avant
+
+
+def _levels(tmp_path, mesh, conform):
+    path = os.path.join(str(tmp_path), "piece.stl")
+    mesh.export(path)
+    p = M.PipelineParams()
+    p.field_solver = dataclasses.replace(p.field_solver, planar=PlanarParams(conform=conform))
+    with runtime.use(p.runtime):
+        stage = lambda *_a, **_k: None
+        md, tm, rep = M._ingest_stage(path, p, None, None, stage, [None])
+        _om, _graph, field = M._analysis_stages(p, md, tm, rep, stage)
+    return tm, field
+
+
+def test_the_sloped_top_and_a_flat_top_are_levels(tmp_path):
+    """Le dessus en pente rendu plan et un dessus plat sont des niveaux du champ (limite #95), le plus grand d'abord :
+    leur valeur est celle du champ sur la surface."""
+    step = trimesh.creation.box(extents=(6.0, 6.0, 5.3))
+    step.apply_translation((-4.0, 8.0, 2.65))                      # dessus plat a z = 5,3, colle au coin
+    tm, field = _levels(tmp_path, trimesh.boolean.union([_wedge(), step], engine="manifold"), ConformParams(depth=6.0))
+    assert field.levels is not None and len(field.levels) == 2
+    x = tm.tet_vertices
+    top = _top(x) & (x[:, 0] > 1.0) & (x[:, 0] < 23.0)
+    assert abs(field.levels[0] - np.median(field.values[top])) < 0.1
+    assert abs(field.levels[1] - 5.3) < 0.1
+
+
+def test_without_conformal_layers_there_are_no_levels(tmp_path):
+    _tm, field = _levels(tmp_path, _wedge(), None)
+    assert field.levels is None

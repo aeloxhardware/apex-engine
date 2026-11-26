@@ -4,6 +4,16 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 13 (2026-11-26, alpha-0.2.3.1.9.3.0.221) : INCOMPATIBLE, le numero passe de 12 a 13
+Element Ardor, toit du Benchy en dentelle a la finesse 0,8 de l'interface (limite #95) :
+- `layers.align_levels` (nouveau, ACTIF) : grille des isovaleurs calee pour que chaque surface parallele aux couches
+  (dessus rendu conforme, dessus plat) tombe a mi-chemin entre deux isovaleurs.
+- `field_solver.planar.conform.flat_min_width` (1 mm) et `level_spread` (0,1 mm) (nouveaux) : quels dessus plats comptent,
+  et ecart maximal du champ sur une surface pour qu'elle serve de calage.
+- Mesures (finesse 1,5) : l_shape, l-triple, death inchanges ; turkish sans appui 139 -> 144 mm ; Benchy 64,2 -> 65,9 mm.
+- Ce que l'interface doit faire : `APEX_CONTRACT_VERSION = 13`, `pnpm schema:sync`. Ancien comportement :
+  `"layers": {"align_levels": false}`.
+
 ## Contrat 12 (2026-11-25, alpha-0.2.3.1.9.2.0.221) : INCOMPATIBLE, le numero passe de 11 a 12
 Element Ardor, zones du Benchy relevees par l'utilisateur (limite #94) :
 - Remplissage (clairseme et plein) a 45 / 135 deg du repere local au lieu de 0 / 90 deg, comme Aeolis.

@@ -574,14 +574,15 @@ def run(
     platform_nodes = _identify_platform_nodes(tet_mesh, mesh_data, region_dependency_graph)
     _progress.milestone(0.1)                 # R-017 : gradients de forme et nœuds du plateau
     values = _heat_method_distance(tet_mesh, shape_gradients, volumes, platform_nodes, params)
-    printing = None
+    printing, levels = None, None
     if params.planar is not None:
         inputs = FieldInputs(tet_mesh, mesh_data, shape_gradients, volumes, platform_nodes,
                              region_dependency_graph.platform_contact_faces)
-        values, printing = _planar_blend(inputs, values, params.planar, params)
+        values, printing, levels = _planar_blend(inputs, values, params.planar, params)
     _progress.milestone(0.9)                 # diffusion, flux et integration resolus
     return ScalarField(
         values=values,
         gradient=_compute_per_tet_gradient(tet_mesh, shape_gradients, values),
         direction=None if printing is None else _compute_per_tet_gradient(tet_mesh, shape_gradients, printing),
+        levels=levels if levels is not None and len(levels) else None,
     )

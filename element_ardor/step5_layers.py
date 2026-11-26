@@ -225,8 +225,27 @@ def _generate_isovalues(scalar_field: ScalarField, tet_mesh: TetMesh, params: La
         return np.array([0.5 * (v_min + v_max)])
 
     first = v_min + 0.5 * delta
-    count = int(np.floor((v_max - first) / delta)) + 1
-    return first + delta * np.arange(count)
+    anchors = scalar_field.levels if params.align_levels and scalar_field.levels is not None else ()
+    return _aligned_isovalues(first, delta, v_max, anchors)
+
+
+_ANCHOR_GAP = 3.0          # pas : ecart minimal entre deux calages (epaisseur deformee d'au plus 1/6)
+
+
+def _aligned_isovalues(first: float, delta: float, v_max: float, anchors) -> np.ndarray:
+    """Isovaleurs de `first` a `v_max` au pas `delta`, chaque valeur retenue de `anchors` (par priorite decroissante)
+    a mi-chemin entre deux isovaleurs. Une valeur a moins de `_ANCHOR_GAP` pas d'une valeur deja retenue (ou du bas)
+    est ignoree. Entre deux calages, le nombre de couches est celui du pas `delta` arrondi et l'ecart s'y repartit."""
+    knots = [first]
+    for level in np.asarray(anchors, dtype=float):
+        knot = level - 0.5 * delta
+        if level < v_max and min(abs(knot - k) for k in knots) >= _ANCHOR_GAP * delta and knot > first:
+            knots.append(knot)
+    knots.sort()
+    parts = [np.linspace(a, b, max(1, int(round((b - a) / delta))) + 1)[:-1] for a, b in zip(knots[:-1], knots[1:])]
+    count = int(np.floor((v_max - knots[-1]) / delta)) + 1
+    return np.concatenate(parts + [knots[-1] + delta * np.arange(count)])
+
 
 
 # ---------------------------------------------------------------------------

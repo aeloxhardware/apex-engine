@@ -19,7 +19,7 @@ Desactive (None) dans `PlanarParams.conform`. Les contours des couches courbes s
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import scipy.sparse as sp
@@ -41,6 +41,10 @@ class ConformParams:
     # au dessus en pente, coupaient en biais le plafond horizontal de la cabine et le refermaient en plusieurs couches,
     # chacune posee dans le vide (longueur deposee sans appui 41 -> 150 mm). 180 = aucune.
     ceiling_tilt_deg: float = 135.0
+    # Dessus plats (pente < `tilt_min_deg`) de largeur 2A/P >= ceci (mm) : leur valeur du champ est aussi un niveau
+    # (voir `offset`), si elle varie de moins de `level_spread` (mm, p10-p90) sur la surface.
+    flat_min_width: float = 1.0
+    level_spread: float = 0.1
 
 
 def _face_patches(vertices: np.ndarray, faces: np.ndarray, normals: np.ndarray, platform_faces, up: np.ndarray,
@@ -80,7 +84,8 @@ def _area(vertices: np.ndarray, tri: np.ndarray) -> np.ndarray:
 
 
 def _targets(vertices: np.ndarray, tri: np.ndarray, label: np.ndarray, up: np.ndarray, params: ConformParams):
-    """(points echantillonnes, cible u par point) : lambda * (c - h) du morceau de chaque point."""
+    """(points echantillonnes, cible u par point : lambda * (c - h) de son morceau, morceau de chaque point, lambda
+    par morceau)."""
     from element_ardor.step4_planar import _sample_faces
     pts, owner = _sample_faces(vertices, tri, params.sample_spacing)
     count = int(label.max()) + 1
@@ -94,7 +99,7 @@ def _targets(vertices: np.ndarray, tri: np.ndarray, label: np.ndarray, up: np.nd
     half = np.maximum(centre - lo, hi - centre)
     lam = np.minimum(1.0, params.ratio * params.depth / np.maximum(half, 1e-9))
     patch = label[owner]
-    return pts, lam[patch] * (centre[patch] - pts @ up)
+    return pts, lam[patch] * (centre[patch] - pts @ up), patch, lam
 
 
 def _near_ceilings(md, nodes: np.ndarray, up: np.ndarray, params: ConformParams) -> np.ndarray:
@@ -119,17 +124,37 @@ def wide_patch_points(mesh_data, up: np.ndarray, params: ConformParams) -> np.nd
     return _sample_faces(vertices, faces[idx], params.sample_spacing)[0]
 
 
-def offset(inputs, phi: np.ndarray, params: ConformParams, solver_params, up: np.ndarray) -> np.ndarray:
-    """phi + u (voir le module) ; phi inchange s'il n'y a aucune surface retenue."""
+def offset(inputs, phi: np.ndarray, params: ConformParams, solver_params, up: np.ndarray
+           ) -> tuple[np.ndarray, np.ndarray]:
+    """(phi + u (voir le module), niveaux). phi est inchange s'il n'y a aucune surface retenue. Niveaux : valeur du
+    champ obtenu sur chaque surface parallele aux couches, des plus grandes aux plus petites : surfaces rendues
+    entierement paralleles (lambda = 1) et dessus plats. L'etape 5 place chacun a mi-chemin entre deux isovaleurs :
+    une isovaleur qui frolait une telle surface (bruit du champ de quelques centiemes) n'en couvrait qu'une partie,
+    en dentelle (toit du Benchy a la finesse 0,8, sommet de la cheminee ; 2026-11-26, limite #95)."""
+    md = inputs.mesh_data
+    vertices, faces = np.asarray(md.vertices, dtype=float), np.asarray(md.faces)
+    normals = np.asarray(md.face_normals, dtype=float)
+    idx, label = _face_patches(vertices, faces, normals, inputs.platform_faces, up, params)
+    shaped, levels = phi, []
+    if len(idx):
+        shaped, levels = _shift(inputs, phi, (vertices, faces[idx], label), params, solver_params, up)
+    flat = replace(params, tilt_min_deg=0.0, tilt_max_deg=params.tilt_min_deg, min_width=params.flat_min_width)
+    fidx, flabel = _face_patches(vertices, faces, normals, inputs.platform_faces, up, flat)
+    if len(fidx):
+        pts, _t, patch, _lam = _targets(vertices, faces[fidx], flabel, up, flat)
+        levels += _patch_levels(shaped, inputs.tet_mesh, pts, patch, np.ones(int(flabel.max()) + 1), flat)
+    levels.sort(key=lambda item: -item[0])
+    return shaped, np.asarray([value for _area_, value in levels], dtype=float)
+
+
+def _shift(inputs, phi: np.ndarray, patches: tuple, params: ConformParams, solver_params,
+           up: np.ndarray) -> tuple[np.ndarray, list]:
+    """(phi + u, niveaux [(aire, valeur)] des morceaux rendus entierement plans) ; `patches` : (sommets, faces
+    retenues, morceau par face)."""
     from element_ardor import step4_field_solver as s4
     from element_ardor.step4_planar import _solve
     md, tm = inputs.mesh_data, inputs.tet_mesh
-    vertices, faces = np.asarray(md.vertices, dtype=float), np.asarray(md.faces)
-    idx, label = _face_patches(vertices, faces, np.asarray(md.face_normals, dtype=float), inputs.platform_faces,
-                               up, params)
-    if not len(idx):
-        return phi
-    pts, target_pts = _targets(vertices, faces[idx], label, up, params)
+    pts, target_pts, patch, lam = _targets(*patches, up, params)
     dist, nearest = cKDTree(pts).query(tm.tet_vertices, workers=-1)
     free = np.zeros(tm.node_count, dtype=bool)
     free[inputs.platform_nodes] = True
@@ -142,4 +167,25 @@ def offset(inputs, phi: np.ndarray, params: ConformParams, solver_params, up: np
     weight[near | free] = solver_params.platform_anchor_weight
     L = s4._assemble_stiffness_matrix(tm, inputs.shape_gradients, inputs.volumes)
     A = (L + sp.diags(weight, format="csr")).tocsr()
-    return phi + _solve(A, weight * target, solver_params, np.zeros(tm.node_count))
+    shaped = phi + _solve(A, weight * target, solver_params, np.zeros(tm.node_count))
+    return shaped, _patch_levels(shaped, tm, pts, patch, lam, params)
+
+
+_LEVEL_SAMPLES = 4000
+
+
+def _patch_levels(values: np.ndarray, tm, pts: np.ndarray, patch: np.ndarray, lam: np.ndarray,
+                  params: ConformParams) -> list:
+    """[(aire approchee, valeur mediane du champ sur la surface)] des morceaux de lambda = 1 dont le champ, a leurs
+    points (au plus `_LEVEL_SAMPLES` par morceau), varie de moins de `level_spread` (p10-p90)."""
+    from core.mesh_types import ScalarField
+    from element_ardor.step5e_surface_levels import phi_at
+    out = []
+    for j in np.flatnonzero(lam >= 1.0):
+        own = np.flatnonzero(patch == j)
+        if not len(own):
+            continue
+        v = phi_at(pts[own[::max(1, len(own) // _LEVEL_SAMPLES)]], tm, ScalarField(values=values))
+        if np.subtract(*np.percentile(v, [90, 10])) <= params.level_spread:
+            out.append((len(own) * params.sample_spacing ** 2, float(np.median(v))))
+    return out
