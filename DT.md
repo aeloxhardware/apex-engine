@@ -53,6 +53,12 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
   Benchy, finesse 1,5) : ni `bridge_span = 0`, ni le champ de la chaleur seul (temps 300 000 ou 100) ne le font ; à
   temps court, les couches du toit deviennent presque verticales. Piste : direction de croissance tournée vers le
   vide au voisinage d'un plafond, inclinaison bornée (≈ 45-60°), retour aux couches conformes sous le dessus.
+  Prototype (`PlanarParams.lean_deg`, inactif par défaut, non commité) : direction penchée de 45° depuis l'appui le
+  plus proche vers le vide. SANS la projection sur les inclinaisons atteignables, la cabine se referme en arche comme
+  sur le dessin ; AVEC (réglage par défaut), tout redevient plat : sur l'Aetheris-4, C est imposé par la position
+  (limite #59), la tête ne penche que vers l'extérieur du plateau (`_project_to_reachable_radial_tilt`, d_r ≥ 0). Un
+  plafond fermé des deux côtés demande qu'un mur penche vers le centre : impossible pièce centrée. Décision demandée à
+  l'utilisateur (placement décentré, balayage d'un seul côté, ou pont à plat).
 
 ## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
 - [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).
