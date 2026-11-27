@@ -53,6 +53,9 @@ class PlanarParams:
     ramp: float = 8.0                # mm : largeur de la transition chaleur -> plan
     flat_height: float = 0.6         # mm au-dessus du plateau : couches toujours planes (plus une rampe de meme hauteur)
     smooth_iterations: int = 20      # lissages de la direction (moyenne aux noeuds puis aux tetraedres) dans la zone inclinee
+    # deg : pres d'un surplomb a incliner, la direction de croissance penche de cet angle vers le vide (depuis l'appui le
+    # plus proche) au lieu de suivre la chaleur ; 0 = la chaleur (dessin de l'utilisateur, 2026-11-27, limite #97)
+    lean_deg: float = 0.0
     # couches conformes sous les grandes surfaces en pente (`element_ardor/step4_conform.py`, 2026-11-25, limite #92) ;
     # None = aucune (couches planes jusqu'au dessus : toit du Benchy en escalier)
     conform: Optional[ConformParams] = field(default_factory=ConformParams)
@@ -209,13 +212,18 @@ def tilt_points(inputs: FieldInputs, params: PlanarParams, up: np.ndarray) -> np
     trou). Un porte-a-faux n'a d'appui que d'un cote : il reste a incliner. Appui : bord du surplomb sous lequel une paroi descend ; la ou elle monte, le bord est libre (bout d'un
     porte-a-faux). `OverhangMap.is_bridge` (rien a moins de 2 mm sous la face) ne distingue pas un pont d'un
     porte-a-faux : il n'est pas utilise."""
+    return _tilt_geometry(inputs, params, up)[0]
+
+
+def _tilt_geometry(inputs: FieldInputs, params: PlanarParams, up: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """(points a incliner (voir `tilt_points`), points d'appui des surplombs)."""
     md = inputs.mesh_data
     faces = np.asarray(md.faces)
     v = np.asarray(md.vertices, dtype=float)
     over, down = _overhang_faces(md, inputs.platform_faces, params, up)
     idx = np.flatnonzero(over)
     if not idx.size:
-        return np.zeros((0, 3))
+        return np.zeros((0, 3)), np.zeros((0, 3))
     sup = _supports(v, faces[idx], up, _Solid(inputs.tet_mesh), _printable_surface(v, faces, over, down))
     pts, owner = _sample_faces(v, faces[idx], 0.5)
     face = idx[owner]
@@ -224,7 +232,7 @@ def tilt_points(inputs: FieldInputs, params: PlanarParams, up: np.ndarray) -> np
     held[ceiling] = _anchored(pts[ceiling], sup, params)
     n = np.asarray(md.face_normals, dtype=float)[face[~ceiling]]
     held[~ceiling] = _slope_held(pts[~ceiling], n, sup, params, up)
-    return pts[~held]
+    return pts[~held], sup
 
 
 def _slope_held(p: np.ndarray, normals: np.ndarray, sup: np.ndarray, params: PlanarParams, up: np.ndarray):
@@ -249,11 +257,12 @@ def _slope_held(p: np.ndarray, normals: np.ndarray, sup: np.ndarray, params: Pla
     return held
 
 
-def tilt_weight(inputs: FieldInputs, params: PlanarParams, up: np.ndarray) -> np.ndarray:
-    """Poids w par tetraedre (0 = couches planes, 1 = champ de la chaleur)."""
+def tilt_weight(inputs: FieldInputs, params: PlanarParams, up: np.ndarray, need=None) -> np.ndarray:
+    """Poids w par tetraedre (0 = couches planes, 1 = champ de la chaleur) ; `need` : points a incliner (calcules si
+    absents)."""
     tm = inputs.tet_mesh
     centers = tm.tet_vertices[tm.tetrahedra].mean(axis=1)
-    need = tilt_points(inputs, params, up)
+    need = tilt_points(inputs, params, up) if need is None else need
     if len(need):
         # recherche bornee a core + ramp (au-dela, w = 0) et parallele : 4,6 s -> une fraction sur turkish
         dist, _ = cKDTree(need).query(centers, distance_upper_bound=params.core + params.ramp, workers=-1)
@@ -276,7 +285,12 @@ def blend(inputs: FieldInputs, values: np.ndarray, params: PlanarParams, solver_
     grad = s4._compute_per_tet_gradient(tm, inputs.shape_gradients, values)
     norm = np.linalg.norm(grad, axis=1)
     heat = np.where(norm[:, None] > 1e-12, grad / np.maximum(norm, 1e-12)[:, None], up[None, :])
-    w = tilt_weight(inputs, params, up)
+    if params.lean_deg > 0.0:
+        need, sup = _tilt_geometry(inputs, params, up)
+        w = tilt_weight(inputs, params, up, need)
+        heat = _lean(tm, need, sup, heat, w, params, up)
+    else:
+        w = tilt_weight(inputs, params, up)
     flow = (1.0 - w)[:, None] * up[None, :] + w[:, None] * heat
     fn = np.linalg.norm(flow, axis=1)
     flow = np.where(fn[:, None] > 1e-9, flow / np.maximum(fn, 1e-9)[:, None], up[None, :])
@@ -304,6 +318,28 @@ def blend(inputs: FieldInputs, values: np.ndarray, params: PlanarParams, solver_
     from element_ardor import step4_conform
     shaped, levels = step4_conform.offset(inputs, phi, params.conform, solver_params, up)
     return _place_unanchored(tm, pn, shaped, up), _place_unanchored(tm, pn, phi, up), levels
+
+
+def _lean(tm: TetMesh, need: np.ndarray, sup: np.ndarray, heat: np.ndarray, w: np.ndarray, params: PlanarParams,
+          up: np.ndarray) -> np.ndarray:
+    """Direction de croissance penchee de `lean_deg` vers le vide pres des surplombs a incliner (w > 0) : vers
+    l'horizontale qui va de l'appui le plus proche du point a incliner le plus proche vers ce point. Sous un plafond
+    tenu par des parois, les couches des parois tournent vers l'ouverture et la referment en eventail au lieu d'un
+    pont pose a plat dans le vide (dessin de l'utilisateur, 2026-11-27). Ailleurs, et sans appui : `heat`."""
+    out = heat.copy()
+    near = np.flatnonzero(w > 0.0)
+    if not len(near) or not len(need) or not len(sup):
+        return out
+    _d, s_idx = cKDTree(sup).query(need, workers=-1)
+    h = need - sup[s_idx]
+    h -= (h @ up)[:, None] * up[None, :]
+    hn = np.linalg.norm(h, axis=1)
+    centers = tm.tet_vertices[tm.tetrahedra[near]].mean(axis=1)
+    _d, j = cKDTree(need).query(centers, workers=-1)
+    ok = hn[j] > 1e-6
+    t = math.radians(params.lean_deg)
+    out[near[ok]] = math.cos(t) * up[None, :] + math.sin(t) * h[j[ok]] / hn[j[ok], None]
+    return out
 
 
 def _smooth_directions(tm: TetMesh, flow: np.ndarray, w: np.ndarray, volumes: np.ndarray, iterations: int):

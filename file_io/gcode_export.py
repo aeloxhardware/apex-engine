@@ -709,6 +709,9 @@ def export_gcode(toolpath: dict, machine, params: GcodeParams, path: Optional[st
     plateau. `travel_check(i, point, B) -> bool` : controle de collision d'un
     point de degagement (vrai = contact), compte dans le rapport."""
     from core import _cpp
+    if getattr(machine, "kinematics", "polar") == "head-ab":     # machine XYZAB (docs/CINEMATIQUE_XYZAB.md)
+        from file_io import gcode_xyzab
+        return gcode_xyzab.export(toolpath, machine, params, path)
     pos = np.asarray(toolpath["position"], dtype=float)
     ang = np.asarray(toolpath["axis_angles"], dtype=float)
     ext = np.asarray(toolpath["extrusion"], dtype=float)

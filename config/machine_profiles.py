@@ -39,7 +39,7 @@ def load_machine_profile(machine_id: Optional[str] = None, *, with_toolhead: boo
     with open(os.path.join(MACHINES_DIR, f"{machine_id}.json"), encoding="utf-8") as handle:
         data = json.load(handle)
     nozzle_model = None
-    if with_toolhead:
+    if with_toolhead and data.get("toolhead_id"):
         try:
             from file_io.mesh_loader import load_toolhead_by_id
             nozzle_model = load_toolhead_by_id(data["toolhead_id"])
@@ -60,7 +60,10 @@ def load_machine_profile(machine_id: Optional[str] = None, *, with_toolhead: boo
         platform_radius=float(data["platform_radius"]),
         platform_thickness=float(data["platform_thickness"]),
         position_coupled_axes=[int(i) for i in data["position_coupled_axes"]],
-        radial_direction=np.array(data["radial_direction"], dtype=float),
+        radial_direction=None if data.get("radial_direction") is None else np.array(data["radial_direction"], dtype=float),
+        kinematics=str(data.get("kinematics", "polar")),
+        platform_size=None if data.get("platform_size") is None else tuple(float(v) for v in data["platform_size"]),
+        pivot_to_tip=None if data.get("pivot_to_tip") is None else float(data["pivot_to_tip"]),
     )
 
 

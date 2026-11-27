@@ -381,6 +381,13 @@ class MachineProfile:
     # `position_coupled_axes` est non vide : l'angle couplé est celui qui
     # oriente cette direction vers le point.
     radial_direction: Optional[Vec3] = None
+    # Architecture, pour l'export G-code : "polar" (Aetheris-4 : R C Z B, plateau tournant) ou "head-ab" (XYZAB :
+    # A puis B portés par la tête, plateau qui se déplace en Y ; docs/CINEMATIQUE_XYZAB.md).
+    kinematics: str = "polar"
+    # Plateau rectangulaire (largeur X, profondeur Y, mm) ; None = plateau rond (`platform_radius`).
+    platform_size: Optional[tuple] = None
+    # Pivot des axes de la tête -> pointe (mm), donnée du profil ; None = `GcodeParams.pivot_to_tip`.
+    pivot_to_tip: Optional[float] = None
 
 
 # ---------------------------------------------------------------------------

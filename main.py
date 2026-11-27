@@ -358,7 +358,8 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
     _core_progress.milestone(0.15)           # R-017 : hauteur mini de la tete par B
     gp = gcode_params if gcode_params is not None else GcodeParams(pivot_to_tip=pivot_to_tip, strict=True)
     arrays = toolpath_arrays(toolpath)
-    travel_check = material_travel_check(arrays, machine, gp) if check_travel else None
+    polar = getattr(machine, "kinematics", "polar") == "polar"       # controle des degagements : machine polaire seule
+    travel_check = material_travel_check(arrays, machine, gp) if check_travel and polar else None
     _core_progress.milestone(0.4)            # degagements controles ; reste l'ecriture du fichier
     return export_gcode(arrays, machine, gp, out_path, head_zlow=head_zlow, travel_check=travel_check)
 

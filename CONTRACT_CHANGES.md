@@ -4,6 +4,18 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajout compatible (2026-11-27, alpha-0.2.3.1.10.0.0.221) : le numero du contrat NE CHANGE PAS (reste 14)
+Machine XYZAB (limite #97, `docs/CINEMATIQUE_XYZAB.md`), FACULTATIVE : l'Aetheris-4 reste la machine par defaut et son
+G-code est inchange.
+- `machine_profile.kinematics` ("polar" par defaut, "head-ab" pour la XYZAB), `machine_profile.platform_size`
+  ([largeur, profondeur] en mm, null = plateau rond), `machine_profile.pivot_to_tip` (null = `GcodeParams.pivot_to_tip`)
+  (nouveaux, facultatifs) ; `machine_profile.radial_direction` peut etre null quand aucun axe n'est impose par la position.
+- `field_solver.planar.lean_deg` (nouveau, 0 = inactif) : eventail sous les plafonds, prototype.
+- Profil `res/machines/apex-xyzab.json` ; G-code `G01 X Y Z A B` (pivot commande), description `apex-kinematics/1`
+  `machine: "apex-xyzab"`.
+- Ce que l'interface peut faire : `pnpm schema:sync` ; proposer la machine XYZAB (aperçu : la pointe est a
+  `pivot_to_tip` du point commande, le long de R_A R_B (0, 0, -1)).
+
 ## Contrat 14 (2026-11-27, alpha-0.2.3.1.9.3.1.221) : INCOMPATIBLE, le numero passe de 13 a 14
 Element Ardor, calage des couches universel (limite #96 ; Benchy basse resolution encore en dentelle au contrat 13) :
 - `field_solver.planar.conform.flush_tolerance` (nouveau, 0,25 mm) : pres d'une surface rendue entierement parallele et

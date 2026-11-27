@@ -201,13 +201,28 @@ def _median_filter_free_axes(resolved_angles, raw_points, axes, machine_profile,
                 for ax in free:
                     angles[start:i, ax] = median_filter(angles[start:i, ax], size=window, mode="nearest")
             start = i
-    units = [np.asarray(s.axis, dtype=float) / np.linalg.norm(s.axis) for s in axes]
     _positions, desired = _point_arrays(raw_points)
+    residual = _residuals(angles, axes, reference_direction, desired)
+    if len(free) > 1 and len(residual):
+        # Deux axes libres (tete A puis B de la machine XYZAB) : la mediane de chaque axe, prise separement, melange
+        # les deux solutions de la rotule et ses points proches de la singularite (B = +-90 deg), et vise une autre
+        # direction (l_shape : 164 orientations « inatteignables » creees par le filtre, aucune sans lui). Un point
+        # que le filtre ecarte de plus d'un degre de plus de sa direction reprend ses angles resolus.
+        original = np.array(resolved_angles, dtype=float)
+        before = _residuals(original, axes, reference_direction, desired)
+        worse = residual > before + np.radians(1.0)
+        angles[worse], residual[worse] = original[worse], before[worse]
+    return [list(a) for a in angles], [float(r) for r in residual]
+
+
+def _residuals(angles: np.ndarray, axes, reference_direction, desired) -> np.ndarray:
+    """Ecart (rad) entre la direction atteinte par `angles` et la direction visee, point par point."""
+    units = [np.asarray(s.axis, dtype=float) / np.linalg.norm(s.axis) for s in axes]
     # Ecart residuel recalcule PAR LOTS (2026-10-06 : la boucle point par point
     # coutait ~12 s sur death avec la normale par point). Meme formule de Rodrigues,
     # memes operations dans le meme ordre que `_rodrigues_rotate_single` ; seul le
     # cos/sin vectorise de numpy peut differer d'un ULP (sans effet sur un seuil en degres).
-    n = len(raw_points)
+    n = len(angles)
     d = np.tile(np.asarray(reference_direction, dtype=float), (n, 1))
     for k in range(len(units) - 1, -1, -1):
         u = units[k]
@@ -223,8 +238,7 @@ def _median_filter_free_axes(resolved_angles, raw_points, axes, machine_profile,
                              d[:, 2] * cos_a + cz * sin_a + u[2] * factor])
     t = np.asarray(desired, dtype=float).reshape(n, 3)
     t = t / np.maximum(np.linalg.norm(t, axis=1), 1e-12)[:, None]
-    residual = np.arccos(np.clip((d * t).sum(axis=1), -1.0, 1.0)) if n else np.zeros(0)
-    return [list(a) for a in angles], [float(r) for r in residual]
+    return np.arccos(np.clip((d * t).sum(axis=1), -1.0, 1.0)) if n else np.zeros(0)
 
 
 def _smooth_all_axes(

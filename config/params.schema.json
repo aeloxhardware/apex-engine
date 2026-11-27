@@ -629,6 +629,10 @@
      ],
      "default": null
     },
+    "kinematics": {
+     "default": "polar",
+     "type": "string"
+    },
     "max_angular_acceleration": {
      "default": 0.0,
      "type": "number"
@@ -644,6 +648,17 @@
     "nozzle_model": {
      "x-runtime-only": true
     },
+    "pivot_to_tip": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
     "platform_origin": {
      "default": null,
      "items": {
@@ -655,6 +670,17 @@
      "anyOf": [
       {
        "type": "number"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
+    "platform_size": {
+     "anyOf": [
+      {
+       "type": "array"
       },
       {
        "type": "null"
@@ -845,6 +871,7 @@
        },
        "core": 2.0,
        "flat_height": 0.6,
+       "lean_deg": 0.0,
        "lip": 1.5,
        "min_patch_area": 4.0,
        "overhang_deg": 60.0,
@@ -900,15 +927,18 @@
      "$ref": "#/$defs/MachineProfile",
      "default": {
       "build_volume": null,
+      "kinematics": "polar",
       "max_angular_acceleration": 22.689280275926283,
       "max_angular_velocity": 29.08940264298949,
       "nozzle_diameter": 0.4,
+      "pivot_to_tip": null,
       "platform_origin": [
        0.0,
        0.0,
        0.0
       ],
       "platform_radius": 150.0,
+      "platform_size": null,
       "platform_thickness": 1.0,
       "position_coupled_axes": [
        0
@@ -1196,7 +1226,7 @@
   },
   "PlanarParams": {
    "additionalProperties": false,
-   "description": "PlanarParams(overhang_deg: 'float' = 60.0, ceiling_deg: 'float' = 80.0, lip: 'float' = 1.5, slope_reach: 'float' = 2.0, bridge_span: 'float' = 25.0, min_patch_area: 'float' = 4.0, core: 'float' = 2.0, ramp: 'float' = 8.0, flat_height: 'float' = 0.6, smooth_iterations: 'int' = 20, conform: 'Optional[ConformParams]' = <factory>)",
+   "description": "PlanarParams(overhang_deg: 'float' = 60.0, ceiling_deg: 'float' = 80.0, lip: 'float' = 1.5, slope_reach: 'float' = 2.0, bridge_span: 'float' = 25.0, min_patch_area: 'float' = 4.0, core: 'float' = 2.0, ramp: 'float' = 8.0, flat_height: 'float' = 0.6, smooth_iterations: 'int' = 20, lean_deg: 'float' = 0.0, conform: 'Optional[ConformParams]' = <factory>)",
    "properties": {
     "bridge_span": {
      "default": 25.0,
@@ -1234,6 +1264,10 @@
     },
     "flat_height": {
      "default": 0.6,
+     "type": "number"
+    },
+    "lean_deg": {
+     "default": 0.0,
      "type": "number"
     },
     "lip": {

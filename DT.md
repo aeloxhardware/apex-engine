@@ -61,6 +61,13 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
   l'utilisateur (placement décentré, balayage d'un seul côté, ou pont à plat).
   Réponse : « il est temps de refaire la cinématique » : imprimante XYZAB, bedslinger, plateau carré 220 mm, A et B
   sur la tête (± 180°), pivot-pointe 40 mm par défaut. Plan : `docs/CINEMATIQUE_XYZAB.md`.
+- [x] XYZAB, étapes 1, 2, 3 et 5 (Python) : profil, inclinaisons libres, filtre médian sûr à deux axes, G-code du pivot
+  (limite #97). Machine optionnelle, l'Aetheris-4 reste par défaut.
+- [ ] XYZAB : export natif (Benchy ≈ 9 min en Python), modèle 3D de la tête (collisions), bloc chiffré, interface.
+- [ ] Éventail (`lean_deg`) : Benchy XYZAB sans appui 67,7 → 408,5 mm avec `bridge_span = 0` ; à cibler (plafonds
+  fermés seulement, inclinaison progressive) avant tout défaut.
+- [ ] Observé : le nombre de points de trajectoire diffère entre natif et Python (l_shape, Aetheris-4 : 18 197 contre
+  22 380), dans l'arbre de travail qui contient les changements non commités d'une autre session.
 
 ## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
 - [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).
