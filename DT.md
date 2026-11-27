@@ -59,6 +59,8 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
   (limite #59), la tête ne penche que vers l'extérieur du plateau (`_project_to_reachable_radial_tilt`, d_r ≥ 0). Un
   plafond fermé des deux côtés demande qu'un mur penche vers le centre : impossible pièce centrée. Décision demandée à
   l'utilisateur (placement décentré, balayage d'un seul côté, ou pont à plat).
+  Réponse : « il est temps de refaire la cinématique » : imprimante XYZAB, bedslinger, plateau carré 220 mm, A et B
+  sur la tête (± 180°), pivot-pointe 40 mm par défaut. Plan : `docs/CINEMATIQUE_XYZAB.md`.
 
 ## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
 - [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).
@@ -156,6 +158,7 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 ## ⚠️ RAPPELS PERMANENTS — à répéter à CHAQUE réponse tant que la case n'est pas cochée (demande de l'utilisateur, 2026-10-18)
 - 🟢 **[x] Paramètres du firmware (`config.g`, Z) modifiés** (confirmé par l'utilisateur, 2026-10-26). Rappel arrêté. **Salon (MFR 2026) passé : récompense spéciale pour l'originalité du projet.** ⬛ **Le Benchy n'a toujours PAS été imprimé.**
 - 🟢 **[x] Champ scalaire multibranche : ESSAYÉ (2026-10-19, par Claude à la demande de l'utilisateur), verdict dans `CLAUDE.md` #78.** Résultat MITIGÉ, comme les mécanismes précédents : `multibranch=True, multibranch_direction_mode="up"` (variante `mbr_up`) divise par ~2 la matière sans appui sur death (−56 %) et benchy (−53 %), neutre sur real_overhang/dino/l_shape/l-triple, mais dégrade fig (+17 %) et deer (+23 %). Reste opt-in. Rappel arrêté.
+- ⚠️ **[ ] Modifier le décalage pivot-pointe de la nouvelle tête XYZAB** (40 mm par défaut, provisoire ; utilisateur, 2026-11-27 : « me rappeler de le modifier »).
 - Contexte : MFR 2026 commence ~2026-10-23. Le lot nocturne tourne sur la voie **Bird**.
 
 ## Ce qui a été développé

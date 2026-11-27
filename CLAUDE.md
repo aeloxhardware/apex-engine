@@ -65,6 +65,9 @@ que lorsque l'utilisateur dit l'avoir fait et que la case est cochée dans `DT.m
 1. ~~Modifier les paramètres du firmware~~ : **fait** (confirmé par l'utilisateur, 2026-10-26, `DT.md` coché). Rappel arrêté. Salon MFR 2026 passé avec une récompense spéciale pour l'originalité du projet ; **le Benchy n'a toujours pas été imprimé**.
 2. ~~Essayer le champ scalaire multibranche~~ : **fait le 2026-10-19** (limite #78, résultat mitigé,
    opt-in). Rappel arrêté.
+3. **Modifier le décalage pivot-pointe de la nouvelle tête XYZAB** (40 mm par défaut, valeur provisoire donnée
+   par l'utilisateur le 2026-11-27 : « me rappeler de le modifier »). À rappeler à chaque réponse jusqu'à ce que
+   l'utilisateur donne la vraie valeur et que la case soit cochée dans `DT.md`.
 
 ## LIMITES DE QUALITÉ NON NÉGOCIABLES (décision de l'utilisateur, 2026-11-01)
 
