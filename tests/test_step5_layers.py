@@ -642,3 +642,18 @@ def test_an_anchor_too_close_to_a_retained_one_is_ignored():
     mid = 0.5 * (iso[1:] + iso[:-1])
     assert np.min(np.abs(mid - 2.0)) < 1e-9 and np.min(np.abs(mid - 4.0)) < 1e-9
     assert np.min(np.abs(mid - 2.3)) > 1e-3
+
+
+def test_a_level_spread_over_more_than_a_layer_is_not_an_anchor():
+    """Une surface dont le champ varie de plus d'une couche (p5-p95) ne cale pas la grille ; une autre, nette, la cale
+    (limite #96 : critere relatif a l'epaisseur de couche, pas un seuil fixe en mm)."""
+    from element_ardor.step5_layers import _generate_isovalues
+    x = 10.0 * np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    tm = TetMesh(tet_vertices=x, tetrahedra=np.array([[0, 1, 2, 3]]))
+    field = ScalarField(values=x[:, 2].copy(), gradient=np.array([[0.0, 0.0, 1.0]]),
+                        levels=np.array([[5.33, 0.05], [3.07, 0.5]]))
+    iso = _generate_isovalues(field, tm, LayerParams(layer_height_base=0.2))
+    k = np.searchsorted(iso, 5.33)
+    assert iso[k - 1] == pytest.approx(5.23) and iso[k] == pytest.approx(5.43)
+    k = np.searchsorted(iso, 3.07)
+    assert abs(0.5 * (iso[k - 1] + iso[k]) - 3.07) > 0.01

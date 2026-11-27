@@ -57,7 +57,7 @@ struct ConformParams {
     double sample_spacing{0.4};
     double ceiling_tilt_deg{135.0};
     double flat_min_width{1.0};
-    double level_spread{0.1};
+    double flush_tolerance{0.25};
 };
 
 struct PlanarParams {
@@ -71,7 +71,7 @@ struct PlanarParams {
     double ramp{8.0};
     double flat_height{0.6};
     int smooth_iterations{20};
-    std::optional<ConformParams> conform{ConformParams{.depth = 10.0, .tilt_min_deg = 2.0, .tilt_max_deg = 45.0, .min_width = 5.0, .ratio = 0.5, .surface_reach = 0.75, .sample_spacing = 0.4, .ceiling_tilt_deg = 135.0, .flat_min_width = 1.0, .level_spread = 0.1}};
+    std::optional<ConformParams> conform{ConformParams{.depth = 10.0, .tilt_min_deg = 2.0, .tilt_max_deg = 45.0, .min_width = 5.0, .ratio = 0.5, .surface_reach = 0.75, .sample_spacing = 0.4, .ceiling_tilt_deg = 135.0, .flat_min_width = 1.0, .flush_tolerance = 0.25}};
 };
 
 struct FieldSolverParams {
@@ -327,7 +327,7 @@ struct PipelineParams {
     double tetranet_feature_angle_deg{0.0};
     OverhangParams overhang{OverhangParams{.overhang_angle_threshold_deg = 45.0, .bridge_detection_ray_density = 4, .bridge_support_ratio_threshold = 0.7, .bridge_max_gap_distance = 2.0, .bridge_horizontal_angle_tolerance_deg = 10.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
     SegmentationParams segmentation{SegmentationParams{.direction_candidate_count = 26, .max_angle_from_direction_deg = 45.0, .max_region_merge_angle_deg = std::nullopt, .platform_z = std::nullopt, .platform_contact_tolerance = 0.5, .rotation_axes = std::nullopt, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
-    FieldSolverParams field_solver{FieldSolverParams{.resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .platform_anchor_weight = 1000000.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .heat_method_time_factor = 100.0, .radial_tilt_origin = std::nullopt, .heat_project_reachable = true, .planar = PlanarParams{.overhang_deg = 60.0, .ceiling_deg = 80.0, .lip = 1.5, .slope_reach = 2.0, .bridge_span = 25.0, .min_patch_area = 4.0, .core = 2.0, .ramp = 8.0, .flat_height = 0.6, .smooth_iterations = 20, .conform = ConformParams{.depth = 10.0, .tilt_min_deg = 2.0, .tilt_max_deg = 45.0, .min_width = 5.0, .ratio = 0.5, .surface_reach = 0.75, .sample_spacing = 0.4, .ceiling_tilt_deg = 135.0, .flat_min_width = 1.0, .level_spread = 0.1}}}};
+    FieldSolverParams field_solver{FieldSolverParams{.resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .platform_anchor_weight = 1000000.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .heat_method_time_factor = 100.0, .radial_tilt_origin = std::nullopt, .heat_project_reachable = true, .planar = PlanarParams{.overhang_deg = 60.0, .ceiling_deg = 80.0, .lip = 1.5, .slope_reach = 2.0, .bridge_span = 25.0, .min_patch_area = 4.0, .core = 2.0, .ramp = 8.0, .flat_height = 0.6, .smooth_iterations = 20, .conform = ConformParams{.depth = 10.0, .tilt_min_deg = 2.0, .tilt_max_deg = 45.0, .min_width = 5.0, .ratio = 0.5, .surface_reach = 0.75, .sample_spacing = 0.4, .ceiling_tilt_deg = 135.0, .flat_min_width = 1.0, .flush_tolerance = 0.25}}}};
     LayerParams layers{LayerParams{.layer_height_base = 0.2, .weld_tolerance_factor = 1e-06, .split_disjoint_clusters = std::nullopt, .isovalue_order = true, .align_levels = true}};
     Step6Params toolpath2d{Step6Params{.native_fill = true, .native_layer = true, .nozzle_width = 0.4, .wall_count = 2, .infill_density = 0.2, .infill_pattern = InfillPattern::CROSSED_ZIGZAG, .bridge_contour_ratio_threshold = 0.05, .bridge_anchor_extra_walls = 2, .degenerate_area_ratio = 1e-06, .out_of_plane_interpolation_power = 2.0, .split_rings_into_runs = true, .split_open_polylines = false, .continuous_rings = true, .run_split_min_amplitude = 0.05, .run_split_min_slope_deg = 20.0, .solid_top_layers = 4, .solid_bottom_layers = 3, .min_fill_length = 0.8, .solid_line_resample = 1.0, .spiral_axis_origin = std::nullopt, .spiral_alternation_threshold = std::nullopt, .spiral_peak_spacing = std::nullopt, .spiral_randomization_threshold = 0.5, .spiral_seed = 0}};
     Step7Params scheduling{Step7Params{.surface_color_distance = 0.5, .hole_cost_model = HoleCostModel{.reheat_penalty = 1.0, .adhesion_risk_weight = 1.0}, .purge_cost_model = PurgeCostModel{.volume_per_purge = 1.0, .time_per_purge = 1.0}, .max_open_holes = 4, .escape_direction_count = 16, .rotation_axes = std::nullopt, .deadline_ray_samples = 24}};

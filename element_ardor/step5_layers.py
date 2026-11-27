@@ -225,7 +225,11 @@ def _generate_isovalues(scalar_field: ScalarField, tet_mesh: TetMesh, params: La
         return np.array([0.5 * (v_min + v_max)])
 
     first = v_min + 0.5 * delta
-    anchors = scalar_field.levels if params.align_levels and scalar_field.levels is not None else ()
+    anchors = ()
+    if params.align_levels and scalar_field.levels is not None:
+        levels = np.asarray(scalar_field.levels, dtype=float).reshape(-1, 2)
+        # une surface dont le champ varie de plus d'une couche ne peut pas en etre une : pas un calage
+        anchors = levels[levels[:, 1] <= delta, 0]
     return _aligned_isovalues(first, delta, v_max, anchors)
 
 
@@ -245,7 +249,6 @@ def _aligned_isovalues(first: float, delta: float, v_max: float, anchors) -> np.
     parts = [np.linspace(a, b, max(1, int(round((b - a) / delta))) + 1)[:-1] for a, b in zip(knots[:-1], knots[1:])]
     count = int(np.floor((v_max - knots[-1]) / delta)) + 1
     return np.concatenate(parts + [knots[-1] + delta * np.arange(count)])
-
 
 
 # ---------------------------------------------------------------------------

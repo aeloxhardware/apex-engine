@@ -197,9 +197,10 @@ class ScalarField:
     # direction du champ d'avant le decalage (verticale hors des surplombs), comme la buse fixe d'Aeolis. None = le
     # gradient (limite #92).
     direction: Optional[np.ndarray] = None
-    # shape (K,) - valeurs du champ des surfaces paralleles aux couches (`step4_conform.offset` : toit du Benchy en
-    # couches conformes, dessus plats), des plus grandes aux plus petites : l'etape 5 place chacune a mi-chemin entre
-    # deux isovaleurs (limite #95). None = aucune.
+    # shape (K, 2) - (valeur mediane du champ, etendue p5-p95) des surfaces paralleles aux couches
+    # (`step4_conform.offset` : toit du Benchy en couches conformes, dessus plats), des plus grandes aux plus petites :
+    # l'etape 5 place chacune dont l'etendue tient dans une couche a mi-chemin entre deux isovaleurs (limites #95, #96).
+    # None = aucune.
     levels: Optional[np.ndarray] = None
 
 

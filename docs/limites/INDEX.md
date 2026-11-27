@@ -64,3 +64,4 @@ Les numéros sont ceux cités partout dans le code (`limite #NN`). Mesures chiff
 | [93](093.md) | Plateau infini : la tête ne passe jamais sous le plan du plateau (borne de hauteur active, plateau en demi-espace à l'étape 9) ; points « support de secours » non comptés (2026-11-25) |
 | [94](094.md) | Benchy : remplissage à 45°, couture du toit (lignes pleines redécoupées), éclat de maillage détaché du porte-canne, complétion de l'étape 5e (2026-11-25) |
 | [95](095.md) | Dessus des couches conformes et dessus plats en dentelle selon la finesse du maillage : grille des isovaleurs calée sur les surfaces parallèles aux couches (Benchy à la finesse 0,8 de l'interface, 2026-11-26) |
+| [96](096.md) | Calage des couches universel : champ exact sous les surfaces rendues parallèles et propres, étendue jugée contre l'épaisseur de couche, plafonds plats calés (Benchy basse résolution, 2026-11-27) |

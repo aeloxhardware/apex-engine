@@ -4,6 +4,18 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Contrat 14 (2026-11-27, alpha-0.2.3.1.9.3.1.221) : INCOMPATIBLE, le numero passe de 13 a 14
+Element Ardor, calage des couches universel (limite #96 ; Benchy basse resolution encore en dentelle au contrat 13) :
+- `field_solver.planar.conform.flush_tolerance` (nouveau, 0,25 mm) : pres d'une surface rendue entierement parallele et
+  propre, le champ vise exactement c - profondeur (au lieu de recopier le bruit de phi) si l'ecart reste sous ce seuil.
+- `field_solver.planar.conform.level_spread` (SUPPRIME) : l'etape 5 retient une surface comme calage si l'etendue du
+  champ (p5-p95) tient dans une couche, critere relatif a l'epaisseur de couche.
+- Les plafonds plats (faces tournees vers le bas, pente > 178 deg) servent aussi de calage.
+- Mesures (finesse 1,5) : l_shape, l-triple, death, turkish inchanges ; Benchy sans appui 65,9 -> 69,9 mm ; Benchy
+  basse resolution 57,7 -> 62,1 mm (toit sans dentelle).
+- Ce que l'interface doit faire : `APEX_CONTRACT_VERSION = 14`, `pnpm schema:sync` (retirer `level_spread` s'il est
+  envoye : une cle inconnue est refusee). Ancien comportement, en partie : `"layers": {"align_levels": false}`.
+
 ## Contrat 13 (2026-11-26, alpha-0.2.3.1.9.3.0.221) : INCOMPATIBLE, le numero passe de 12 a 13
 Element Ardor, toit du Benchy en dentelle a la finesse 0,8 de l'interface (limite #95) :
 - `layers.align_levels` (nouveau, ACTIF) : grille des isovaleurs calee pour que chaque surface parallele aux couches

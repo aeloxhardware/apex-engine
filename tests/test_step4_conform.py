@@ -157,8 +157,9 @@ def test_the_sloped_top_and_a_flat_top_are_levels(tmp_path):
     assert field.levels is not None and len(field.levels) == 2
     x = tm.tet_vertices
     top = _top(x) & (x[:, 0] > 1.0) & (x[:, 0] < 23.0)
-    assert abs(field.levels[0] - np.median(field.values[top])) < 0.1
-    assert abs(field.levels[1] - 5.3) < 0.1
+    assert abs(field.levels[0, 0] - np.median(field.values[top])) < 0.1
+    assert abs(field.levels[1, 0] - 5.3) < 0.1
+    assert (field.levels[:, 1] < 0.2).all()
 
 
 def test_without_conformal_layers_there_are_no_levels(tmp_path):

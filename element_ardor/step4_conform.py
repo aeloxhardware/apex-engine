@@ -42,9 +42,11 @@ class ConformParams:
     # chacune posee dans le vide (longueur deposee sans appui 41 -> 150 mm). 180 = aucune.
     ceiling_tilt_deg: float = 135.0
     # Dessus plats (pente < `tilt_min_deg`) de largeur 2A/P >= ceci (mm) : leur valeur du champ est aussi un niveau
-    # (voir `offset`), si elle varie de moins de `level_spread` (mm, p10-p90) sur la surface.
+    # (voir `offset`).
     flat_min_width: float = 1.0
-    level_spread: float = 0.1
+    # mm : ecart maximal entre la cible exacte pres d'une surface rendue entierement parallele et l'ancienne pour que
+    # la premiere remplace la seconde (voir `_flush`, limite #96).
+    flush_tolerance: float = 0.25
 
 
 def _face_patches(vertices: np.ndarray, faces: np.ndarray, normals: np.ndarray, platform_faces, up: np.ndarray,
@@ -128,9 +130,10 @@ def offset(inputs, phi: np.ndarray, params: ConformParams, solver_params, up: np
            ) -> tuple[np.ndarray, np.ndarray]:
     """(phi + u (voir le module), niveaux). phi est inchange s'il n'y a aucune surface retenue. Niveaux : valeur du
     champ obtenu sur chaque surface parallele aux couches, des plus grandes aux plus petites : surfaces rendues
-    entierement paralleles (lambda = 1) et dessus plats. L'etape 5 place chacun a mi-chemin entre deux isovaleurs :
-    une isovaleur qui frolait une telle surface (bruit du champ de quelques centiemes) n'en couvrait qu'une partie,
-    en dentelle (toit du Benchy a la finesse 0,8, sommet de la cheminee ; 2026-11-26, limite #95)."""
+    entierement paralleles (lambda = 1), dessus plats et plafonds plats. L'etape 5 place chacun a mi-chemin entre
+    deux isovaleurs : une isovaleur qui frolait une telle surface (bruit du champ de quelques centiemes) n'en couvrait
+    qu'une partie, en dentelle (toit du Benchy a la finesse 0,8, sommet de la cheminee ; 2026-11-26, limite #95), ou,
+    sous un plafond, refermait celui-ci en deux couches posees en partie dans le vide (limite #96)."""
     md = inputs.mesh_data
     vertices, faces = np.asarray(md.vertices, dtype=float), np.asarray(md.faces)
     normals = np.asarray(md.face_normals, dtype=float)
@@ -138,13 +141,14 @@ def offset(inputs, phi: np.ndarray, params: ConformParams, solver_params, up: np
     shaped, levels = phi, []
     if len(idx):
         shaped, levels = _shift(inputs, phi, (vertices, faces[idx], label), params, solver_params, up)
-    flat = replace(params, tilt_min_deg=0.0, tilt_max_deg=params.tilt_min_deg, min_width=params.flat_min_width)
-    fidx, flabel = _face_patches(vertices, faces, normals, inputs.platform_faces, up, flat)
-    if len(fidx):
-        pts, _t, patch, _lam = _targets(vertices, faces[fidx], flabel, up, flat)
-        levels += _patch_levels(shaped, inputs.tet_mesh, pts, patch, np.ones(int(flabel.max()) + 1), flat)
+    for low, high in ((0.0, params.tilt_min_deg), (180.0 - params.tilt_min_deg, 180.0)):   # dessus, plafonds
+        flat = replace(params, tilt_min_deg=low, tilt_max_deg=high, min_width=params.flat_min_width)
+        fidx, flabel = _face_patches(vertices, faces, normals, inputs.platform_faces, up, flat)
+        if len(fidx):
+            pts, _t, patch, _lam = _targets(vertices, faces[fidx], flabel, up, flat)
+            levels += _patch_levels(shaped, inputs.tet_mesh, pts, patch, np.ones(int(flabel.max()) + 1), flat)
     levels.sort(key=lambda item: -item[0])
-    return shaped, np.asarray([value for _area_, value in levels], dtype=float)
+    return shaped, np.asarray([level for _area_, *level in levels], dtype=float).reshape(-1, 2)
 
 
 def _shift(inputs, phi: np.ndarray, patches: tuple, params: ConformParams, solver_params,
@@ -167,8 +171,68 @@ def _shift(inputs, phi: np.ndarray, patches: tuple, params: ConformParams, solve
     weight[near | free] = solver_params.platform_anchor_weight
     L = s4._assemble_stiffness_matrix(tm, inputs.shape_gradients, inputs.volumes)
     A = (L + sp.diags(weight, format="csr")).tocsr()
-    shaped = phi + _solve(A, weight * target, solver_params, np.zeros(tm.node_count))
+    u = _solve(A, weight * target, solver_params, np.zeros(tm.node_count))
+    clean = _clean_patches(phi + u, tm, pts, target_pts + pts @ up, patch, lam, params)
+    mask = near & clean[patch[nearest]]
+    if mask.any() and _flush(phi, target, (mask, nearest), (pts, target_pts), inputs, patches, params, up):
+        u = _solve(A, weight * target, solver_params, u)
+    shaped = phi + u
     return shaped, _patch_levels(shaped, tm, pts, patch, lam, params)
+
+
+def _clean_patches(values: np.ndarray, tm, pts: np.ndarray, level: np.ndarray, patch: np.ndarray, lam: np.ndarray,
+                   params: ConformParams) -> np.ndarray:
+    """Par morceau : rendu entierement parallele (lambda = 1) et champ a moins de `flush_tolerance` de c en au moins
+    95 % de ses points (au plus `_LEVEL_SAMPLES`). Sur un morceau que le decalage n'atteint pas partout (death : 5 %
+    des points a plus d'1 mm), la cible exacte de `_flush` tordait les couches (1 431 -> 1 478 mm sans appui)."""
+    clean = np.zeros(len(lam), dtype=bool)
+    for j in np.flatnonzero(lam >= 1.0):
+        own = np.flatnonzero(patch == j)
+        own = own[::max(1, len(own) // _LEVEL_SAMPLES)]
+        if len(own):
+            error = _field_at(pts[own], tm, values) - level[own]
+            clean[j] = np.mean(np.abs(error) <= params.flush_tolerance) >= 0.95
+    return clean
+
+
+def _field_at(points: np.ndarray, tm, values: np.ndarray) -> np.ndarray:
+    from core.mesh_types import ScalarField
+    from element_ardor.step5e_surface_levels import phi_at
+    return phi_at(points, tm, ScalarField(values=values))
+
+
+def _flush(phi: np.ndarray, target: np.ndarray, links: tuple, samples: tuple, inputs, patches: tuple,
+           params: ConformParams, up: np.ndarray) -> bool:
+    """Cible exacte pres des surfaces `links[0]` (rendues entierement paralleles et propres, voir `_clean_patches`),
+    modifie `target` en place ; vrai si elle a change.
+
+    La cible lambda (c - h), ajoutee a phi, en recopie le bruit : sur le toit du Benchy basse resolution, phi + u
+    variait de 0,36 mm, presque deux couches, et le toit sortait en dentelle (limite #96). Le champ vise y est
+    c - profondeur sous le plan de la face la plus proche, au gradient median de phi pres. Un noeud ne prend cette
+    cible que si elle s'ecarte de moins de `flush_tolerance` de l'ancienne (bruit) : au-dela, le champ a sa propre
+    structure (surplomb, plafond) et la remplacer tordait les couches (death : 1 431 -> 1 470 mm sans appui).
+    `links` : (noeuds concernes, point de surface le plus proche de chaque noeud) ; `samples` : (points, cible)."""
+    from element_ardor import step4_field_solver as s4
+    mask, nearest = links
+    pts, target_pts = samples
+    nodes = np.flatnonzero(mask)
+    tm = inputs.tet_mesh
+    k = nearest[nodes]
+    grad = np.median(np.linalg.norm(s4._compute_per_tet_gradient(tm, inputs.shape_gradients, phi), axis=1))
+    exact = target_pts[k] + pts[k] @ up - grad * _depth(patches, tm.tet_vertices[nodes], up) - phi[nodes]
+    keep = np.abs(exact - target[nodes]) <= params.flush_tolerance
+    target[nodes[keep]] = exact[keep]
+    return bool(keep.any())
+
+
+def _depth(patches: tuple, nodes: np.ndarray, up: np.ndarray) -> np.ndarray:
+    """Profondeur de chaque noeud sous le plan de la face retenue la plus proche (`patches` : sommets, faces, morceau
+    par face)."""
+    import trimesh
+    mesh = trimesh.Trimesh(patches[0], patches[1], process=False)
+    closest, _distance, face = trimesh.proximity.closest_point(mesh, nodes)
+    normal = mesh.face_normals[face] * np.sign(mesh.face_normals[face] @ up)[:, None]
+    return np.einsum("ij,ij->i", closest - nodes, normal)
 
 
 _LEVEL_SAMPLES = 4000
@@ -176,8 +240,8 @@ _LEVEL_SAMPLES = 4000
 
 def _patch_levels(values: np.ndarray, tm, pts: np.ndarray, patch: np.ndarray, lam: np.ndarray,
                   params: ConformParams) -> list:
-    """[(aire approchee, valeur mediane du champ sur la surface)] des morceaux de lambda = 1 dont le champ, a leurs
-    points (au plus `_LEVEL_SAMPLES` par morceau), varie de moins de `level_spread` (p10-p90)."""
+    """[(aire approchee, valeur mediane du champ, etendue p5-p95)] du champ aux points (au plus `_LEVEL_SAMPLES`)
+    de chaque morceau de lambda = 1. L'etape 5 juge de l'etendue acceptable (une epaisseur de couche)."""
     from core.mesh_types import ScalarField
     from element_ardor.step5e_surface_levels import phi_at
     out = []
@@ -186,6 +250,6 @@ def _patch_levels(values: np.ndarray, tm, pts: np.ndarray, patch: np.ndarray, la
         if not len(own):
             continue
         v = phi_at(pts[own[::max(1, len(own) // _LEVEL_SAMPLES)]], tm, ScalarField(values=values))
-        if np.subtract(*np.percentile(v, [90, 10])) <= params.level_spread:
-            out.append((len(own) * params.sample_spacing ** 2, float(np.median(v))))
+        low, mid, high = np.percentile(v, [5, 50, 95])
+        out.append((len(own) * params.sample_spacing ** 2, float(mid), float(high - low)))
     return out

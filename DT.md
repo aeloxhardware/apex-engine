@@ -41,6 +41,11 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
 - [ ] Contours qui serpentent sur le pont et avant du pont fragmenté de la capture du 2026-11-26 : non reproduits à
   0,8 ni à 1,5 ; à revoir sur un tranchage de l'interface au contrat 13.
 - [ ] Mesurer aussi à la finesse 0,8 (celle que l'utilisateur a choisie) : toutes les mesures se font à 1,5.
+- [x] **Capture du 2026-11-27** (Benchy basse résolution, réglages par défaut) : couronne en dentelle autour de la
+  cheminée. Champ exact sous les surfaces rendues parallèles et propres, étendue des calages jugée contre l'épaisseur
+  de couche, plafonds plats calés (limite #96, contrat 14).
+- [ ] Lèvre du toit hors du maillage TetraNet (arête vive arrondie) : champ extrapolé, quelques points du bord restent
+  à plus d'une demi-couche (limite #86).
 
 ## 2026-11-24 — Element Ardor : défauts de texture du Benchy lissé (limite #90)
 - [x] Creusement (P3) : contour d'origine gardé loin de la peau (parois sans lissage : p99 0,181 → 0,105 mm).
