@@ -4,6 +4,18 @@ Numero courant : voir `APEX_CONTRACT_VERSION` dans `config/schema.py` (copie dan
 `config/params.schema.json`, cle `x-apex-contract`). Regles : `apex/integration/RULES.md`, §4.1 et §9.
 Un changement INCOMPATIBLE incremente le numero et s'ajoute ici, avec ce que le consommateur doit faire.
 
+## Ajout compatible (2026-11-28, alpha-0.2.3.1.11.0.0.221) : le numero du contrat NE CHANGE PAS (reste 14)
+Machine XYZAB (limite #97) : le G-code de l'Aetheris-4, machine par defaut, est inchange (mesure : l_shape, death, Benchy
+identiques).
+- `field_solver.planar.lean_deg` : 0 -> 30 (eventail sous les ponts) ; coupe par le moteur sur une machine dont un axe
+  est impose par la position (Aetheris-4).
+- `machine_profile.toolhead_envelope` (nouveau, facultatif) : enveloppe parametrique de la tete quand son modele 3D manque.
+- `support_check` : `tool_axis_check` (nouveau, vrai) ; le rapport porte `tool_axis_unsupported` (appui le long de l'axe
+  de la buse).
+- Commande `main.py machines` (nouvelle) : `{"contract", "default", "machines": [{"id", "name", "kinematics", "profile"}]}`.
+- `runtime.gcode_workers` (nouveau, null = min(8, coeurs)) : processus d'ecriture du texte du G-code XYZAB.
+- Ce que l'interface peut faire : `pnpm schema:sync` ; menu des machines depuis `main.py machines` (R-045).
+
 ## Ajout compatible (2026-11-27, alpha-0.2.3.1.10.0.0.221) : le numero du contrat NE CHANGE PAS (reste 14)
 Machine XYZAB (limite #97, `docs/CINEMATIQUE_XYZAB.md`), FACULTATIVE : l'Aetheris-4 reste la machine par defaut et son
 G-code est inchange.

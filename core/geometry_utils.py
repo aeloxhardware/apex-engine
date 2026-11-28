@@ -462,3 +462,19 @@ from core.geometry_analytic import (  # noqa: E402,F401  (reexport : imports et 
     _bracket_inner_root,
     _previous_angle_for,
 )
+
+
+def head_directions(angles_deg, axes, reference=(0.0, 0.0, 1.0)) -> np.ndarray:
+    """Direction de la tete (pointe -> pivot, sens d'impression) pour chaque jeu d'angles (N, len(axes)) :
+    R_1 ... R_n `reference`, axes du plus externe au plus interne (meme composition que
+    `composed_rotation_angles_and_directions`), vectorise sur N."""
+    ang = np.atleast_2d(np.asarray(angles_deg, dtype=float))
+    d = np.tile(np.asarray(reference, dtype=float), (len(ang), 1))
+    for j in range(len(axes) - 1, -1, -1):           # le plus interne d'abord
+        k = np.asarray(axes[j].axis, dtype=float)
+        k = k / np.linalg.norm(k)
+        t = np.radians(ang[:, j])
+        c, s = np.cos(t)[:, None], np.sin(t)[:, None]
+        d = d * c + np.cross(k, d) * s + np.outer(d @ k, k) * (1.0 - c)
+    return d
+

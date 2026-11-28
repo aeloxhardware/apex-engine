@@ -53,9 +53,12 @@ class PlanarParams:
     ramp: float = 8.0                # mm : largeur de la transition chaleur -> plan
     flat_height: float = 0.6         # mm au-dessus du plateau : couches toujours planes (plus une rampe de meme hauteur)
     smooth_iterations: int = 20      # lissages de la direction (moyenne aux noeuds puis aux tetraedres) dans la zone inclinee
-    # deg : pres d'un surplomb a incliner, la direction de croissance penche de cet angle vers le vide (depuis l'appui le
-    # plus proche) au lieu de suivre la chaleur ; 0 = la chaleur (dessin de l'utilisateur, 2026-11-27, limite #97)
-    lean_deg: float = 0.0
+    # deg : pres d'un PONT (plafond ferme, tenu de part et d'autre), la direction de croissance penche de cet angle vers
+    # le vide depuis l'appui le plus proche : les parois referment le plafond en eventail (dessin de l'utilisateur,
+    # 2026-11-27, limite #97). 0 = aucun. Sans effet sur une machine dont un axe est impose par la position (la tete ne
+    # penche pas vers le centre du plateau, `main._effective_field_solver_params`). XYZAB, 30 deg : matiere sans appui
+    # le long de l'axe de la buse Benchy 68,5 -> 22,4 mm, death 801 -> 251, turkish 153 -> 134, l_shape et l-triple 0.
+    lean_deg: float = 30.0
     # couches conformes sous les grandes surfaces en pente (`element_ardor/step4_conform.py`, 2026-11-25, limite #92) ;
     # None = aucune (couches planes jusqu'au dessus : toit du Benchy en escalier)
     conform: Optional[ConformParams] = field(default_factory=ConformParams)
@@ -215,15 +218,16 @@ def tilt_points(inputs: FieldInputs, params: PlanarParams, up: np.ndarray) -> np
     return _tilt_geometry(inputs, params, up)[0]
 
 
-def _tilt_geometry(inputs: FieldInputs, params: PlanarParams, up: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """(points a incliner (voir `tilt_points`), points d'appui des surplombs)."""
+def _tilt_geometry(inputs: FieldInputs, params: PlanarParams, up: np.ndarray) -> tuple:
+    """(points a incliner (voir `tilt_points`), points d'appui des surplombs, points des PONTS : plafonds tenus de part
+    et d'autre a plus de `lip` mm de leur appui le plus proche, imprimes a plat en pont)."""
     md = inputs.mesh_data
     faces = np.asarray(md.faces)
     v = np.asarray(md.vertices, dtype=float)
     over, down = _overhang_faces(md, inputs.platform_faces, params, up)
     idx = np.flatnonzero(over)
     if not idx.size:
-        return np.zeros((0, 3)), np.zeros((0, 3))
+        return np.zeros((0, 3)), np.zeros((0, 3)), np.zeros((0, 3))
     sup = _supports(v, faces[idx], up, _Solid(inputs.tet_mesh), _printable_surface(v, faces, over, down))
     pts, owner = _sample_faces(v, faces[idx], 0.5)
     face = idx[owner]
@@ -232,7 +236,10 @@ def _tilt_geometry(inputs: FieldInputs, params: PlanarParams, up: np.ndarray) ->
     held[ceiling] = _anchored(pts[ceiling], sup, params)
     n = np.asarray(md.face_normals, dtype=float)[face[~ceiling]]
     held[~ceiling] = _slope_held(pts[~ceiling], n, sup, params, up)
-    return pts[~held], sup
+    bridge = ceiling & held
+    if bridge.any() and len(sup):
+        bridge[bridge] = cKDTree(sup).query(pts[bridge], workers=-1)[0] > params.lip
+    return pts[~held], sup, pts[bridge]
 
 
 def _slope_held(p: np.ndarray, normals: np.ndarray, sup: np.ndarray, params: PlanarParams, up: np.ndarray):
@@ -286,9 +293,9 @@ def blend(inputs: FieldInputs, values: np.ndarray, params: PlanarParams, solver_
     norm = np.linalg.norm(grad, axis=1)
     heat = np.where(norm[:, None] > 1e-12, grad / np.maximum(norm, 1e-12)[:, None], up[None, :])
     if params.lean_deg > 0.0:
-        need, sup = _tilt_geometry(inputs, params, up)
-        w = tilt_weight(inputs, params, up, need)
-        heat = _lean(tm, need, sup, heat, w, params, up)
+        need, sup, bridges = _tilt_geometry(inputs, params, up)
+        w = tilt_weight(inputs, params, up, np.vstack([need, bridges]))
+        heat = _lean(tm, (need, bridges, sup), heat, w, params, up)
     else:
         w = tilt_weight(inputs, params, up)
     flow = (1.0 - w)[:, None] * up[None, :] + w[:, None] * heat
@@ -320,23 +327,27 @@ def blend(inputs: FieldInputs, values: np.ndarray, params: PlanarParams, solver_
     return _place_unanchored(tm, pn, shaped, up), _place_unanchored(tm, pn, phi, up), levels
 
 
-def _lean(tm: TetMesh, need: np.ndarray, sup: np.ndarray, heat: np.ndarray, w: np.ndarray, params: PlanarParams,
+def _lean(tm: TetMesh, points: tuple, heat: np.ndarray, w: np.ndarray, params: PlanarParams,
           up: np.ndarray) -> np.ndarray:
-    """Direction de croissance penchee de `lean_deg` vers le vide pres des surplombs a incliner (w > 0) : vers
-    l'horizontale qui va de l'appui le plus proche du point a incliner le plus proche vers ce point. Sous un plafond
-    tenu par des parois, les couches des parois tournent vers l'ouverture et la referment en eventail au lieu d'un
-    pont pose a plat dans le vide (dessin de l'utilisateur, 2026-11-27). Ailleurs, et sans appui : `heat`."""
+    """Direction de croissance penchee de `lean_deg` vers le vide pres des PONTS (plafonds fermes, tenus de part et
+    d'autre) : vers l'horizontale qui va de l'appui le plus proche du point de pont le plus proche vers ce point. Sous
+    un plafond tenu par des parois, les couches des parois tournent vers l'ouverture et la referment en eventail au
+    lieu d'un pont pose a plat dans le vide (dessin de l'utilisateur, 2026-11-27). Un tetraedre plus proche d'un
+    autre surplomb a incliner garde `heat` : pencher TOUS les surplombs (`bridge_span = 0`) multipliait la longueur
+    deposee sans appui du Benchy par 6 (limite #97). `points` : (a incliner, ponts, appuis)."""
+    need, bridges, sup = points
     out = heat.copy()
     near = np.flatnonzero(w > 0.0)
-    if not len(near) or not len(need) or not len(sup):
+    if not len(near) or not len(bridges) or not len(sup):
         return out
-    _d, s_idx = cKDTree(sup).query(need, workers=-1)
-    h = need - sup[s_idx]
+    _d, s_idx = cKDTree(sup).query(bridges, workers=-1)
+    h = bridges - sup[s_idx]
     h -= (h @ up)[:, None] * up[None, :]
     hn = np.linalg.norm(h, axis=1)
     centers = tm.tet_vertices[tm.tetrahedra[near]].mean(axis=1)
-    _d, j = cKDTree(need).query(centers, workers=-1)
-    ok = hn[j] > 1e-6
+    d_bridge, j = cKDTree(bridges).query(centers, workers=-1)
+    d_other = cKDTree(need).query(centers, workers=-1)[0] if len(need) else np.full(len(near), np.inf)
+    ok = (hn[j] > 1e-6) & (d_bridge <= d_other)
     t = math.radians(params.lean_deg)
     out[near[ok]] = math.cos(t) * up[None, :] + math.sin(t) * h[j[ok]] / hn[j[ok], None]
     return out

@@ -41,6 +41,7 @@ class RuntimeOptions:
     tetgen_log: Optional[str] = None       # fichier ou TetGen journalise ses phases (diagnostic seulement)
     speculative_tetgen: bool = True        # tentative finale lancee en parallele de la sonde (step1)
     step6_threads: Optional[int] = None    # fils de step6 ; None = min(8, coeurs)
+    gcode_workers: Optional[int] = None    # processus qui ecrivent le texte du G-code ; None = min(8, coeurs)
 
 
 @dataclass

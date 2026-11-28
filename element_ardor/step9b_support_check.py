@@ -166,6 +166,11 @@ class SupportCheckParams:
     # toute la trajectoire).
     direction_candidate_count: int = 26
 
+    # Mesure supplementaire : appui le long de l'axe REEL de la buse de chaque point, au moment du depot
+    # (`SupportCheckReport.tool_axis_unsupported`, limite #97). Les evenements (`events`) restent ceux du test
+    # vertical. Aucun effet sur la trajectoire.
+    tool_axis_check: bool = True
+
 
 def _search_aabb_below(
     position: np.ndarray, horizontal_radius: float, vertical_height: float
@@ -369,6 +374,11 @@ def run(
 
     tested, unsupported_indices = _find_unsupported(
         points, params, platform_z, nozzle_diameter, horizontal_radius, vertical_height)
+    along_tool = None
+    n_axes = len(machine_profile.rotation_axes or [])
+    if params.tool_axis_check and n_axes and all(len(p.axis_angles) == n_axes for p in points):
+        along_tool = _find_unsupported_along_tool(points, machine_profile, params, platform_z, horizontal_radius,
+                                                  vertical_height)
     events = _classify_unsupported(
         points,
         unsupported_indices,
@@ -379,7 +389,34 @@ def run(
         candidate_directions,
         params.locate_supporting_point,
     )
-    return SupportCheckReport(events=events, checked=True, tested_extruded_points=tested)
+    return SupportCheckReport(events=events, checked=True, tested_extruded_points=tested,
+                              tool_axis_unsupported=along_tool)
+
+
+def _find_unsupported_along_tool(points: list[ToolpathPoint], machine_profile: MachineProfile,
+                                 params: SupportCheckParams, platform_z: Optional[float], horizontal_radius: float,
+                                 vertical_height: float) -> list[int]:
+    """Comme `_find_unsupported`, mais l'appui est cherche le long du sens d'impression de CHAQUE point (ses angles,
+    `head_directions`), pas a la verticale : une tete inclinee depose son cordon contre le precedent, le long de son
+    axe. Meme matiere strictement anterieure, memes rayons."""
+    from core.geometry_utils import head_directions
+    nozzle_diameter = max(float(machine_profile.nozzle_diameter), 1e-6)
+    platform_tolerance = params.platform_contact_tolerance_factor * nozzle_diameter
+    directions = head_directions([p.axis_angles for p in points], machine_profile.rotation_axes)
+    index = _PrintedGeometryIndex(nozzle_diameter, params.grid_cell_size_multiplier)
+    extent = max(horizontal_radius, vertical_height)
+    grown, out = 0, []
+    for i in _sample_point_indices(points, params.path_sampling_step):
+        grown = _grow_printed_index_to(index, points, i, grown)
+        if points[i].extrusion <= 0.0:
+            continue
+        position = np.asarray(points[i].position, dtype=float)
+        if platform_z is not None and position[2] <= platform_z + platform_tolerance:
+            continue
+        aabb = AABB(min_corner=position - extent, max_corner=position + extent)
+        if not index.has_support(aabb, position, directions[i:i + 1], horizontal_radius, vertical_height):
+            out.append(i)
+    return out
 
 
 def _locate_supporting_points(

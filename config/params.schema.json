@@ -727,6 +727,18 @@
      },
      "type": "array"
     },
+    "toolhead_envelope": {
+     "anyOf": [
+      {
+       "additionalProperties": {},
+       "type": "object"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
     "toolhead_id": {
      "default": "",
      "type": "string"
@@ -871,7 +883,7 @@
        },
        "core": 2.0,
        "flat_height": 0.6,
-       "lean_deg": 0.0,
+       "lean_deg": 30.0,
        "lip": 1.5,
        "min_patch_area": 4.0,
        "overhang_deg": 60.0,
@@ -972,6 +984,7 @@
         ]
        }
       ],
+      "toolhead_envelope": null,
       "toolhead_id": "aetheris-4",
       "z_clearance_min": 0.0
      }
@@ -1088,6 +1101,7 @@
     "runtime": {
      "$ref": "#/$defs/RuntimeOptions",
      "default": {
+      "gcode_workers": null,
       "gpu": false,
       "grid_mode": "stamped",
       "native": false,
@@ -1226,7 +1240,7 @@
   },
   "PlanarParams": {
    "additionalProperties": false,
-   "description": "PlanarParams(overhang_deg: 'float' = 60.0, ceiling_deg: 'float' = 80.0, lip: 'float' = 1.5, slope_reach: 'float' = 2.0, bridge_span: 'float' = 25.0, min_patch_area: 'float' = 4.0, core: 'float' = 2.0, ramp: 'float' = 8.0, flat_height: 'float' = 0.6, smooth_iterations: 'int' = 20, lean_deg: 'float' = 0.0, conform: 'Optional[ConformParams]' = <factory>)",
+   "description": "PlanarParams(overhang_deg: 'float' = 60.0, ceiling_deg: 'float' = 80.0, lip: 'float' = 1.5, slope_reach: 'float' = 2.0, bridge_span: 'float' = 25.0, min_patch_area: 'float' = 4.0, core: 'float' = 2.0, ramp: 'float' = 8.0, flat_height: 'float' = 0.6, smooth_iterations: 'int' = 20, lean_deg: 'float' = 30.0, conform: 'Optional[ConformParams]' = <factory>)",
    "properties": {
     "bridge_span": {
      "default": 25.0,
@@ -1267,7 +1281,7 @@
      "type": "number"
     },
     "lean_deg": {
-     "default": 0.0,
+     "default": 30.0,
      "type": "number"
     },
     "lip": {
@@ -1424,6 +1438,17 @@
    "additionalProperties": false,
    "description": "Ce qui change la facon de calculer, jamais le contrat de sortie.",
    "properties": {
+    "gcode_workers": {
+     "anyOf": [
+      {
+       "type": "integer"
+      },
+      {
+       "type": "null"
+      }
+     ],
+     "default": null
+    },
     "gpu": {
      "default": false,
      "type": "boolean"
@@ -1997,6 +2022,10 @@
     "platform_contact_tolerance_factor": {
      "default": 2.5,
      "type": "number"
+    },
+    "tool_axis_check": {
+     "default": true,
+     "type": "boolean"
     },
     "vertical_search_height_factor": {
      "default": 7.5,

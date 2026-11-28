@@ -3,6 +3,8 @@
   "name": "Apex XYZAB (bedslinger, tête A puis B)",
   "kinematics": "head-ab",
   "toolhead_id": "",
+  "toolhead_envelope": {"nozzle_length": 6.0, "nozzle_top_radius": 3.0, "block_size": [20.0, 20.0, 12.0],
+                        "body_radius": 25.0, "body_top": 75.0},
   "rotation_axes": [
     {"axis": [1.0, 0.0, 0.0], "angle_range_deg": [-180.0, 180.0]},
     {"axis": [0.0, 1.0, 0.0], "angle_range_deg": [-180.0, 180.0]}
@@ -16,5 +18,5 @@
   "max_angular_velocity_deg_s": 1666.7,
   "max_angular_acceleration_deg_s2": 1300.0,
   "position_coupled_axes": [],
-  "notes": "Décision de l'utilisateur, 2026-11-27 (docs/CINEMATIQUE_XYZAB.md). Plateau carré 220 x 220 mm qui se déplace en Y (bedslinger) ; tête en X et Z. A tourne autour de X et porte B, qui tourne autour de Y au repos (lecture de la capture CAO, confirmée « je crois que c'est ça ») ; buse vers -Z au repos. A et B dans [-180, 180]. pivot_to_tip = 40 mm PROVISOIRE (rappel permanent n° 3). platform_radius = cercle inscrit, pour le refus de taille indépendant du placement. Vitesses angulaires : reprises de l'Aetheris-4 faute de valeur. Aucun modèle 3D de la tête (toolhead_id vide) : collisions de la tête non vérifiées."
+  "notes": "Décision de l'utilisateur, 2026-11-27 (docs/CINEMATIQUE_XYZAB.md). Plateau carré 220 x 220 mm qui se déplace en Y (bedslinger) ; tête en X et Z. A tourne autour de X et porte B, qui tourne autour de Y au repos (lecture de la capture CAO, confirmée « je crois que c'est ça ») ; buse vers -Z au repos. A et B dans [-180, 180]. pivot_to_tip = 40 mm PROVISOIRE (rappel permanent n° 3). platform_radius = cercle inscrit, pour le refus de taille indépendant du placement. Vitesses angulaires : reprises de l'Aetheris-4 faute de valeur. Aucun modèle 3D de la tête (toolhead_id vide) : enveloppe PROVISOIRE (toolhead_envelope : cône de buse, bloc de chauffe, corps cylindrique de 25 mm de rayon jusqu'à 75 mm au-dessus de la pointe), à remplacer par l'export GLB de la CAO."
 }

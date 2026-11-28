@@ -71,7 +71,7 @@ struct PlanarParams {
     double ramp{8.0};
     double flat_height{0.6};
     int smooth_iterations{20};
-    double lean_deg{0.0};
+    double lean_deg{30.0};
     std::optional<ConformParams> conform{ConformParams{.depth = 10.0, .tilt_min_deg = 2.0, .tilt_max_deg = 45.0, .min_width = 5.0, .ratio = 0.5, .surface_reach = 0.75, .sample_spacing = 0.4, .ceiling_tilt_deg = 135.0, .flat_min_width = 1.0, .flush_tolerance = 0.25}};
 };
 
@@ -207,6 +207,7 @@ struct MachineProfile {
     std::string kinematics{"polar"};
     std::optional<std::vector<double>> platform_size{std::nullopt};
     std::optional<double> pivot_to_tip{std::nullopt};
+    std::optional<std::map<int, int>> toolhead_envelope{std::nullopt};
 };
 
 struct TravelRoutingParams {
@@ -237,6 +238,7 @@ struct SupportCheckParams {
     bool locate_supporting_point{false};
     double grid_cell_size_multiplier{1.0};
     int direction_candidate_count{26};
+    bool tool_axis_check{true};
 };
 
 struct SkinParams {
@@ -315,6 +317,7 @@ struct RuntimeOptions {
     std::optional<std::string> tetgen_log{std::nullopt};
     bool speculative_tetgen{true};
     std::optional<int> step6_threads{std::nullopt};
+    std::optional<int> gcode_workers{std::nullopt};
 };
 
 struct PipelineParams {
@@ -331,7 +334,7 @@ struct PipelineParams {
     double tetranet_feature_angle_deg{0.0};
     OverhangParams overhang{OverhangParams{.overhang_angle_threshold_deg = 45.0, .bridge_detection_ray_density = 4, .bridge_support_ratio_threshold = 0.7, .bridge_max_gap_distance = 2.0, .bridge_horizontal_angle_tolerance_deg = 10.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
     SegmentationParams segmentation{SegmentationParams{.direction_candidate_count = 26, .max_angle_from_direction_deg = 45.0, .max_region_merge_angle_deg = std::nullopt, .platform_z = std::nullopt, .platform_contact_tolerance = 0.5, .rotation_axes = std::nullopt, .up_vector = std::vector<double>{0.0, 0.0, 1.0}}};
-    FieldSolverParams field_solver{FieldSolverParams{.resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .platform_anchor_weight = 1000000.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .heat_method_time_factor = 100.0, .radial_tilt_origin = std::nullopt, .heat_project_reachable = true, .planar = PlanarParams{.overhang_deg = 60.0, .ceiling_deg = 80.0, .lip = 1.5, .slope_reach = 2.0, .bridge_span = 25.0, .min_patch_area = 4.0, .core = 2.0, .ramp = 8.0, .flat_height = 0.6, .smooth_iterations = 20, .lean_deg = 0.0, .conform = ConformParams{.depth = 10.0, .tilt_min_deg = 2.0, .tilt_max_deg = 45.0, .min_width = 5.0, .ratio = 0.5, .surface_reach = 0.75, .sample_spacing = 0.4, .ceiling_tilt_deg = 135.0, .flat_min_width = 1.0, .flush_tolerance = 0.25}}}};
+    FieldSolverParams field_solver{FieldSolverParams{.resolution = 1.5, .max_solver_iterations = 2000, .convergence_tolerance = 1e-08, .direct_solve_node_threshold = 30000, .use_ilu_preconditioner = false, .platform_anchor_weight = 1000000.0, .up_vector = std::vector<double>{0.0, 0.0, 1.0}, .heat_method_time_factor = 100.0, .radial_tilt_origin = std::nullopt, .heat_project_reachable = true, .planar = PlanarParams{.overhang_deg = 60.0, .ceiling_deg = 80.0, .lip = 1.5, .slope_reach = 2.0, .bridge_span = 25.0, .min_patch_area = 4.0, .core = 2.0, .ramp = 8.0, .flat_height = 0.6, .smooth_iterations = 20, .lean_deg = 30.0, .conform = ConformParams{.depth = 10.0, .tilt_min_deg = 2.0, .tilt_max_deg = 45.0, .min_width = 5.0, .ratio = 0.5, .surface_reach = 0.75, .sample_spacing = 0.4, .ceiling_tilt_deg = 135.0, .flat_min_width = 1.0, .flush_tolerance = 0.25}}}};
     LayerParams layers{LayerParams{.layer_height_base = 0.2, .weld_tolerance_factor = 1e-06, .split_disjoint_clusters = std::nullopt, .isovalue_order = true, .align_levels = true}};
     Step6Params toolpath2d{Step6Params{.native_fill = true, .native_layer = true, .nozzle_width = 0.4, .wall_count = 2, .infill_density = 0.2, .infill_pattern = InfillPattern::CROSSED_ZIGZAG, .bridge_contour_ratio_threshold = 0.05, .bridge_anchor_extra_walls = 2, .degenerate_area_ratio = 1e-06, .out_of_plane_interpolation_power = 2.0, .split_rings_into_runs = true, .split_open_polylines = false, .continuous_rings = true, .run_split_min_amplitude = 0.05, .run_split_min_slope_deg = 20.0, .solid_top_layers = 4, .solid_bottom_layers = 3, .min_fill_length = 0.8, .solid_line_resample = 1.0, .spiral_axis_origin = std::nullopt, .spiral_alternation_threshold = std::nullopt, .spiral_peak_spacing = std::nullopt, .spiral_randomization_threshold = 0.5, .spiral_seed = 0}};
     Step7Params scheduling{Step7Params{.surface_color_distance = 0.5, .hole_cost_model = HoleCostModel{.reheat_penalty = 1.0, .adhesion_risk_weight = 1.0}, .purge_cost_model = PurgeCostModel{.volume_per_purge = 1.0, .time_per_purge = 1.0}, .max_open_holes = 4, .escape_direction_count = 16, .rotation_axes = std::nullopt, .deadline_ray_samples = 24}};
@@ -342,7 +345,7 @@ struct PipelineParams {
     bool height_clamp{true};
     std::optional<std::vector<double>> coupled_reorientation_tiers{std::nullopt};
     int coupled_reorientation_rounds{3};
-    MachineProfile machine_profile{MachineProfile{.rotation_axes = std::vector<RotationAxisSpec>{RotationAxisSpec{.axis = std::vector<double>{0.0, 0.0, 1.0}, .angle_range_deg = std::array<double, 2>{0.0, 360.0}}, RotationAxisSpec{.axis = std::vector<double>{1.0, 0.0, 0.0}, .angle_range_deg = std::array<double, 2>{0.0, 185.0}}}, .platform_origin = std::vector<double>{0.0, 0.0, 0.0}, .toolhead_id = "aetheris-4", .nozzle_diameter = 0.4, .max_angular_velocity = 29.08940264298949, .max_angular_acceleration = 22.689280275926283, .build_volume = std::nullopt, .z_clearance_min = 0.0, .platform_radius = 150.0, .platform_thickness = 1.0, .position_coupled_axes = std::vector<int>{0}, .radial_direction = std::vector<double>{0.0, -1.0, 0.0}, .kinematics = "polar", .platform_size = std::nullopt, .pivot_to_tip = std::nullopt}};
+    MachineProfile machine_profile{MachineProfile{.rotation_axes = std::vector<RotationAxisSpec>{RotationAxisSpec{.axis = std::vector<double>{0.0, 0.0, 1.0}, .angle_range_deg = std::array<double, 2>{0.0, 360.0}}, RotationAxisSpec{.axis = std::vector<double>{1.0, 0.0, 0.0}, .angle_range_deg = std::array<double, 2>{0.0, 185.0}}}, .platform_origin = std::vector<double>{0.0, 0.0, 0.0}, .toolhead_id = "aetheris-4", .nozzle_diameter = 0.4, .max_angular_velocity = 29.08940264298949, .max_angular_acceleration = 22.689280275926283, .build_volume = std::nullopt, .z_clearance_min = 0.0, .platform_radius = 150.0, .platform_thickness = 1.0, .position_coupled_axes = std::vector<int>{0}, .radial_direction = std::vector<double>{0.0, -1.0, 0.0}, .kinematics = "polar", .platform_size = std::nullopt, .pivot_to_tip = std::nullopt, .toolhead_envelope = std::nullopt}};
     std::optional<TravelRoutingParams> travel_routing{std::nullopt};
     std::optional<CollisionOrderParams> collision_order{std::nullopt};
     std::optional<SupportCheckParams> support_check{std::nullopt};
@@ -350,7 +353,7 @@ struct PipelineParams {
     std::optional<SkinParams> skin{std::nullopt};
     std::optional<SkinProjectionParams> skin_projection{SkinProjectionParams{.chord_tolerance = 0.02, .max_rounds = 3, .max_shift = 1.5, .crease_angle_deg = 8.0, .crease_tolerance = 0.0001, .batch = 200000, .in_layer = true}};
     std::optional<PlanarSectionParams> planar_sections{PlanarSectionParams{.angle_tol_deg = 0.5, .flat_tol = 0.05, .match_tol = 0.5, .loose_match_tol = 1.0, .ambiguity_ratio = 2.5, .close_tol = 0.001, .sample_step = 0.05, .simplify_tol = 0.01, .neighbourhood = 2.0, .surface_levels = SurfaceLevelParams{.subdivide = 1.0, .match_tol = 0.5, .loose_match_tol = 1.0, .ambiguity_ratio = 2.5, .far_match_tol = 3.0, .far_ratio = 5.0, .tangent_gradient = 0.17, .rival_tangent_fraction = 0.3, .sample_step = 0.05, .simplify_tol = 0.01, .max_segment = 0.3, .curved_tol = 0.05, .close_tol = 0.001, .neighbours = 8, .complete = true, .cover_tol = 0.4, .uncovered_fraction = 0.95, .fragment_fraction = 0.5, .min_added_length = 2.0, .added_flatness = 0.05, .added_tangent_fraction = 0.02, .added_max_width = 2.0, .added_min_width = 0.4}}};
-    RuntimeOptions runtime{RuntimeOptions{.native = false, .gpu = false, .grid_mode = "stamped", .tetgen_worker = true, .tetgen_log = std::nullopt, .speculative_tetgen = true, .step6_threads = std::nullopt}};
+    RuntimeOptions runtime{RuntimeOptions{.native = false, .gpu = false, .grid_mode = "stamped", .tetgen_worker = true, .tetgen_log = std::nullopt, .speculative_tetgen = true, .step6_threads = std::nullopt, .gcode_workers = std::nullopt}};
 };
 
 struct GcodeParams {

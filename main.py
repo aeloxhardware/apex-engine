@@ -78,10 +78,15 @@ from element_ardor.step10_adjustment import (AdjustmentReport, Step10Params, cla
 def _effective_field_solver_params(params: "PipelineParams"):
     """FieldSolverParams effectifs : `radial_tilt_origin` derive de la machine
     quand `reachable_tilt_from_machine` est actif et que le premier axe est
-    couple a la position. Copie : `params` n'est jamais mute."""
+    couple a la position. Copie : `params` n'est jamais mute. Une machine dont
+    un axe est impose par la position ne penche pas la tete vers le centre du
+    plateau : l'eventail sous les plafonds (`PlanarParams.lean_deg`) y est
+    coupe (limite #97)."""
     from dataclasses import replace as _replace
     fs = params.field_solver
     m = params.machine_profile
+    if getattr(m, "position_coupled_axes", None) and fs.planar is not None and fs.planar.lean_deg:
+        fs = _replace(fs, planar=_replace(fs.planar, lean_deg=0.0))
     if (params.reachable_tilt_from_machine and fs.radial_tilt_origin is None
             and list(getattr(m, "position_coupled_axes", None) or []) == [0]
             and m.platform_origin is not None):
@@ -113,19 +118,7 @@ def check_model_fits_machine(mesh_path: str, machine_profile: MachineProfile) ->
     loaded = _trimesh.load(mesh_path, force="mesh")
     check_fits_platform(np.asarray(loaded.vertices), radius, max_height)
 
-def ensure_toolhead(machine_profile: MachineProfile) -> None:
-    """Charge la tete que designe `toolhead_id` quand le profil n'en porte pas (profil venu d'une requete
-    JSON : `nozzle_model` n'est pas serialise, R-020). Echec : journal et `nozzle_model=None`, jamais un crash
-    (step9 degrade en `nozzle_model_checked=False`)."""
-    if machine_profile.nozzle_model is not None or not machine_profile.toolhead_id:
-        return
-    try:
-        from file_io.mesh_loader import load_toolhead_by_id
-
-        machine_profile.nozzle_model = load_toolhead_by_id(machine_profile.toolhead_id)
-    except Exception as exc:
-        print(f"[main] Avertissement : tete {machine_profile.toolhead_id!r} non chargee ({exc}) - "
-              f"simulation de collision desactivee (nozzle_model=None).", file=sys.stderr)
+from config.machine_profiles import ensure_toolhead  # noqa: E402,F401  (tete du profil : R-020, limite #97)
 
 
 def _default_machine_profile() -> MachineProfile:
@@ -347,7 +340,8 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
     if pivot_to_tip is None:
         pivot_to_tip, _origin = current_pivot_to_tip()
     head_zlow = None
-    if machine.nozzle_model is not None:
+    polar = getattr(machine, "kinematics", "polar") == "polar"     # table par B, degagements : machine polaire seule
+    if machine.nozzle_model is not None and polar:
         head = s9._filter_nozzle_contact_zone(s9._surface_sample_points(machine.nozzle_model, sim.toolhead_sample_spacing),
                                               sim.nozzle_contact_clearance)
         lo_b, hi_b = machine.rotation_axes[1].angle_range_deg
@@ -358,7 +352,6 @@ def export_gcode_checked(toolpath: ToolpathMachine, params: PipelineParams, out_
     _core_progress.milestone(0.15)           # R-017 : hauteur mini de la tete par B
     gp = gcode_params if gcode_params is not None else GcodeParams(pivot_to_tip=pivot_to_tip, strict=True)
     arrays = toolpath_arrays(toolpath)
-    polar = getattr(machine, "kinematics", "polar") == "polar"       # controle des degagements : machine polaire seule
     travel_check = material_travel_check(arrays, machine, gp) if check_travel and polar else None
     _core_progress.milestone(0.4)            # degagements controles ; reste l'ecriture du fichier
     return export_gcode(arrays, machine, gp, out_path, head_zlow=head_zlow, travel_check=travel_check)
@@ -715,6 +708,9 @@ def _run_pipeline(mesh_path: str, params: PipelineParams,
 
 def main(argv: Optional[list[str]] = None) -> int:
     argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == "machines":
+        from config.machine_profiles import machines_main
+        return machines_main(argv[1:])
     if argv and argv[0] in ("slice", "steps"):
         # Protocole d'appel du tranchage (apex/integration/RULES.md, §5 ; contrats C2 et C3).
         import slice_cli

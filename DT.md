@@ -63,9 +63,12 @@ Détail technique : `CLAUDE.md` (limites #56 à #75) ; récapitulatif de session
   sur la tête (± 180°), pivot-pointe 40 mm par défaut. Plan : `docs/CINEMATIQUE_XYZAB.md`.
 - [x] XYZAB, étapes 1, 2, 3 et 5 (Python) : profil, inclinaisons libres, filtre médian sûr à deux axes, G-code du pivot
   (limite #97). Machine optionnelle, l'Aetheris-4 reste par défaut.
-- [ ] XYZAB : export natif (Benchy ≈ 9 min en Python), modèle 3D de la tête (collisions), bloc chiffré, interface.
-- [ ] Éventail (`lean_deg`) : Benchy XYZAB sans appui 67,7 → 408,5 mm avec `bridge_span = 0` ; à cibler (plafonds
-  fermés seulement, inclinaison progressive) avant tout défaut.
+- [x] XYZAB (2026-11-28, limite #97) : G-code écrit en parallèle (Benchy ≈ 9 min → 4 s), enveloppe de tête provisoire
+  (collisions vérifiées), borne de hauteur à deux axes, bloc chiffré, `main.py machines` pour l'interface (R-045).
+- [ ] XYZAB : modèle 3D réel de la tête (export GLB de la CAO), dégagements contrôlés contre la matière, texte natif.
+- [x] Éventail (`lean_deg` = 30°, ponts seuls, machines à tête libre) : sans appui le long de l'axe de la buse Benchy
+  68,5 → 22,4 mm, death 801 → 251, turkish 153 → 134 ; l'étape 9b mesurait à la verticale (mauvaise référence).
+- [ ] Éventail : +36 % de rétractions sur le Benchy.
 - [ ] Observé : le nombre de points de trajectoire diffère entre natif et Python (l_shape, Aetheris-4 : 18 197 contre
   22 380), dans l'arbre de travail qui contient les changements non commités d'une autre session.
 

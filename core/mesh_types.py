@@ -388,6 +388,8 @@ class MachineProfile:
     platform_size: Optional[tuple] = None
     # Pivot des axes de la tête -> pointe (mm), donnée du profil ; None = `GcodeParams.pivot_to_tip`.
     pivot_to_tip: Optional[float] = None
+    # Enveloppe parametrique de la tete quand son modele 3D manque (`file_io/toolhead_envelope.py`) ; None = aucune.
+    toolhead_envelope: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -550,6 +552,10 @@ class SupportCheckReport:
     # nombre total de points de la trajectoire — sinon la fraction serait
     # diluée par les trajets à vide, qui ne déposent rien.
     tested_extruded_points: int = 0
+    # Points de dépôt sans matière déjà imprimée sous eux le long de l'axe RÉEL de la buse (sens d'impression de
+    # leurs angles), au moment du dépôt (limite #97). Le test vertical de `events` compte comme « en l'air » un
+    # cordon déposé par une tête inclinée contre le cordon précédent. None = non calculé.
+    tool_axis_unsupported: Optional[list[int]] = None
 
     @property
     def unsupported_fraction(self) -> float:

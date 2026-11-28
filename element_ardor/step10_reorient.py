@@ -54,9 +54,12 @@ def clamp_head_height(
         if not free:
             return ToolpathMachine(points=list(toolpath.points)), 0, []
         axis_index = free[-1]
+    free_axes = [i for i in range(len(axes)) if i not in coupled]
     for i, spec in enumerate(axes):
         a = np.asarray(spec.axis, dtype=float)
         if i != axis_index and np.linalg.norm(np.cross(a / np.linalg.norm(a), [0.0, 0.0, 1.0])) > 1e-9:
+            if len(free_axes) == len(axes) > 1:                   # tete A puis B (machine XYZAB, limite #97)
+                return _clamp_head_height_tilt(toolpath, machine_profile, sim_params)
             raise ValueError("clamp_head_height : les autres axes doivent tourner autour de la verticale")
     grid, zlow = _head_zlow_table(model, axes, axis_index, sim_params, grid_step_deg)
     plate_z = float(machine_profile.platform_origin[2]) if machine_profile.platform_origin is not None else 0.0
@@ -443,6 +446,55 @@ def _try_local_reorientation(
             return candidate
 
     return None
+
+
+_TILT_BISECTIONS = 10
+
+
+def _clamp_head_height_tilt(toolpath: ToolpathMachine, machine_profile: MachineProfile, sim_params: CollisionSimParams):
+    """Borne de hauteur pour une tete dont TOUS les axes orientent la buse (machine XYZAB, limite #97) : point le plus
+    bas de la tete pour l'orientation exacte de chaque point (pas de table par axe : les deux axes changent z). Un
+    point dont la tete passerait sous la marge du plateau est redresse vers la verticale (angles multiplies par le
+    plus grand facteur de [0, 1] qui convient, trouve par bissection). Rend (trajectoire, points ramenes, ecarts deg)."""
+    axes = machine_profile.rotation_axes
+    samples = _filter_nozzle_contact_zone(
+        _surface_sample_points(machine_profile.nozzle_model, sim_params.toolhead_sample_spacing),
+        sim_params.nozzle_contact_clearance)
+    plate_z = float(machine_profile.platform_origin[2]) if machine_profile.platform_origin is not None else 0.0
+    if not len(toolpath.points):
+        return ToolpathMachine(points=[]), 0, []
+    ang = np.array([p.axis_angles for p in toolpath.points], dtype=float)
+    room = np.array([p.position[2] for p in toolpath.points], dtype=float) - plate_z - sim_params.safety_margin
+    bad = np.flatnonzero(_lowest_head_offset(samples, ang, axes) < -room)
+    if not len(bad):
+        return ToolpathMachine(points=list(toolpath.points)), 0, []
+    lo, hi = np.zeros(len(bad)), np.ones(len(bad))              # facteur qui convient, facteur qui ne convient pas
+    for _ in range(_TILT_BISECTIONS):
+        mid = 0.5 * (lo + hi)
+        ok = _lowest_head_offset(samples, ang[bad] * mid[:, None], axes) >= -room[bad]
+        lo, hi = np.where(ok, mid, lo), np.where(ok, hi, mid)
+    points = list(toolpath.points)
+    deviations = []
+    for k, i in enumerate(bad):
+        new = ang[i] * lo[k]
+        deviations.append(float(np.abs(new - ang[i]).max()))
+        points[i] = replace(points[i], axis_angles=[float(v) for v in new])
+    return ToolpathMachine(points=points), int(len(bad)), deviations
+
+
+def _lowest_head_offset(samples: np.ndarray, angles: np.ndarray, axes, chunk: int = 20_000) -> np.ndarray:
+    """Pour chaque jeu d'angles, z le plus bas de la tete sous la pointe : min_s (R v_s).z = min_s v_s . (R^T e_z)."""
+    w = np.tile([0.0, 0.0, 1.0], (len(angles), 1))
+    for j, spec in enumerate(axes):                             # R^T = R_n^T ... R_1^T : le plus externe d'abord
+        k = np.asarray(spec.axis, dtype=float)
+        k = k / np.linalg.norm(k)
+        t = -np.radians(angles[:, j])
+        c, s_ = np.cos(t)[:, None], np.sin(t)[:, None]
+        w = w * c + np.cross(k, w) * s_ + np.outer(w @ k, k) * (1.0 - c)
+    out = np.empty(len(angles))
+    for start in range(0, len(angles), chunk):
+        out[start:start + chunk] = (samples @ w[start:start + chunk].T).min(axis=0)
+    return out
 
 
 def _head_zlow_table(model, axes, axis_index: int, sim_params: CollisionSimParams, grid_step_deg: float):

@@ -38,21 +38,12 @@ def load_machine_profile(machine_id: Optional[str] = None, *, with_toolhead: boo
         raise ValueError(f"identifiant de machine invalide : {machine_id!r}")
     with open(os.path.join(MACHINES_DIR, f"{machine_id}.json"), encoding="utf-8") as handle:
         data = json.load(handle)
-    nozzle_model = None
-    if with_toolhead and data.get("toolhead_id"):
-        try:
-            from file_io.mesh_loader import load_toolhead_by_id
-            nozzle_model = load_toolhead_by_id(data["toolhead_id"])
-        except Exception as exc:  # pragma: no cover - chemin de repli
-            import sys
-            print(f"[machine] Avertissement : tete {data['toolhead_id']} non chargee ({exc}) - "
-                  f"simulation de collision desactivee.", file=sys.stderr)
-    return MachineProfile(
+    profile = MachineProfile(
         rotation_axes=[RotationAxisSpec(axis=np.array(a["axis"], dtype=float),
                                         angle_range_deg=tuple(float(v) for v in a["angle_range_deg"]))
                        for a in data["rotation_axes"]],
         platform_origin=np.array(data["platform_origin"], dtype=float),
-        nozzle_model=nozzle_model,
+        nozzle_model=None,
         toolhead_id=data["toolhead_id"],
         nozzle_diameter=float(data["nozzle_diameter"]),
         max_angular_velocity=float(math.radians(data["max_angular_velocity_deg_s"])),
@@ -64,7 +55,33 @@ def load_machine_profile(machine_id: Optional[str] = None, *, with_toolhead: boo
         kinematics=str(data.get("kinematics", "polar")),
         platform_size=None if data.get("platform_size") is None else tuple(float(v) for v in data["platform_size"]),
         pivot_to_tip=None if data.get("pivot_to_tip") is None else float(data["pivot_to_tip"]),
+        toolhead_envelope=data.get("toolhead_envelope"),
     )
+    if with_toolhead:
+        ensure_toolhead(profile)
+    return profile
+
+
+def ensure_toolhead(machine_profile: MachineProfile) -> None:
+    """Charge la tete que designe `toolhead_id` quand le profil n'en porte pas (profil venu d'une requete
+    JSON : `nozzle_model` n'est pas serialise, R-020) ; sans `toolhead_id`, l'enveloppe parametrique du profil
+    (`toolhead_envelope`, limite #97). Echec : journal et `nozzle_model=None`, jamais un crash
+    (step9 degrade en `nozzle_model_checked=False`)."""
+    import sys
+    if machine_profile.nozzle_model is not None:
+        return
+    if not machine_profile.toolhead_id:
+        if machine_profile.toolhead_envelope:
+            from file_io.toolhead_envelope import envelope_mesh
+            machine_profile.nozzle_model = envelope_mesh(machine_profile.toolhead_envelope)
+        return
+    try:
+        from file_io.mesh_loader import load_toolhead_by_id
+
+        machine_profile.nozzle_model = load_toolhead_by_id(machine_profile.toolhead_id)
+    except Exception as exc:
+        print(f"[main] Avertissement : tete {machine_profile.toolhead_id!r} non chargee ({exc}) - "
+              f"simulation de collision desactivee (nozzle_model=None).", file=sys.stderr)
 
 
 def machine_data(machine_id: Optional[str] = None) -> dict:
@@ -79,3 +96,21 @@ def machine_data(machine_id: Optional[str] = None) -> dict:
 def default_toolhead_id() -> str:
     """Tete de la machine par defaut (donnee, pas une constante du code)."""
     return str(machine_data()["toolhead_id"])
+
+
+def machines_main(argv: list[str]) -> int:
+    """`main.py machines` : profils disponibles en JSON (identifiant, nom, architecture, profil complet) et machine
+    par defaut. L'interface en tire son choix de machine au lieu de l'inventer (R-045)."""
+    import argparse
+    from config.schema import APEX_CONTRACT_VERSION
+    argparse.ArgumentParser(prog="main.py machines", description="Machines connues du moteur.").parse_args(argv)
+    machines = []
+    for machine_id in machine_ids():
+        if not _ID.fullmatch(machine_id):          # fichier d'exemple (`*.example.json`), pas un profil
+            continue
+        data = machine_data(machine_id)
+        machines.append({"id": machine_id, "name": data.get("name", machine_id),
+                         "kinematics": data.get("kinematics", "polar"), "profile": data})
+    print(json.dumps({"contract": APEX_CONTRACT_VERSION, "default": default_machine_id(), "machines": machines},
+                     ensure_ascii=False), flush=True)
+    return 0
